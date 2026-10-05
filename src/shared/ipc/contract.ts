@@ -1,3 +1,5 @@
+import type { AiChoice, AiProvider, AiProviderId } from '../models/ai'
+import type { Transcript, TranscriptionProgress, TranscriptionRequest } from '../models/captions'
 import type { CaptureDevices } from '../models/devices'
 import type { EditorSession } from '../models/editor'
 import type { IpcResult } from '../models/errors'
@@ -6,6 +8,7 @@ import type { PermissionKind, PermissionReport } from '../models/permissions'
 import type { Project } from '../models/project'
 import type { RecordingStateSnapshot } from '../models/recording'
 import type { RecordingSummary } from '../models/session'
+import type { CutSuggestionResult } from '../models/suggestions'
 
 /**
  * Every renderer → main call. The preload bridge exposes exactly these, one
@@ -40,6 +43,22 @@ export interface IpcInvokeContract {
     result: IpcResult<number[]>
   }
 
+  'captions:generate': {
+    args: [sessionId: string, request: TranscriptionRequest]
+    result: IpcResult<Transcript>
+  }
+  'captions:cancel': { args: []; result: void }
+
+  'ai:providers': { args: [refresh: boolean]; result: AiProvider[] }
+  'ai:install': { args: [provider: AiProviderId]; result: IpcResult<AiProvider[]> }
+  'ai:login': { args: [provider: AiProviderId]; result: IpcResult<AiProvider[]> }
+  'ai:cancel-setup': { args: []; result: void }
+  'ai:suggest-cuts': {
+    args: [sessionId: string, choice: AiChoice]
+    result: IpcResult<CutSuggestionResult>
+  }
+  'ai:cancel': { args: []; result: void }
+
   'export:start': { args: [sessionId: string]; result: IpcResult<ExportJob> }
   'export:read-chunk': {
     args: [exportId: string, track: ExportTrackName, offset: number, length: number]
@@ -63,6 +82,7 @@ export interface IpcInvokeContract {
 export interface IpcEventContract {
   'recording:state-changed': RecordingStateSnapshot
   'library:changed': null
+  'captions:progress': TranscriptionProgress
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -105,6 +125,34 @@ export interface ScreenRxApi {
     saveProject(project: Project): Promise<IpcResult<null>>
     /** Loudness outline of an audio track: peaks between 0 and 1, evenly spaced in time. */
     waveform(sessionId: string, track: 'microphone' | 'systemAudio'): Promise<IpcResult<number[]>>
+  }
+  captions: {
+    /**
+     * Transcribes one of the session's audio tracks on this machine and stores
+     * the result with the session. The audio is never uploaded.
+     */
+    generate(sessionId: string, request: TranscriptionRequest): Promise<IpcResult<Transcript>>
+    cancel(): Promise<void>
+    onProgress(listener: (progress: TranscriptionProgress) => void): Unsubscribe
+  }
+  ai: {
+    /**
+     * The AI command-line tools known to the app as they stand on this machine:
+     * installed, signed in, models, effort levels. `refresh` looks again now.
+     */
+    providers(refresh?: boolean): Promise<AiProvider[]>
+    /** Asks for confirmation, then installs the tool with its vendor's own installer. */
+    install(provider: AiProviderId): Promise<IpcResult<AiProvider[]>>
+    /** Starts the tool's own sign-in, which opens the browser, and waits for it. */
+    login(provider: AiProviderId): Promise<IpcResult<AiProvider[]>>
+    /** Stops an installation or a sign-in in progress. */
+    cancelSetup(): Promise<void>
+    /**
+     * Asks an AI which stretches of speech could be cut. Only the transcript's
+     * text is sent; nothing is applied — the result is a list of proposals.
+     */
+    suggestCuts(sessionId: string, choice: AiChoice): Promise<IpcResult<CutSuggestionResult>>
+    cancel(): Promise<void>
   }
   export: {
     /** Asks where to save and starts the encoder; the caller then renders and sends every frame. */

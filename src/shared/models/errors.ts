@@ -16,6 +16,17 @@ export type AppErrorCode =
   | 'export-failed'
   | 'export-cancelled'
   | 'export-busy'
+  | 'transcription-failed'
+  | 'transcription-unavailable'
+  | 'transcription-cancelled'
+  | 'transcription-busy'
+  | 'ai-unavailable'
+  | 'ai-failed'
+  | 'ai-cancelled'
+  | 'ai-busy'
+  | 'ai-no-transcript'
+  | 'ai-install-failed'
+  | 'ai-login-failed'
   | 'platform-unsupported'
   | 'invalid-state'
   | 'unknown'
@@ -55,6 +66,19 @@ const MESSAGES: Record<AppErrorCode, string> = {
   'export-failed': 'A exportação falhou.',
   'export-cancelled': 'A exportação foi cancelada.',
   'export-busy': 'Já existe uma exportação em andamento.',
+  'transcription-failed': 'Não foi possível transcrever o áudio desta gravação.',
+  'transcription-unavailable':
+    'A transcrição não está disponível: ela precisa do macOS 26 ou mais recente e de um idioma suportado pelo sistema.',
+  'transcription-cancelled': 'A transcrição foi cancelada.',
+  'transcription-busy': 'Já existe uma transcrição em andamento.',
+  'ai-unavailable': 'A ferramenta de IA não foi encontrada. Instale-a em Configurar IA.',
+  'ai-failed':
+    'A IA não respondeu como esperado. Confira se o login da ferramenta está ativo e tente de novo.',
+  'ai-cancelled': 'A análise foi cancelada.',
+  'ai-busy': 'Já existe uma análise em andamento.',
+  'ai-install-failed': 'A instalação não foi concluída.',
+  'ai-login-failed': 'O login não foi concluído.',
+  'ai-no-transcript': 'A IA lê a transcrição da fala. Gere as legendas desta gravação primeiro.',
   'platform-unsupported': 'A gravação ainda não é suportada neste sistema operacional.',
   'invalid-state': 'Essa ação não está disponível no momento.',
   unknown: 'Ocorreu um erro inesperado.'

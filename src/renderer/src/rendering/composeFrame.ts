@@ -1,9 +1,11 @@
+import { CAPTION_LAYOUT } from '@engine/captions/captionConfig'
+import { captionFontCss, captionFontPx, layoutCaption } from '@engine/captions/captionLayout'
 import { findBackgroundPreset } from '@engine/rendering/backgrounds'
-import type { Size } from '@engine/rendering/frameLayout'
+import type { Rect, Size } from '@engine/rendering/frameLayout'
 import { centeredSquare, layoutFrame, layoutWebcam } from '@engine/rendering/frameLayout'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { visibleRect } from '@engine/zoom/zoomCamera'
-import type { BackgroundSettings, WebcamSettings } from '@shared/models/project'
+import type { BackgroundSettings, CaptionStyle, WebcamSettings } from '@shared/models/project'
 
 export interface FrameInput {
   screen: CanvasImageSource
@@ -12,19 +14,69 @@ export interface FrameInput {
   webcam: { image: CanvasImageSource; size: Size; settings: WebcamSettings } | null
   camera: Camera
   background: BackgroundSettings
+  /** The caption on screen at this instant, when there is one and captions are shown. */
+  caption: { text: string; style: CaptionStyle } | null
+}
+
+/** Where things ended up on the frame, for pointer interaction in the preview. */
+export interface FrameRegions {
+  /** The caption's block in output pixels, or `null` when none was drawn. */
+  caption: Rect | null
 }
 
 type Context = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
+/** `#rrggbb` with an opacity, as a canvas colour. */
+function withAlpha(hex: string, alpha: number): string {
+  const value = Number.parseInt(hex.slice(1), 16)
+  return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`
+}
+
+/** Draws a caption over the finished frame and returns the block it occupies. */
+function drawCaption(context: Context, output: Size, text: string, style: CaptionStyle): Rect | null {
+  context.save()
+  context.font = captionFontCss(style, captionFontPx(style, output))
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  const layout = layoutCaption(text, style, output, (candidate) => context.measureText(candidate).width)
+  if (!layout) {
+    context.restore()
+    return null
+  }
+  const { box, fontPx } = layout
+
+  if (style.backdrop === 'box') {
+    context.fillStyle = withAlpha(style.backdropColor, CAPTION_LAYOUT.boxOpacity)
+    context.beginPath()
+    context.roundRect(box.x, box.y, box.width, box.height, layout.boxRadius)
+    context.fill()
+  }
+  if (style.backdrop === 'outline') {
+    context.lineJoin = 'round'
+    context.lineWidth = fontPx * CAPTION_LAYOUT.outlineWidth
+    context.strokeStyle = style.backdropColor
+    for (const line of layout.lines) context.strokeText(line.text, line.centerX, line.centerY)
+  }
+  if (style.backdrop === 'shadow') {
+    context.shadowColor = 'rgba(0, 0, 0, 0.8)'
+    context.shadowBlur = fontPx * CAPTION_LAYOUT.shadowBlur
+    context.shadowOffsetY = fontPx * CAPTION_LAYOUT.shadowOffsetY
+  }
+  context.fillStyle = style.color
+  for (const line of layout.lines) context.fillText(line.text, line.centerX, line.centerY)
+  context.restore()
+  return box
+}
+
 /**
  * Draws one finished frame: backdrop, the recording (zoomed by `camera`)
- * inside its rounded frame, and the webcam on top. Every pixel the user sees
- * comes from here, and the export will draw with the same function, so the
- * exported video cannot differ from the preview.
+ * inside its rounded frame, the webcam and the caption on top. Every pixel
+ * the user sees comes from here, and the export draws with the same
+ * function, so the exported video cannot differ from the preview.
  *
- *   source frame → zoom → backdrop and frame → webcam
+ *   source frame → zoom → backdrop and frame → webcam → caption
  */
-export function composeFrame(context: Context, output: Size, input: FrameInput): void {
+export function composeFrame(context: Context, output: Size, input: FrameInput): FrameRegions {
   const preset = findBackgroundPreset(input.background.presetId)
   const layout = layoutFrame(output, input.background, preset !== null)
   const { frame, cornerRadius } = layout
@@ -121,6 +173,11 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
       context.strokeStyle = 'rgba(255, 255, 255, 0.9)'
       context.stroke()
     }
+  }
+
+  // Captions are not part of the recording: they stay put and sharp while it zooms.
+  return {
+    caption: input.caption ? drawCaption(context, output, input.caption.text, input.caption.style) : null
   }
 }
 

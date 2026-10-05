@@ -1,9 +1,11 @@
-// End-to-end check of phase 1, driving the real app and the real capture:
+// End-to-end check, driving the real app and the real capture:
 //
 //   1. the app boots on the library; "Nova gravação" swaps it for the recording bar
 //   2. record -> pause -> resume -> stop produces a valid MP4 and session.json
 //   3. the paused span is absent from the file
 //   4. the HUD stays on screen but is NOT in the recording
+//   5. the editor: zooms, cuts, export at any speed, and captions generated
+//      from speech (on a copy of the recording that is given a spoken track)
 //
 // Step 4 is verified against a control: a plain system screenshot taken
 // while idle must show the HUD (proving the comparison can see it); the
@@ -12,7 +14,18 @@
 // Requires: `npm run build`, Screen Recording permission for the launching
 // terminal, and ffmpeg/ffprobe on PATH (dev-only dependency of this script).
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -23,6 +36,7 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const workDir = mkdtempSync(join(tmpdir(), 'screenrx-e2e-'))
 const recordingsDir = join(workDir, 'recordings')
 const exportsDir = join(workDir, 'exports')
+const aiDir = join(workDir, 'ai-tools')
 const keepArtifacts = process.argv.includes('--keep')
 
 const RECORD_BEFORE_PAUSE_MS = 2500
@@ -136,14 +150,37 @@ async function main() {
   copyFileSync(join(projectRoot, 'dist-native', 'darwin', 'screenrx-capture'), helperCopy)
   mkdirSync(exportsDir)
 
+  // A stand-in for the Claude CLI, so the run never spends anyone's AI quota:
+  // it reports a version and an account, records what it is asked, and
+  // proposes cutting the first two words.
+  mkdirSync(aiDir)
+  const aiStub = join(aiDir, 'claude')
+  writeFileSync(
+    aiStub,
+    [
+      '#!/bin/sh',
+      'case "$1" in',
+      '  --version) echo "9.9.9 (stand-in)"; exit 0;;',
+      `  auth) echo '{"loggedIn":true,"email":"teste@example.com","subscriptionType":"max"}'; exit 0;;`,
+      'esac',
+      `printf '%s\\n' "$@" > "$0.args"`,
+      'cat > "$0.stdin"',
+      `echo '{"type":"result","is_error":false,"structured_output":{"cuts":[{"fromWord":0,"toWord":1,"kind":"filler","reason":"Saudação que pode sair."}]}}'`
+    ].join('\n')
+  )
+  chmodSync(aiStub, 0o755)
+
   const app = await electron.launch({
-    args: [projectRoot, `--user-data-dir=${join(workDir, 'user-data')}`],
+    // Screenshots are compared with exported frames: without this, a wide-gamut
+    // display shifts every saturated colour of the screenshots.
+    args: [projectRoot, `--user-data-dir=${join(workDir, 'user-data')}`, '--force-color-profile=srgb'],
     cwd: projectRoot,
     env: {
       ...process.env,
       SCREENRX_RECORDINGS_DIR: recordingsDir,
       SCREENRX_HELPER_PATH: helperCopy,
-      SCREENRX_EXPORT_DIR: exportsDir
+      SCREENRX_EXPORT_DIR: exportsDir,
+      SCREENRX_AI_CLI_DIR: aiDir
     }
   })
 
@@ -484,12 +521,13 @@ async function main() {
       // --- export: what the preview shows, at any speed, with cuts ----------------
       const probeAll = (file) =>
         JSON.parse(
-          run('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,pix_fmt,width,height,duration', '-of', 'json', file]).toString()
+          run('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,codec_name,pix_fmt,width,height,duration,avg_frame_rate,nb_frames', '-of', 'json', file]).toString()
         ).streams
-      const exportNow = async (speedLabel) => {
+      const exportNow = async (speedLabel, fpsLabel = '30 fps') => {
         const before = new Set(readdirSync(exportsDir))
         await mainPage.getByRole('button', { name: 'Exportar', exact: true }).click()
         await mainPage.getByRole('radio', { name: speedLabel, exact: true }).click()
+        await mainPage.getByRole('radio', { name: fpsLabel, exact: true }).click()
         if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, `export-dialog-${speedLabel}.png`) })
         const startedAt = Date.now()
         await mainPage.getByRole('button', { name: 'Exportar MP4' }).click()
@@ -524,6 +562,11 @@ async function main() {
         !normal.error && normal.video.codec_name === 'h264' && normal.video.pix_fmt === 'yuv420p' && Math.abs(normalMs - video.durationMs) < 150,
         normal.error ?? `${normal.video.width}x${normal.video.height}, ${Math.round(normalMs)} ms, rendered in ${normal.seconds.toFixed(1)} s`
       )
+      check(
+        'the export is made at 30 frames per second unless another rate is chosen',
+        !normal.error && normal.video.avg_frame_rate === '30/1' && Math.abs(Number(normal.video.nb_frames) - (normalMs / 1000) * 30) <= 2,
+        normal.error ?? `${normal.video.avg_frame_rate}, ${normal.video.nb_frames} frames`
+      )
       if (!normal.error) {
         check(
           'the exported file carries the mixed audio, in sync',
@@ -547,7 +590,9 @@ async function main() {
             '-vf', `scale=${small.width}:${small.height}:flags=area`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'
           ])
         const parity = meanAbsoluteDifference(scaled(previewFile, null), scaled(normal.file, parityMs / 1000))
-        check('the exported frame matches the preview of the same instant', parity < 6, `difference ${parity.toFixed(1)}`)
+        // Fine text aliases differently at the two sizes (a few units on a text-heavy screen);
+        // a composition that is off — framing, zoom — differs by tens.
+        check('the exported frame matches the preview of the same instant', parity < 10, `difference ${parity.toFixed(1)}`)
       }
 
       // The timeline shows the recording itself: thumbnails and waveforms.
@@ -590,7 +635,7 @@ async function main() {
       const durationLabel = await mainPage.locator('.transport-duration').innerText()
       check('the editor clock shows the edited duration', durationLabel.includes(`0${Math.floor(keptMs / 1000)}`.slice(-2)), durationLabel.trim())
 
-      const fast = await exportNow('2×')
+      const fast = await exportNow('2×', '60 fps')
       const fastMs = Number(fast.video?.duration) * 1000
       check(
         'exporting at 2x with a cut yields (recording − cut) / 2',
@@ -598,6 +643,13 @@ async function main() {
         fast.error ?? `${Math.round(keptMs)} ms kept → ${Math.round(fastMs)} ms at 2x, rendered in ${fast.seconds.toFixed(1)} s`
       )
       if (!fast.error) {
+        check(
+          'the chosen frame rate is the one of the exported file',
+          fast.video.avg_frame_rate === '60/1' &&
+            Math.abs(Number(fast.video.nb_frames) - (fastMs / 1000) * 60) <= 2 &&
+            JSON.parse(readFileSync(join(sessionDir, 'project.json'), 'utf8')).export.fps === 60,
+          `${fast.video.avg_frame_rate}, ${fast.video.nb_frames} frames in ${Math.round(fastMs)} ms`
+        )
         check(
           'audio is sped up with the video',
           Boolean(fast.audio) && Math.abs(Number(fast.audio.duration) * 1000 - fastMs) < 200,
@@ -627,6 +679,290 @@ async function main() {
         'editing never modifies the recorded video',
         probe(screenPath).nb_frames === video.nb_frames && readFileSync(join(sessionDir, 'session.json'), 'utf8') === JSON.stringify(manifest, null, 2) + '\n'
       )
+
+      // --- captions: speech → words → captions, in the preview and in the export ---
+      // The run's own recording has no speech, so a copy of it gets a spoken
+      // audio track (synthesized, so what was said is known).
+      const captionId = 'recording-20200101-120000-000'
+      const captionDir = join(recordingsDir, captionId)
+      const speechAiff = join(workDir, 'speech.aiff')
+      const spoken = spawnSync('say', ['-v', 'Luciana', '-o', speechAiff, 'Olá, pessoal. Hoje vamos exportar um vídeo.'])
+      if (spoken.status !== 0) {
+        note('no Portuguese voice on this Mac to synthesize speech with', 'caption checks skipped')
+      } else {
+        cpSync(sessionDir, captionDir, { recursive: true })
+        for (const file of ['project.json', 'microphone.m4a']) rmSync(join(captionDir, file), { force: true })
+        const speechPath = join(captionDir, 'system.m4a')
+        run('afconvert', ['-f', 'm4af', '-d', 'aac', speechAiff, speechPath])
+        const speechMs = Number(run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', speechPath]).toString()) * 1000
+        const fixture = JSON.parse(JSON.stringify(manifest))
+        fixture.id = captionId
+        fixture.createdAt = '2020-01-01T12:00:00.000Z'
+        fixture.assets.systemAudio = { ...fixture.assets.systemAudio, durationMs: speechMs }
+        delete fixture.assets.microphone
+        writeFileSync(join(captionDir, 'session.json'), JSON.stringify(fixture, null, 2) + '\n')
+        const speechBefore = readFileSync(speechPath)
+        const readCaptionFile = (file) => JSON.parse(readFileSync(join(captionDir, file), 'utf8'))
+
+        // The fixture appeared behind the app's back: reloading makes the library
+        // list it. A reloaded window may reopen the last recording in the editor.
+        const reloadToLibrary = async () => {
+          await mainPage.reload()
+          await mainPage.locator('.card-poster, .preview-canvas').first().waitFor()
+          await sleep(500)
+          if ((await canvas.count()) > 0) await mainPage.getByRole('button', { name: 'Gravações' }).click()
+          await mainPage.locator('.card-poster').first().waitFor()
+        }
+        await reloadToLibrary()
+        await mainPage.locator('.card-poster').last().click()
+        await canvas.waitFor()
+        await mainPage.getByRole('tab', { name: 'Legendas' }).click()
+        if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, 'captions-before.png') })
+        await mainPage.getByRole('button', { name: 'Gerar legendas' }).click()
+        const generated = await mainPage.locator('.cue-row').first().waitFor({ timeout: 120_000 }).then(() => true, () => false)
+        await sleep(700)
+
+        if (!generated) {
+          const notice = await mainPage.locator('.panel-notice').innerText().catch(() => '')
+          check('captions are generated from the speech in the recording', false, notice.replace(/\s+/g, ' '))
+        } else {
+          const transcript = readCaptionFile('transcript.json')
+          const said = transcript.words.map((word) => word.text).join(' ')
+          check(
+            'speech is transcribed on this Mac, word by word, on the recording clock',
+            transcript.locale === 'pt-BR' &&
+              transcript.track === 'systemAudio' &&
+              /exportar/i.test(said) &&
+              /vídeo/i.test(said) &&
+              transcript.words.every(
+                (word, index) => word.endMs >= word.startMs && word.endMs <= speechMs + 200 && (index === 0 || word.startMs >= transcript.words[index - 1].endMs)
+              ),
+            `${transcript.words.length} words: "${said}"`
+          )
+          check('transcribing only reads the audio track', speechBefore.equals(readFileSync(speechPath)))
+
+          let captions = readCaptionFile('project.json').captions
+          const wellFormed = (list) =>
+            /exportar/i.test(list.map((cue) => cue.text).join(' ')) &&
+            list.every((cue, index) => cue.endMs > cue.startMs && (index === 0 || cue.startMs >= list[index - 1].endMs))
+          const describe = (list) => list.map((cue) => `${Math.round(cue.startMs)}–${Math.round(cue.endMs)} "${cue.text}"`).join(' | ')
+          check(
+            'captions are built from the transcript and saved to project.json',
+            captions.cues.length >= 1 && wellFormed(captions.cues),
+            describe(captions.cues)
+          )
+
+          // Shorter captions are the same words, split into more of them.
+          await mainPage.getByRole('radio', { name: 'Curtas' }).click()
+          await sleep(700)
+          const mediumCount = captions.cues.length
+          captions = readCaptionFile('project.json').captions
+          const cues = captions.cues
+          check(
+            'changing the caption length re-splits the same transcript',
+            captions.length === 'short' &&
+              cues.length > mediumCount &&
+              wellFormed(cues) &&
+              cues.every((cue) => cue.text.length <= 18 || !cue.text.includes(' ')),
+            describe(cues)
+          )
+          check('the timeline shows one block per caption', (await mainPage.locator('.cue-block').count()) === cues.length)
+
+          // The fixture's lanes are not where the first recording's were.
+          const captionLane = await mainPage.locator('.lane-video').boundingBox()
+          const cue = cues[0]
+          const cueMiddle = (cue.startMs + cue.endMs) / 2
+          const seekCaption = async () => {
+            await mainPage.mouse.click(captionLane.x + (captionLane.width * cueMiddle) / video.durationMs, captionLane.y + captionLane.height / 2)
+            await sleep(600)
+          }
+          const visible = mainPage.getByLabel('Mostrar legendas no vídeo')
+          await seekCaption()
+          const shown = await shot('caption-shown.png')
+          if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, 'captions-editor.png') })
+          await visible.uncheck()
+          await sleep(300)
+          const hidden = await shot('caption-hidden.png')
+          await visible.check()
+          const captionDifference = meanAbsoluteDifference(shown, hidden)
+          check('the preview draws the caption over the video', captionDifference > 0.5, `difference ${captionDifference.toFixed(1)} with vs without`)
+
+          // Style and position are descriptions too.
+          await mainPage.getByRole('button', { name: 'Estilo Destaque' }).click()
+          await mainPage.getByRole('radio', { name: 'Topo' }).click()
+          await sleep(700)
+          captions = readCaptionFile('project.json').captions
+          check(
+            'style and position are saved to project.json',
+            captions.style.font === 'impact' && captions.style.uppercase === true && captions.style.backdrop === 'outline' && captions.style.position.y === 0.12,
+            JSON.stringify(captions.style)
+          )
+          const restyled = await shot('caption-restyled.png')
+          const restyleDifference = meanAbsoluteDifference(restyled, shown)
+          check('the preview follows the style and the position', restyleDifference > 0.5, `difference ${restyleDifference.toFixed(1)}`)
+          if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, 'captions-restyled.png') })
+
+          // Dragging the caption in the preview places it freely.
+          const picture = await canvas.boundingBox()
+          const grab = { x: picture.x + picture.width / 2, y: picture.y + picture.height * 0.12 }
+          const drop = { x: picture.x + picture.width * 0.4, y: picture.y + picture.height * 0.6 }
+          await mainPage.mouse.move(grab.x, grab.y)
+          await mainPage.mouse.down()
+          await mainPage.mouse.move((grab.x + drop.x) / 2, (grab.y + drop.y) / 2, { steps: 4 })
+          await mainPage.mouse.move(drop.x, drop.y, { steps: 4 })
+          await mainPage.mouse.up()
+          await sleep(700)
+          const dragged = readCaptionFile('project.json').captions.style.position
+          check(
+            'dragging the caption in the preview moves it',
+            Math.abs(dragged.x - 0.4) < 0.03 && Math.abs(dragged.y - 0.6) < 0.03,
+            JSON.stringify({ x: Number(dragged.x.toFixed(3)), y: Number(dragged.y.toFixed(3)) })
+          )
+
+          // The text is the user's to correct; undo brings the recognized text back.
+          const firstText = mainPage.locator('.cue-text').first()
+          await firstText.fill('Texto corrigido')
+          await sleep(700)
+          const corrected = readCaptionFile('project.json').captions.cues[0].text
+          await mainPage.click('[aria-label="Desfazer"]')
+          await sleep(700)
+          const undone = readCaptionFile('project.json').captions.cues[0].text
+          check(
+            'a caption can be corrected, and the correction undone',
+            corrected === 'Texto corrigido' && undone === cue.text,
+            `"${corrected}" → "${undone}"`
+          )
+
+          // What the preview shows is what the export contains.
+          await mainPage.getByRole('button', { name: 'Estilo Clássica' }).click()
+          // The largest size, so the caption is unmistakable in the comparison.
+          await mainPage.getByRole('slider', { name: /Tamanho/ }).fill('0.1')
+          await seekCaption()
+          const previewWith = join(workDir, 'caption-parity-preview.png')
+          await canvas.screenshot({ path: previewWith })
+          await visible.uncheck()
+          await sleep(300)
+          const previewWithout = join(workDir, 'caption-parity-without.png')
+          await canvas.screenshot({ path: previewWithout })
+          await visible.check()
+          const captioned = await exportNow('1×')
+          if (captioned.error) {
+            check('the exported video carries the captions', false, captioned.error)
+          } else {
+            // Compared on the band of the picture the caption was dragged to, at a small
+            // size: the two are rendered at different resolutions.
+            const scaledFrame = (file, time) =>
+              run('ffmpeg', [
+                '-v', 'error', ...(time === null ? [] : ['-ss', String(time)]), '-i', file, '-frames:v', '1',
+                '-vf', 'crop=iw:ih*0.2:0:ih*0.5,scale=480:64:flags=area', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'
+              ])
+            const exportedFrame = scaledFrame(captioned.file, cueMiddle / 1000)
+            const withCaption = meanAbsoluteDifference(scaledFrame(previewWith, null), exportedFrame)
+            const withoutCaption = meanAbsoluteDifference(scaledFrame(previewWithout, null), exportedFrame)
+            check(
+              'the exported video carries the captions, as the preview shows them',
+              // The caption's own edges alias differently at the two sizes; without it the band is plainly another picture.
+              withCaption < 10 && withoutCaption > withCaption + 4,
+              `difference ${withCaption.toFixed(1)} from the preview with captions, ${withoutCaption.toFixed(1)} without`
+            )
+            if (keepArtifacts) {
+              run('ffmpeg', ['-v', 'error', '-y', '-ss', String(cueMiddle / 1000), '-i', captioned.file, '-frames:v', '1', join(workDir, 'caption-exported-frame.png')])
+            }
+          }
+        }
+
+        // --- AI suggestions: proposals from the transcript, decided by the user ------
+        if (generated) {
+          const readProject = () => readCaptionFile('project.json')
+          const trimsOf = () => readProject().effects.filter((effect) => effect.type === 'trim')
+          const spokenWords = readCaptionFile('transcript.json').words
+          await mainPage.getByRole('tab', { name: 'Cortes' }).click()
+
+          // The tool, its model and its effort are chosen in the settings screen.
+          await mainPage.locator('.ai-choice').click()
+          const settings = mainPage.locator('.settings')
+          await settings.waitFor()
+          const agent = (id) => settings.locator(`.agent[data-agent="${id}"]`)
+          await agent('claude').waitFor()
+          const claudeCard = (await agent('claude').innerText()).replace(/\s+/g, ' ')
+          check(
+            'the settings screen shows each AI tool as it stands on this machine',
+            (await agent('claude').getAttribute('data-readiness')) === 'ready' &&
+              claudeCard.includes('9.9.9') &&
+              claudeCard.includes('teste@example.com') &&
+              (await agent('codex').getAttribute('data-readiness')) === 'missing' &&
+              (await agent('agy').getAttribute('data-readiness')) === 'missing' &&
+              (await settings.getByRole('button', { name: 'Instalar' }).count()) === 2,
+            claudeCard
+          )
+          await agent('claude').getByLabel('Modelo do Claude').selectOption('haiku')
+          await agent('claude').getByRole('radio', { name: 'Alto', exact: true }).click()
+          if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, 'settings.png') })
+          await settings.getByRole('button', { name: 'Voltar' }).click()
+          await settings.waitFor({ state: 'detached' })
+          const chosen = (await mainPage.locator('.ai-choice').innerText()).replace(/\s+/g, ' ')
+          check('the editor shows the chosen tool, model and effort', /Claude/.test(chosen) && /Haiku/.test(chosen) && /alto/.test(chosen), chosen)
+
+          await mainPage.getByRole('button', { name: 'Sugerir cortes' }).click()
+          const suggestion = mainPage.locator('.suggestion')
+          const proposed = await suggestion.first().waitFor({ timeout: 30_000 }).then(() => true, () => false)
+          await sleep(700)
+          check(
+            "the AI's answer becomes a proposal on the timeline, not a cut",
+            proposed && (await suggestion.count()) === 1 && (await mainPage.locator('.suggestion-block').count()) === 1 && trimsOf().length === 0,
+            proposed ? (await suggestion.first().innerText()).replace(/\s+/g, ' ') : (await mainPage.locator('.panel-notice').innerText().catch(() => ''))
+          )
+          if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, 'ai-suggestions.png') })
+
+          const sent = existsSync(`${aiStub}.stdin`) ? readFileSync(`${aiStub}.stdin`, 'utf8') : ''
+          check(
+            'the AI tool receives the transcript as numbered words, and nothing else of the session',
+            sent.includes(`0 ${spokenWords[0].text}`) && /exportar/i.test(sent) && !sent.includes(recordingsDir) && !sent.includes(captionId),
+            `${sent.split('\n').length} lines`
+          )
+
+          const asked = existsSync(`${aiStub}.args`) ? readFileSync(`${aiStub}.args`, 'utf8') : ''
+          check(
+            'the tool is asked with the chosen model and effort, and with no tools',
+            asked.includes('--model\nhaiku') && asked.includes('--effort\nhigh') && asked.includes('--tools\n\n'),
+            asked.split('\n').filter((arg) => arg.startsWith('--')).join(' ')
+          )
+
+          if (proposed) {
+            await mainPage.locator('.suggestion-accept').first().click()
+            await mainPage.locator('.trim-block').waitFor({ timeout: 3000 }).catch(() => undefined)
+            await sleep(700)
+            const accepted = trimsOf()
+            check(
+              'accepting a suggestion makes an ordinary cut, on word boundaries',
+              accepted.length === 1 &&
+                Math.abs(accepted[0].startMs - spokenWords[0].startMs) < 1 &&
+                Math.abs(accepted[0].endMs - spokenWords[2].startMs) < 1 &&
+                (await suggestion.count()) === 0,
+              JSON.stringify(accepted.map((trim) => ({ startMs: Math.round(trim.startMs), endMs: Math.round(trim.endMs) })))
+            )
+
+            await mainPage.click('[aria-label="Desfazer"]')
+            const back = await suggestion.first().waitFor({ timeout: 3000 }).then(() => true, () => false)
+            await sleep(700)
+            check('undoing the cut brings the suggestion back', back && trimsOf().length === 0)
+
+            await mainPage.locator('.suggestion-reject').first().click()
+            await sleep(700)
+            check(
+              'a rejected suggestion goes away and nothing is cut',
+              (await suggestion.count()) === 0 && (await mainPage.locator('.suggestion-block').count()) === 0 && trimsOf().length === 0
+            )
+          }
+        }
+
+        // Back to the run's own recording, with the fixture gone, for the checks that follow.
+        await mainPage.getByRole('button', { name: 'Gravações' }).click()
+        rmSync(captionDir, { recursive: true, force: true })
+        await reloadToLibrary()
+        await mainPage.locator('.card-poster').first().click()
+        await canvas.waitFor()
+      }
     }
 
     // --- companion tracks: separate files, in sync with the screen ---------------
@@ -668,6 +1004,14 @@ async function main() {
       const cardText = posterLoaded ? (await mainPage.locator('.card').first().innerText()).replace(/\s+/g, ' ') : ''
       check('the library shows the recording as a card with its poster frame', posterLoaded, cardText)
       if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, 'home.png') })
+
+      await mainPage.getByRole('button', { name: 'Configurações' }).click()
+      const opened = await mainPage.locator('.settings .agent').first().waitFor({ timeout: 5000 }).then(() => true, () => false)
+      await mainPage.locator('.settings').getByRole('button', { name: 'Voltar' }).click()
+      check(
+        'the settings screen opens from the library and closes back to it',
+        opened && (await mainPage.locator('.settings').count()) === 0 && (await mainPage.locator('.card').count()) === 1
+      )
     }
 
     const library = await hud.evaluate(() => window.screenrx.library.list())

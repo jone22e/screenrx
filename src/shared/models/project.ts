@@ -52,9 +52,19 @@ export interface TrimEffect extends TimelineEffectBase {
 /** Annotation, blur, highlight and webcam effects join this union in later phases. */
 export type TimelineEffect = ZoomEffect | SpeedEffect | TrimEffect
 
+/** Frame rates an export can be made at. */
+export const EXPORT_FRAME_RATES = [24, 30, 60] as const
+export type ExportFps = (typeof EXPORT_FRAME_RATES)[number]
+
+export function isExportFps(value: unknown): value is ExportFps {
+  return (EXPORT_FRAME_RATES as readonly unknown[]).includes(value)
+}
+
 export interface ExportSettings {
   format: 'mp4'
   quality: 'standard' | 'high'
+  /** Frames per second of the exported file. */
+  fps: ExportFps
   /**
    * Global playback speed of the exported file, applied after the whole
    * timeline: `timelineTime = outputTime * speed`. Independent of speed regions.
@@ -92,6 +102,47 @@ export interface WebcamSettings {
   mirrored: boolean
 }
 
+/** One caption: a line of text shown over a span of SOURCE time. */
+export interface CaptionCue {
+  id: string
+  startMs: number
+  endMs: number
+  text: string
+}
+
+export type CaptionFont = 'system' | 'rounded' | 'serif' | 'impact' | 'mono'
+/** What keeps the text readable over the video. */
+export type CaptionBackdrop = 'box' | 'outline' | 'shadow' | 'none'
+/** How much text goes into one caption when they are built from a transcript. */
+export type CaptionLength = 'short' | 'medium' | 'long'
+
+export interface CaptionStyle {
+  font: CaptionFont
+  /** Font size as a ratio of the output height, so captions look the same at any resolution. */
+  sizeRatio: number
+  bold: boolean
+  uppercase: boolean
+  /** Text colour, `#rrggbb`. */
+  color: string
+  backdrop: CaptionBackdrop
+  /** Colour of the box or of the outline, `#rrggbb`. */
+  backdropColor: string
+  /** Centre of the caption, normalized to the output. */
+  position: NormalizedPoint
+}
+
+/**
+ * Captions are drawn at preview/export time, like every other effect; the
+ * cues are the user's to edit once generated from the transcript.
+ */
+export interface CaptionSettings {
+  visible: boolean
+  length: CaptionLength
+  style: CaptionStyle
+  /** Sorted by start time, never overlapping. */
+  cues: CaptionCue[]
+}
+
 export const PROJECT_SCHEMA_VERSION = 1
 
 export interface Project {
@@ -100,10 +151,11 @@ export interface Project {
   effects: TimelineEffect[]
   background: BackgroundSettings
   webcam: WebcamSettings
+  captions: CaptionSettings
   export: ExportSettings
 }
 
-export const DEFAULT_EXPORT_SETTINGS: ExportSettings = { format: 'mp4', quality: 'high', speed: 1 }
+export const DEFAULT_EXPORT_SETTINGS: ExportSettings = { format: 'mp4', quality: 'high', fps: 30, speed: 1 }
 
 export const BACKGROUND_LIMITS = { maxPaddingRatio: 0.16, maxCornerRadiusRatio: 0.05 } as const
 
@@ -117,6 +169,33 @@ export const DEFAULT_WEBCAM: WebcamSettings = {
   position: { x: 0.5, y: 0.5 },
   border: true,
   mirrored: false
+}
+
+export const CAPTION_LIMITS = {
+  minSizeRatio: 0.025,
+  maxSizeRatio: 0.1,
+  maxTextLength: 300,
+  maxCues: 20_000
+} as const
+
+export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
+  font: 'system',
+  sizeRatio: 0.045,
+  bold: true,
+  uppercase: false,
+  color: '#ffffff',
+  backdrop: 'box',
+  backdropColor: '#000000',
+  position: { x: 0.5, y: 0.88 }
+}
+
+export function createCaptionSettings(): CaptionSettings {
+  return {
+    visible: true,
+    length: 'medium',
+    style: { ...DEFAULT_CAPTION_STYLE, position: { ...DEFAULT_CAPTION_STYLE.position } },
+    cues: []
+  }
 }
 
 export const DEFAULT_BACKGROUND: BackgroundSettings = {
@@ -133,6 +212,7 @@ export function createProject(sessionId: string, effects: TimelineEffect[] = [])
     effects,
     background: { ...DEFAULT_BACKGROUND },
     webcam: { ...DEFAULT_WEBCAM, position: { ...DEFAULT_WEBCAM.position } },
+    captions: createCaptionSettings(),
     export: { ...DEFAULT_EXPORT_SETTINGS }
   }
 }
@@ -162,13 +242,20 @@ const isFiniteNumber = (value: unknown): value is number =>
 
 const WEBCAM_SHAPES: readonly WebcamShape[] = ['circle', 'rounded', 'square']
 const WEBCAM_CORNERS: readonly WebcamCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
+export const CAPTION_FONT_IDS: readonly CaptionFont[] = ['system', 'rounded', 'serif', 'impact', 'mono']
+const CAPTION_BACKDROPS: readonly CaptionBackdrop[] = ['box', 'outline', 'shadow', 'none']
+const CAPTION_LENGTHS: readonly CaptionLength[] = ['short', 'medium', 'long']
+
+const includes = <T>(options: readonly T[], candidate: unknown): candidate is T =>
+  (options as readonly unknown[]).includes(candidate)
+
+const isHexColor = (value: unknown): value is string =>
+  typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
 
 /** Projects saved before the webcam was adjustable only say whether it is visible. */
 function parseWebcam(value: unknown): WebcamSettings {
   const settings = isRecord(value) ? value : {}
   const position = isRecord(settings.position) ? settings.position : {}
-  const includes = <T>(options: readonly T[], candidate: unknown): candidate is T =>
-    (options as readonly unknown[]).includes(candidate)
   return {
     visible: settings.visible !== false,
     shape: includes(WEBCAM_SHAPES, settings.shape) ? settings.shape : DEFAULT_WEBCAM.shape,
@@ -214,6 +301,50 @@ function parseBackground(value: unknown): BackgroundSettings {
       BACKGROUND_LIMITS.maxCornerRadiusRatio
     ),
     shadow: typeof value.shadow === 'boolean' ? value.shadow : DEFAULT_BACKGROUND.shadow
+  }
+}
+
+/**
+ * Projects saved before captions existed get the defaults. A malformed cue is
+ * dropped rather than failing the project: the text can always be generated again.
+ */
+function parseCaptions(value: unknown): CaptionSettings {
+  const settings = isRecord(value) ? value : {}
+  const style = isRecord(settings.style) ? settings.style : {}
+  const position = isRecord(style.position) ? style.position : {}
+  const fallback = DEFAULT_CAPTION_STYLE
+
+  const cues: CaptionCue[] = []
+  const entries = Array.isArray(settings.cues) ? settings.cues.slice(0, CAPTION_LIMITS.maxCues) : []
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry.text !== 'string') continue
+    const base = parseBase(entry)
+    if (!base) continue
+    // Cues never overlap: one that starts before the previous one ends is dropped.
+    const previous = cues[cues.length - 1]
+    if (previous && base.startMs < previous.endMs) continue
+    cues.push({ ...base, text: entry.text.slice(0, CAPTION_LIMITS.maxTextLength) })
+  }
+
+  return {
+    visible: settings.visible !== false,
+    length: includes(CAPTION_LENGTHS, settings.length) ? settings.length : 'medium',
+    style: {
+      font: includes(CAPTION_FONT_IDS, style.font) ? style.font : fallback.font,
+      sizeRatio: isFiniteNumber(style.sizeRatio)
+        ? Math.min(Math.max(style.sizeRatio, CAPTION_LIMITS.minSizeRatio), CAPTION_LIMITS.maxSizeRatio)
+        : fallback.sizeRatio,
+      bold: typeof style.bold === 'boolean' ? style.bold : fallback.bold,
+      uppercase: style.uppercase === true,
+      color: isHexColor(style.color) ? style.color : fallback.color,
+      backdrop: includes(CAPTION_BACKDROPS, style.backdrop) ? style.backdrop : fallback.backdrop,
+      backdropColor: isHexColor(style.backdropColor) ? style.backdropColor : fallback.backdropColor,
+      position: {
+        x: clampRatio(position.x, fallback.position.x, 1),
+        y: clampRatio(position.y, fallback.position.y, 1)
+      }
+    },
+    cues
   }
 }
 
@@ -275,9 +406,12 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
     effects,
     background: parseBackground(value.background),
     webcam: parseWebcam(value.webcam),
+    captions: parseCaptions(value.captions),
     export: {
       format: 'mp4',
       quality: settings.quality === 'standard' ? 'standard' : 'high',
+      // Projects saved before the frame rate could be chosen were exported at the default.
+      fps: isExportFps(settings.fps) ? settings.fps : DEFAULT_EXPORT_SETTINGS.fps,
       speed: isFiniteNumber(settings.speed) && settings.speed > 0 ? settings.speed : 1
     }
   }

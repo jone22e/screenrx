@@ -4,12 +4,22 @@ import { sourceTimeToTimelineTime } from '@engine/time/timeMapping'
 import { moveZoom, resizeZoom } from '@engine/zoom/zoomEditing'
 import { formatClock, formatTimecode } from '@shared/format'
 import type { EditorSession } from '@shared/models/editor'
-import type { TrimEffect, ZoomEffect } from '@shared/models/project'
+import type { CaptionCue, TrimEffect, ZoomEffect } from '@shared/models/project'
 import type { EditorStore } from './EditorStore'
 import { Filmstrip } from './Filmstrip'
 import type { PreviewPlayer } from './PreviewPlayer'
+import { SUGGESTION_KIND_LABELS, previewSuggestion } from './SuggestionsPanel'
 import { Waveform } from './Waveform'
-import { CameraIcon, CloseIcon, FilmIcon, MicIcon, ScissorsIcon, SpeakerIcon, ZoomIcon } from './icons'
+import {
+  CameraIcon,
+  CaptionsIcon,
+  CloseIcon,
+  FilmIcon,
+  MicIcon,
+  ScissorsIcon,
+  SpeakerIcon,
+  ZoomIcon
+} from './icons'
 
 interface Props {
   session: EditorSession
@@ -23,6 +33,7 @@ type DragKind = 'move' | 'start' | 'end'
 type Drag = { kind: DragKind; originX: number } & (
   | { target: 'zoom'; original: ZoomEffect }
   | { target: 'trim'; original: TrimEffect }
+  | { target: 'cue'; original: CaptionCue }
 )
 
 /** A press on the video lane: a click seeks, a drag selects. */
@@ -65,8 +76,8 @@ function LaneLabel({ icon, children, tall }: { icon: ReactNode; children: ReactN
 
 /**
  * The timeline, laid out in the recording's own time: a ruler, the video as
- * a strip of thumbnails with its recorded clicks, the cuts, the zooms, and
- * one lane per companion track.
+ * a strip of thumbnails with its recorded clicks, the cuts, the zooms, the
+ * captions, and one lane per companion track.
  *
  * Drag over the video to select a stretch (then cut it); click to move the
  * playhead; drag the ruler to scrub. Regions are dragged to move, by their
@@ -82,6 +93,7 @@ export function Timeline({ session, store, player }: Props) {
   const [width, setWidth] = useState(0)
   const duration = session.durationMs
   const { selection, timeMap } = state
+  const { cues } = state.captions
 
   useEffect(() => {
     const element = tracks.current
@@ -170,7 +182,12 @@ export function Timeline({ session, store, player }: Props) {
     event.currentTarget.setPointerCapture(event.pointerId)
     drag.current = { ...next, originX: event.clientX }
     if (next.target === 'zoom') store.select(next.original.id)
-    else store.selectTrim(next.original.id)
+    else if (next.target === 'trim') store.selectTrim(next.original.id)
+    else {
+      // A caption is only on screen during its own span: go there to see it.
+      store.selectCue(next.original.id)
+      if (next.kind === 'move') player.seek(next.original.startMs)
+    }
   }
 
   const continueDrag = (event: PointerEvent<HTMLElement>): void => {
@@ -183,6 +200,11 @@ export function Timeline({ session, store, player }: Props) {
     if (current.target === 'trim') {
       if (current.kind === 'move') store.moveTrim(current.original, deltaMs)
       else store.resizeTrim(current.original, current.kind, timeMs)
+      return
+    }
+    if (current.target === 'cue') {
+      if (current.kind === 'move') store.moveCue(current.original, deltaMs)
+      else store.resizeCue(current.original, current.kind, timeMs)
       return
     }
     const zooms = store.getState().zooms
@@ -248,6 +270,7 @@ export function Timeline({ session, store, player }: Props) {
           </LaneLabel>
           <LaneLabel icon={<ScissorsIcon />}>Cortes</LaneLabel>
           <LaneLabel icon={<ZoomIcon />}>Zoom</LaneLabel>
+          {cues.length > 0 && <LaneLabel icon={<CaptionsIcon />}>Legendas</LaneLabel>}
           {session.webcam && (
             <LaneLabel icon={<CameraIcon />} tall>
               Câmera
@@ -324,6 +347,22 @@ export function Timeline({ session, store, player }: Props) {
             ))}
           </div>
 
+          {/* Proposed cuts sit on the cuts lane, visibly not cuts yet. */}
+          {state.suggestions.length > 0 && (
+            <div className="suggestion-marks">
+              {state.suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  className="suggestion-block"
+                  aria-label={`Sugestão de corte: ${suggestion.text}`}
+                  title={`Sugestão da IA · ${SUGGESTION_KIND_LABELS[suggestion.kind]} · ${suggestion.reason}`}
+                  style={span(suggestion)}
+                  onClick={() => previewSuggestion(store, player, suggestion)}
+                />
+              ))}
+            </div>
+          )}
+
           <div
             className="lane lane-zoom"
             onPointerDown={scrub}
@@ -357,6 +396,39 @@ export function Timeline({ session, store, player }: Props) {
               </div>
             ))}
           </div>
+
+          {cues.length > 0 && (
+            <div
+              className="lane lane-caption"
+              data-hidden={!state.captions.visible}
+              onPointerDown={scrub}
+              onPointerMove={scrub}
+            >
+              {cues.map((cue) => (
+                <div
+                  key={cue.id}
+                  className="region cue-block"
+                  data-selected={cue.id === state.selectedCueId}
+                  title={`${cue.text} · ${formatTimecode(cue.startMs)} – ${formatTimecode(cue.endMs)}`}
+                  style={span(cue)}
+                  onPointerDown={beginDrag({ target: 'cue', kind: 'move', original: cue, originX: 0 })}
+                  {...dragHandlers}
+                >
+                  <span
+                    className="region-handle region-handle-start"
+                    onPointerDown={beginDrag({ target: 'cue', kind: 'start', original: cue, originX: 0 })}
+                    {...dragHandlers}
+                  />
+                  <span className="cue-label">{cue.text}</span>
+                  <span
+                    className="region-handle region-handle-end"
+                    onPointerDown={beginDrag({ target: 'cue', kind: 'end', original: cue, originX: 0 })}
+                    {...dragHandlers}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
 
           {session.webcam && (
             <div className="lane lane-companion lane-webcam">

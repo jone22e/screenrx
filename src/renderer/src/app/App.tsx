@@ -1,12 +1,15 @@
 import { useState } from 'react'
 import { useRecordingState } from '../common/recordingStore'
+import { closeSettings, useSettingsOpen } from '../common/settingsScreen'
 import { Editor } from '../editor/Editor'
+import { Settings } from '../settings/Settings'
 import { Home } from './Home'
 import { useLibrary } from './hooks'
 
 export function App() {
   const state = useRecordingState()
   const recordings = useLibrary()
+  const settingsOpen = useSettingsOpen()
 
   // A recording that has just finished opens straight in the editor.
   const [view, setView] = useState<{ editing: string | null; lastSeen: string | null }>({
@@ -26,6 +29,8 @@ export function App() {
       ) : (
         <Home state={state} recordings={recordings} onEdit={edit} />
       )}
+      {/* Over the library or the editor, which keeps its state underneath. */}
+      {settingsOpen && <Settings onClose={closeSettings} />}
     </div>
   )
 }

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { EditorSession } from '@shared/models/editor'
 import type { AppError } from '@shared/models/errors'
+import { useSettingsOpen } from '../common/settingsScreen'
 import { EditorStore } from './EditorStore'
 import { ExportDialog } from './ExportDialog'
 import type { SaveStatus } from './EditorStore'
@@ -65,6 +66,8 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
   const state = useSyncExternalStore(store.subscribe, store.getState)
   const [player, setPlayer] = useState<PreviewPlayer | null>(null)
   const [exporting, setExporting] = useState(false)
+  // With the settings screen over the editor, the keyboard is not the editor's.
+  const settingsOpen = useSettingsOpen()
 
   // Nothing is lost when leaving: pending edits are written immediately.
   useEffect(() => {
@@ -78,8 +81,11 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (exporting) return
-      const typing = event.target instanceof HTMLInputElement && event.target.type !== 'range'
+      if (exporting || settingsOpen) return
+      const typing =
+        (event.target instanceof HTMLInputElement && event.target.type !== 'range') ||
+        event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement
       if (typing) return
       const command = event.metaKey || event.ctrlKey
       if (command && event.key.toLowerCase() === 'z') {
@@ -97,7 +103,8 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
         (event.key.toLowerCase() === 'x' || event.key === 'Backspace' || event.key === 'Delete') &&
         store.getState().selection &&
         !store.selectedZoom &&
-        !store.selectedTrim
+        !store.selectedTrim &&
+        !store.selectedCue
       ) {
         event.preventDefault()
         store.cutSelection()
@@ -107,6 +114,9 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
       } else if ((event.key === 'Backspace' || event.key === 'Delete') && store.selectedTrim) {
         event.preventDefault()
         store.removeTrim(store.selectedTrim.id)
+      } else if ((event.key === 'Backspace' || event.key === 'Delete') && store.selectedCue) {
+        event.preventDefault()
+        store.removeCue(store.selectedCue.id)
       } else if (event.key === 'Escape') {
         store.select(null)
         store.setSelection(null)
@@ -114,7 +124,26 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [player, store, exporting])
+  }, [player, store, exporting, settingsOpen])
+
+  useEffect(() => {
+    if (settingsOpen) player?.pause()
+  }, [settingsOpen, player])
+
+  // Transcription runs in the main process; its progress is shown wherever the user is.
+  useEffect(() => {
+    const unsubscribe = window.screenrx.captions.onProgress((progress) => {
+      if (progress.sessionId === session.sessionId && store.transcribing) {
+        store.setTranscription({ stage: progress.stage, fraction: progress.fraction })
+      }
+    })
+    return () => {
+      unsubscribe()
+      // Leaving the editor abandons a transcription that is still running.
+      if (store.transcribing) void window.screenrx.captions.cancel()
+      if (store.getState().suggesting) void window.screenrx.ai.cancel()
+    }
+  }, [session, store])
 
   const openExport = (): void => {
     player?.pause()

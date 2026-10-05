@@ -65,6 +65,19 @@ const api: ScreenRxApi = {
     saveProject: (project) => invoke('project:save', project),
     waveform: (sessionId, track) => invoke('editor:waveform', sessionId, track)
   },
+  captions: {
+    generate: (sessionId, request) => invoke('captions:generate', sessionId, request),
+    cancel: () => invoke('captions:cancel'),
+    onProgress: (listener) => subscribe('captions:progress', listener)
+  },
+  ai: {
+    providers: (refresh = false) => invoke('ai:providers', refresh),
+    install: (provider) => invoke('ai:install', provider),
+    login: (provider) => invoke('ai:login', provider),
+    cancelSetup: () => invoke('ai:cancel-setup'),
+    suggestCuts: (sessionId, choice) => invoke('ai:suggest-cuts', sessionId, choice),
+    cancel: () => invoke('ai:cancel')
+  },
   export: {
     start: (sessionId) => invoke('export:start', sessionId),
     readChunk: (exportId, track, offset, length) => invoke('export:read-chunk', exportId, track, offset, length),

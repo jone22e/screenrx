@@ -1,4 +1,7 @@
+import { CAPTION_CONFIG } from '@engine/captions/captionConfig'
+import { buildCues } from '@engine/captions/captionCues'
 import { isExportSpeed } from '@engine/export/exportConfig'
+import { addCut, isCoveredByCuts } from '@engine/suggestions/cutSuggestions'
 import type { TimeMap } from '@engine/time/timeMapping'
 import { buildTimeMap } from '@engine/time/timeMapping'
 import { moveSpan, resizeSpan, spanForNew } from '@engine/timeline/spanEditing'
@@ -7,10 +10,15 @@ import { regenerateAutoZooms } from '@engine/zoom/autoZoom'
 import { MANUAL_ZOOM_DEFAULTS } from '@engine/zoom/zoomConfig'
 import type { TimeSpan } from '@engine/zoom/zoomEditing'
 import { clampScale, spanForNewZoom } from '@engine/zoom/zoomEditing'
+import type { Transcript, TranscriptionRequest, TranscriptionStage } from '@shared/models/captions'
 import type { EditorSession } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
 import type {
   BackgroundSettings,
+  CaptionCue,
+  CaptionLength,
+  CaptionSettings,
+  CaptionStyle,
   ExportSettings,
   NormalizedPoint,
   Project,
@@ -18,7 +26,16 @@ import type {
   WebcamSettings,
   ZoomEffect
 } from '@shared/models/project'
-import { BACKGROUND_LIMITS, WEBCAM_LIMITS, trimsOf, zoomsOf } from '@shared/models/project'
+import {
+  BACKGROUND_LIMITS,
+  CAPTION_LIMITS,
+  WEBCAM_LIMITS,
+  isExportFps,
+  trimsOf,
+  zoomsOf
+} from '@shared/models/project'
+import type { AiChoice } from '@shared/models/ai'
+import type { CutSuggestion, CutSuggestionResult } from '@shared/models/suggestions'
 
 /** Quiet time after the last edit before the project is written to disk. */
 const AUTOSAVE_DEBOUNCE_MS = 400
@@ -35,10 +52,23 @@ export interface EditorState {
   timeMap: TimeMap
   background: BackgroundSettings
   webcam: WebcamSettings
+  captions: CaptionSettings
   exportSettings: ExportSettings
+  /** The words the captions are built from; not part of the project. `null` until transcribed. */
+  transcript: Transcript | null
+  /** UI state: the transcription in progress, if any. */
+  transcription: TranscriptionActivity | null
+  /** UI state: why the last transcription produced no captions. */
+  captionNotice: string | null
+  /** UI state: cuts proposed by the AI and not yet decided on. Never part of the project. */
+  suggestions: readonly CutSuggestion[]
+  /** UI state: whether the AI is being asked for suggestions. */
+  suggesting: boolean
+  suggestionNotice: string | null
   /** UI state: never persisted. At most one region is selected at a time. */
   selectedZoomId: string | null
   selectedTrimId: string | null
+  selectedCueId: string | null
   /** UI state: a stretch of the recording marked on the timeline, e.g. to cut it. */
   selection: TimeSpan | null
   saveStatus: SaveStatus
@@ -46,10 +76,30 @@ export interface EditorState {
   canRedo: boolean
 }
 
+export interface TranscriptionActivity {
+  stage: TranscriptionStage
+  /** How much of the track has been transcribed, 0…1. */
+  fraction: number
+}
+
 type SaveProject = (project: Project) => Promise<IpcResult<null>>
+type Transcribe = (sessionId: string, request: TranscriptionRequest) => Promise<IpcResult<Transcript>>
+type SuggestCuts = (sessionId: string, choice: AiChoice) => Promise<IpcResult<CutSuggestionResult>>
+
+const NO_SPEECH_NOTICE = 'Nenhuma fala foi encontrada nesta trilha de áudio.'
 
 const createZoomId = (): string => `zoom-${crypto.randomUUID()}`
 const createTrimId = (): string => `trim-${crypto.randomUUID()}`
+const createCueId = (): string => `cue-${crypto.randomUUID()}`
+
+/** What is selected on the timeline; at most one of these is set. */
+interface Selected {
+  zoomId: string | null
+  trimId: string | null
+  cueId: string | null
+}
+
+const NOTHING_SELECTED: Selected = { zoomId: null, trimId: null, cueId: null }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
 
@@ -60,6 +110,13 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
  */
 export class EditorStore {
   private project: Project
+  private transcript: Transcript | null
+  private transcription: TranscriptionActivity | null = null
+  private captionNotice: string | null = null
+  /** Every suggestion received and not rejected; the pending ones are those no cut covers yet. */
+  private allSuggestions: CutSuggestion[] = []
+  private suggesting = false
+  private suggestionNotice: string | null = null
   private state: EditorState
   private past: Project[] = []
   private future: Project[] = []
@@ -74,7 +131,8 @@ export class EditorStore {
     private readonly saveProject: SaveProject
   ) {
     this.project = session.project
-    this.state = this.derive(null, null, 'saved')
+    this.transcript = session.transcript
+    this.state = this.derive(NOTHING_SELECTED, 'saved')
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -92,15 +150,37 @@ export class EditorStore {
     return this.state.trims.find((trim) => trim.id === this.state.selectedTrimId) ?? null
   }
 
+  get selectedCue(): CaptionCue | null {
+    return this.state.captions.cues.find((cue) => cue.id === this.state.selectedCueId) ?? null
+  }
+
   select(zoomId: string | null): void {
-    if (zoomId === this.state.selectedZoomId && this.state.selectedTrimId === null) return
-    this.state = { ...this.state, selectedZoomId: zoomId, selectedTrimId: null }
-    this.emit()
+    this.setSelected({ ...NOTHING_SELECTED, zoomId })
   }
 
   selectTrim(trimId: string | null): void {
-    if (trimId === this.state.selectedTrimId && this.state.selectedZoomId === null) return
-    this.state = { ...this.state, selectedZoomId: null, selectedTrimId: trimId }
+    this.setSelected({ ...NOTHING_SELECTED, trimId })
+  }
+
+  selectCue(cueId: string | null): void {
+    this.setSelected({ ...NOTHING_SELECTED, cueId })
+  }
+
+  private setSelected(selected: Selected): void {
+    const { selectedZoomId, selectedTrimId, selectedCueId } = this.state
+    if (
+      selected.zoomId === selectedZoomId &&
+      selected.trimId === selectedTrimId &&
+      selected.cueId === selectedCueId
+    ) {
+      return
+    }
+    this.state = {
+      ...this.state,
+      selectedZoomId: selected.zoomId,
+      selectedTrimId: selected.trimId,
+      selectedCueId: selected.cueId
+    }
     this.emit()
   }
 
@@ -149,17 +229,62 @@ export class EditorStore {
   cutSelection(): boolean {
     const selection = this.state.selection
     if (!selection || selection.endMs - selection.startMs < TRIM_CONFIG.minDurationMs) return false
-    const touching = this.state.trims.filter(
-      (trim) => trim.startMs <= selection.endMs && trim.endMs >= selection.startMs
-    )
-    const cut: TrimEffect = {
-      id: createTrimId(),
-      type: 'trim',
-      startMs: Math.min(selection.startMs, ...touching.map((trim) => trim.startMs)),
-      endMs: Math.max(selection.endMs, ...touching.map((trim) => trim.endMs))
+    return this.cutSpans([selection])
+  }
+
+  // --- suggestions --------------------------------------------------------------
+
+  /**
+   * Asks an AI which stretches of speech could go. The answer only becomes a
+   * list of proposals: nothing is cut until the user accepts one.
+   */
+  async suggestCuts(choice: AiChoice, request: SuggestCuts): Promise<void> {
+    if (this.suggesting) return
+    this.suggesting = true
+    this.suggestionNotice = null
+    this.refreshSuggestions()
+    const result = await request(this.session.sessionId, choice).catch(() => null)
+    this.suggesting = false
+    if (result?.ok) {
+      const { suggestions, analyzedWords, totalWords } = result.value
+      this.allSuggestions = suggestions
+      this.suggestionNotice =
+        suggestions.length === 0
+          ? 'A IA não encontrou nada para cortar.'
+          : analyzedWords < totalWords
+            ? 'A gravação é longa: só o começo da transcrição foi analisado.'
+            : null
+    } else if (result?.error.code !== 'ai-cancelled') {
+      this.suggestionNotice = result?.error.message ?? 'A IA não respondeu como esperado.'
     }
-    const others = this.state.trims.filter((trim) => !touching.includes(trim))
-    return this.commitTrims([...others, cut], cut.id, null)
+    this.refreshSuggestions()
+  }
+
+  /** Makes the suggested cut. It is an ordinary cut from then on, and can be undone. */
+  acceptSuggestion(suggestionId: string): boolean {
+    const suggestion = this.state.suggestions.find((candidate) => candidate.id === suggestionId)
+    return suggestion ? this.cutSpans([suggestion]) : false
+  }
+
+  /** Makes every pending suggested cut, as one undo step. */
+  acceptAllSuggestions(): boolean {
+    const made = this.state.suggestions.length > 0 && this.cutSpans(this.state.suggestions)
+    if (!made && this.state.suggestions.length > 0) {
+      this.suggestionNotice = 'Aceitar todas não deixaria quase nada da gravação. Aceite uma a uma.'
+      this.refreshSuggestions()
+    }
+    return made
+  }
+
+  rejectSuggestion(suggestionId: string): void {
+    this.allSuggestions = this.allSuggestions.filter((suggestion) => suggestion.id !== suggestionId)
+    this.refreshSuggestions()
+  }
+
+  clearSuggestions(): void {
+    this.allSuggestions = []
+    this.suggestionNotice = null
+    this.refreshSuggestions()
   }
 
   moveTrim(original: TrimEffect, deltaMs: number): void {
@@ -192,8 +317,8 @@ export class EditorStore {
   /** The global export speed is a setting of its own, not a speed region. */
   setExportSettings(change: Partial<ExportSettings>): void {
     const next = { ...this.project.export, ...change }
-    if (!isExportSpeed(next.speed)) return
-    this.commit({ ...this.project, export: next }, this.state.selectedZoomId, null)
+    if (!isExportSpeed(next.speed) || !isExportFps(next.fps)) return
+    this.commit({ ...this.project, export: next }, this.selected(), null)
   }
 
   // --- zooms ------------------------------------------------------------------
@@ -258,7 +383,7 @@ export class EditorStore {
       paddingRatio: clamp(merged.paddingRatio, 0, BACKGROUND_LIMITS.maxPaddingRatio),
       cornerRadiusRatio: clamp(merged.cornerRadiusRatio, 0, BACKGROUND_LIMITS.maxCornerRadiusRatio)
     }
-    this.commit({ ...this.project, background }, this.state.selectedZoomId, gestureKey)
+    this.commit({ ...this.project, background }, this.selected(), gestureKey)
   }
 
   setWebcam(change: Partial<WebcamSettings>, gestureKey: string | null = null): void {
@@ -268,7 +393,121 @@ export class EditorStore {
       sizeRatio: clamp(merged.sizeRatio, WEBCAM_LIMITS.minSizeRatio, WEBCAM_LIMITS.maxSizeRatio),
       position: { x: clamp(merged.position.x, 0, 1), y: clamp(merged.position.y, 0, 1) }
     }
-    this.commit({ ...this.project, webcam }, this.state.selectedZoomId, gestureKey)
+    this.commit({ ...this.project, webcam }, this.selected(), gestureKey)
+  }
+
+  // --- captions ---------------------------------------------------------------
+
+  /**
+   * Transcribes an audio track and turns the result into captions. The work
+   * happens in the main process; this only tracks it, so the UI can show it
+   * from wherever the user is in the editor.
+   */
+  async generateCaptions(request: TranscriptionRequest, transcribe: Transcribe): Promise<void> {
+    if (this.transcription) return
+    this.captionNotice = null
+    this.setTranscription({ stage: 'preparing', fraction: 0 })
+    const result = await transcribe(this.session.sessionId, request).catch(() => null)
+    this.transcription = null
+    if (result?.ok) {
+      if (result.value.words.length === 0) this.captionNotice = NO_SPEECH_NOTICE
+      this.applyTranscript(result.value)
+      return
+    }
+    if (result?.error.code !== 'transcription-cancelled') {
+      this.captionNotice = result?.error.message ?? 'Não foi possível transcrever o áudio desta gravação.'
+    }
+    this.state = { ...this.state, transcription: null, captionNotice: this.captionNotice }
+    this.emit()
+  }
+
+  /** Progress reported by the transcriber; ignored when nothing is being transcribed. */
+  setTranscription(activity: TranscriptionActivity): void {
+    if (this.transcription && activity.fraction < this.transcription.fraction) return
+    this.transcription = activity
+    this.state = { ...this.state, transcription: activity, captionNotice: this.captionNotice }
+    this.emit()
+  }
+
+  get transcribing(): boolean {
+    return this.transcription !== null
+  }
+
+  /**
+   * Takes a fresh transcript and builds the captions from it. The transcript
+   * itself is derived data and is not undoable; the captions are.
+   */
+  applyTranscript(transcript: Transcript): void {
+    this.transcript = transcript
+    this.commitCaptions(
+      { ...this.project.captions, visible: true, cues: this.cuesFor(this.project.captions.length) },
+      null,
+      null
+    )
+  }
+
+  /** Changes how much text goes into each caption, rebuilding them from the transcript. */
+  setCaptionLength(length: CaptionLength): void {
+    const cues = this.transcript ? this.cuesFor(length) : this.project.captions.cues
+    this.commitCaptions({ ...this.project.captions, length, cues }, null, null)
+  }
+
+  /** Builds the captions again from the transcript, discarding edits made to them. */
+  rebuildCaptions(): void {
+    if (!this.transcript) return
+    this.commitCaptions(
+      { ...this.project.captions, visible: true, cues: this.cuesFor(this.project.captions.length) },
+      null,
+      null
+    )
+  }
+
+  removeCaptions(): void {
+    this.commitCaptions({ ...this.project.captions, cues: [] }, null, null)
+  }
+
+  setCaptionsVisible(visible: boolean): void {
+    this.commitCaptions({ ...this.project.captions, visible }, null, this.state.selectedCueId)
+  }
+
+  setCaptionStyle(change: Partial<CaptionStyle>, gestureKey: string | null = null): void {
+    const merged = { ...this.project.captions.style, ...change }
+    const style: CaptionStyle = {
+      ...merged,
+      sizeRatio: clamp(merged.sizeRatio, CAPTION_LIMITS.minSizeRatio, CAPTION_LIMITS.maxSizeRatio),
+      position: { x: clamp(merged.position.x, 0, 1), y: clamp(merged.position.y, 0, 1) }
+    }
+    this.commitCaptions({ ...this.project.captions, style }, gestureKey, this.state.selectedCueId)
+  }
+
+  setCueText(cueId: string, text: string): void {
+    this.editCue(cueId, 'cue-text', (cue) => ({ ...cue, text: text.slice(0, CAPTION_LIMITS.maxTextLength) }))
+  }
+
+  moveCue(original: CaptionCue, deltaMs: number): void {
+    const span = moveSpan(this.state.captions.cues, original, deltaMs, this.session.durationMs)
+    this.editCue(original.id, 'cue-span', (cue) => ({ ...cue, ...span }))
+  }
+
+  resizeCue(original: CaptionCue, edge: 'start' | 'end', timeMs: number): void {
+    const span = resizeSpan(
+      this.state.captions.cues,
+      original,
+      edge,
+      timeMs,
+      this.session.durationMs,
+      CAPTION_CONFIG.minCueDurationMs
+    )
+    this.editCue(original.id, 'cue-span', (cue) => ({ ...cue, ...span }))
+  }
+
+  removeCue(cueId: string): void {
+    const cues = this.project.captions.cues.filter((cue) => cue.id !== cueId)
+    this.commitCaptions(
+      { ...this.project.captions, cues },
+      null,
+      this.state.selectedCueId === cueId ? null : this.state.selectedCueId
+    )
   }
 
   // --- history ----------------------------------------------------------------
@@ -309,6 +548,40 @@ export class EditorStore {
 
   // --- internals --------------------------------------------------------------
 
+  /** Cuts `spans` out of the edit in one step. Cuts they touch are absorbed. */
+  private cutSpans(spans: readonly TimeSpan[]): boolean {
+    const existing = this.state.trims
+    let merged: TimeSpan[] = [...existing]
+    for (const span of spans) merged = addCut(merged, span)
+    const trims = merged.map(
+      (span): TrimEffect =>
+        existing.find((trim) => trim.startMs === span.startMs && trim.endMs === span.endMs) ?? {
+          id: createTrimId(),
+          type: 'trim',
+          startMs: span.startMs,
+          endMs: span.endMs
+        }
+    )
+    const last = spans[spans.length - 1]
+    const made = last && trims.find((trim) => trim.startMs <= last.startMs && trim.endMs >= last.endMs)
+    return this.commitTrims(trims, made?.id ?? null, null)
+  }
+
+  private pendingSuggestions(): CutSuggestion[] {
+    const trims = trimsOf(this.project)
+    return this.allSuggestions.filter((suggestion) => !isCoveredByCuts(suggestion, trims))
+  }
+
+  private refreshSuggestions(): void {
+    this.state = {
+      ...this.state,
+      suggestions: this.pendingSuggestions(),
+      suggesting: this.suggesting,
+      suggestionNotice: this.suggestionNotice
+    }
+    this.emit()
+  }
+
   private editTrim(trimId: string, span: TimeSpan): void {
     this.commitTrims(
       this.state.trims.map((trim) => (trim.id === trimId ? { ...trim, ...span } : trim)),
@@ -323,7 +596,7 @@ export class EditorStore {
     const effects = [...others, ...[...trims].sort((a, b) => a.startMs - b.startMs)]
     const kept = buildTimeMap(this.session.durationMs, effects).timelineDurationMs
     if (kept < Math.min(TRIM_CONFIG.minKeptDurationMs, this.session.durationMs)) return false
-    this.commit({ ...this.project, effects }, null, gestureKey, selectedTrimId)
+    this.commit({ ...this.project, effects }, { ...NOTHING_SELECTED, trimId: selectedTrimId }, gestureKey)
     return true
   }
 
@@ -345,15 +618,37 @@ export class EditorStore {
   ): void {
     const sorted = [...zooms].sort((a, b) => a.startMs - b.startMs)
     const others = this.project.effects.filter((effect) => effect.type !== 'zoom')
-    this.commit({ ...this.project, effects: [...others, ...sorted] }, selectedZoomId, gestureKey)
+    this.commit(
+      { ...this.project, effects: [...others, ...sorted] },
+      { ...NOTHING_SELECTED, zoomId: selectedZoomId },
+      gestureKey
+    )
   }
 
-  private commit(
-    project: Project,
-    selectedZoomId: string | null,
-    gestureKey: string | null,
-    selectedTrimId: string | null = null
-  ): void {
+  private cuesFor(length: CaptionLength): CaptionCue[] {
+    if (!this.transcript) return []
+    // An audio track can run a little past the screen track; captions cannot.
+    const durationMs = this.session.durationMs
+    return buildCues(this.transcript.words, length, createCueId)
+      .filter((cue) => cue.startMs < durationMs)
+      .map((cue) => (cue.endMs > durationMs ? { ...cue, endMs: durationMs } : cue))
+  }
+
+  private editCue(cueId: string, gesture: string, change: (cue: CaptionCue) => CaptionCue): void {
+    const cues = this.project.captions.cues.map((cue) => (cue.id === cueId ? change(cue) : cue))
+    this.commitCaptions({ ...this.project.captions, cues }, `${gesture}:${cueId}`, cueId)
+  }
+
+  private commitCaptions(captions: CaptionSettings, gestureKey: string | null, selectedCueId: string | null): void {
+    this.commit({ ...this.project, captions }, { ...NOTHING_SELECTED, cueId: selectedCueId }, gestureKey)
+  }
+
+  /** The selection an edit of the look (framing, webcam, export) leaves in place. */
+  private selected(): Selected {
+    return { zoomId: this.state.selectedZoomId, trimId: null, cueId: this.state.selectedCueId }
+  }
+
+  private commit(project: Project, selected: Selected, gestureKey: string | null): void {
     const continuesGesture = gestureKey !== null && gestureKey === this.gestureKey
     if (!continuesGesture) {
       this.past.push(this.project)
@@ -363,8 +658,8 @@ export class EditorStore {
     this.gestureKey = gestureKey
     this.project = project
     // A cut consumes the selection it was made from; other edits leave it alone.
-    const selection = selectedTrimId !== null && gestureKey === null ? null : this.state.selection
-    this.state = { ...this.derive(selectedZoomId, selectedTrimId, 'pending'), selection }
+    const selection = selected.trimId !== null && gestureKey === null ? null : this.state.selection
+    this.state = { ...this.derive(selected, 'pending'), selection }
     this.emit()
     this.scheduleSave()
   }
@@ -374,10 +669,14 @@ export class EditorStore {
     this.project = project
     const zoomExists = zoomsOf(project).some((zoom) => zoom.id === this.state.selectedZoomId)
     const trimExists = trimsOf(project).some((trim) => trim.id === this.state.selectedTrimId)
+    const cueExists = project.captions.cues.some((cue) => cue.id === this.state.selectedCueId)
     this.state = {
       ...this.derive(
-        zoomExists ? this.state.selectedZoomId : null,
-        trimExists ? this.state.selectedTrimId : null,
+        {
+          zoomId: zoomExists ? this.state.selectedZoomId : null,
+          trimId: trimExists ? this.state.selectedTrimId : null,
+          cueId: cueExists ? this.state.selectedCueId : null
+        },
         'pending'
       ),
       selection: this.state.selection
@@ -386,20 +685,24 @@ export class EditorStore {
     this.scheduleSave()
   }
 
-  private derive(
-    selectedZoomId: string | null,
-    selectedTrimId: string | null,
-    saveStatus: SaveStatus
-  ): EditorState {
+  private derive(selected: Selected, saveStatus: SaveStatus): EditorState {
     return {
       zooms: zoomsOf(this.project),
       trims: trimsOf(this.project),
       timeMap: buildTimeMap(this.session.durationMs, this.project.effects),
       background: this.project.background,
       webcam: this.project.webcam,
+      captions: this.project.captions,
       exportSettings: this.project.export,
-      selectedZoomId,
-      selectedTrimId,
+      transcript: this.transcript,
+      transcription: this.transcription,
+      captionNotice: this.captionNotice,
+      suggestions: this.pendingSuggestions(),
+      suggesting: this.suggesting,
+      suggestionNotice: this.suggestionNotice,
+      selectedZoomId: selected.zoomId,
+      selectedTrimId: selected.trimId,
+      selectedCueId: selected.cueId,
       selection: null,
       saveStatus,
       canUndo: this.past.length > 0,

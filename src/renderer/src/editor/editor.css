@@ -4,6 +4,7 @@
   --hairline: rgba(255, 255, 255, 0.08);
   --zoom-auto: #5b8cff;
   --zoom-manual: #34c48b;
+  --suggestion: #a57cff;
 
   display: flex;
   flex: 1;
@@ -498,6 +499,368 @@ kbd {
   accent-color: var(--accent);
 }
 
+.check-row {
+  display: flex;
+  gap: 18px;
+}
+
+.select {
+  height: 32px;
+  padding: 0 8px;
+  color: var(--text);
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.select:disabled {
+  opacity: 0.5;
+}
+
+.panel-notice {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #ffd27a;
+  background: rgba(255, 190, 80, 0.1);
+  border: 1px solid rgba(255, 190, 80, 0.25);
+  border-radius: 8px;
+}
+
+/* --- captions ------------------------------------------------------------ */
+
+.progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-track {
+  height: 6px;
+  overflow: hidden;
+  background: #15161a;
+  border-radius: 3px;
+}
+
+.progress-fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.2s ease-out;
+}
+
+.progress-fill[data-indeterminate='true'] {
+  animation: progress-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes progress-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* Ready-made caption looks, each shown as it will be drawn. */
+.looks {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.look {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 0 0 5px;
+  overflow: hidden;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.look:hover {
+  color: var(--text);
+}
+
+.look[aria-pressed='true'] {
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* A slice of "video" behind the sample, so light text and dark boxes both read. */
+.look-sample {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  height: 36px;
+  font-size: 15px;
+  line-height: 1.3;
+  background: linear-gradient(135deg, #4b5568, #2f3644);
+}
+
+.look-name {
+  font-size: 10.5px;
+}
+
+.color-row {
+  display: flex;
+  gap: 18px;
+}
+
+.color-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-field input[type='color'] {
+  width: 30px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+}
+
+.color-field input[type='color']::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+
+.color-field input[type='color']::-webkit-color-swatch {
+  border: 0;
+  border-radius: 3px;
+}
+
+.cue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cue-row {
+  display: flex;
+  align-items: flex-start;
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  /* Long recordings have hundreds of captions; rows off screen are not laid out. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 34px;
+}
+
+.cue-row[data-active='true'] {
+  border-color: rgba(255, 196, 77, 0.6);
+}
+
+.cue-row[data-selected='true'] {
+  border-color: #ffc44d;
+  box-shadow: 0 0 0 1px #ffc44d;
+}
+
+.cue-time {
+  flex: none;
+  padding: 8px 2px 8px 9px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+}
+
+.cue-time:hover {
+  color: var(--text);
+}
+
+.cue-text {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 4px 8px 6px;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 16px;
+  color: var(--text);
+  resize: none;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  field-sizing: content;
+}
+
+/* --- AI suggestions -------------------------------------------------------- */
+
+.panel-button-ai {
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #7c5cff, #5b8cff);
+  border-color: transparent;
+}
+
+/* Which tool, model and effort the AI panel will use; opens the settings. */
+.ai-choice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  color: var(--text-muted);
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.ai-choice:hover:not(:disabled) {
+  color: var(--text);
+  border-color: rgba(165, 124, 255, 0.5);
+}
+
+.ai-choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.ai-choice-text strong {
+  color: var(--text);
+}
+
+.ai-choice-text span {
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.suggestion {
+  overflow: hidden;
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--suggestion);
+  border-radius: 8px;
+}
+
+.suggestion-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 10px 6px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+}
+
+.suggestion-main:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.suggestion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.suggestion-kind {
+  padding: 1px 7px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #d9ccff;
+  background: rgba(165, 124, 255, 0.18);
+  border-radius: 999px;
+}
+
+.suggestion-time {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.suggestion-text {
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 90, 95, 0.7);
+}
+
+.suggestion-reason {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.suggestion-actions {
+  display: flex;
+  border-top: 1px solid var(--hairline);
+}
+
+.suggestion-accept,
+.suggestion-reject {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+}
+
+.suggestion-accept svg,
+.suggestion-reject svg {
+  width: 13px;
+  height: 13px;
+}
+
+.suggestion-accept {
+  border-right: 1px solid var(--hairline);
+}
+
+.suggestion-accept:hover {
+  color: #ff8a8d;
+  background: rgba(255, 90, 95, 0.1);
+}
+
+.suggestion-reject:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.suggestion-all {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+}
+
 .swatches {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -920,6 +1283,54 @@ kbd {
 .zoom-block[data-mode='manual'] {
   background: linear-gradient(180deg, rgba(52, 196, 139, 0.55), rgba(52, 196, 139, 0.36));
   border-color: var(--zoom-manual);
+}
+
+/* Proposed cuts: over the cuts lane, dashed, until the user accepts them. */
+.suggestion-marks {
+  position: absolute;
+  top: calc(var(--ruler-height) + var(--tall-lane-height) + 2 * var(--lane-gap));
+  right: 0;
+  left: 0;
+  z-index: 3;
+  height: var(--lane-height);
+  pointer-events: none;
+}
+
+.suggestion-block {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  min-width: 4px;
+  padding: 0;
+  background: repeating-linear-gradient(-45deg, rgba(165, 124, 255, 0.45) 0 5px, rgba(165, 124, 255, 0.2) 5px 10px);
+  border: 1px dashed var(--suggestion);
+  border-radius: 5px;
+  pointer-events: auto;
+}
+
+.suggestion-block:hover {
+  filter: brightness(1.3);
+}
+
+.cue-block {
+  justify-content: flex-start;
+  min-width: 3px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 196, 77, 0.5), rgba(255, 196, 77, 0.3));
+  border: 1px solid #ffc44d;
+}
+
+.lane-caption[data-hidden='true'] .cue-block {
+  opacity: 0.4;
+}
+
+.cue-label {
+  padding: 0 9px;
+  overflow: hidden;
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .zoom-label {

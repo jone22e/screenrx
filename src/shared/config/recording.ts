@@ -28,5 +28,7 @@ export const SESSION_FILES = {
   webcam: 'webcam.mp4',
   cursor: 'cursor.json',
   interactions: 'interactions.json',
-  project: 'project.json'
+  project: 'project.json',
+  /** Derived from an audio track; can be regenerated at any time. */
+  transcript: 'transcript.json'
 } as const

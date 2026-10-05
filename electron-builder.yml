@@ -1,0 +1,54 @@
+# Packaging of the desktop app (`npm run dist`). The app is built first by
+# electron-vite into out/; this only assembles and signs the bundle.
+appId: com.screenrx.app
+productName: ScreenRx
+copyright: Copyright © 2026 Jone
+
+directories:
+  output: release
+  buildResources: build
+
+# The bundles in out/ already contain everything they import, except the two
+# packages that carry executables.
+files:
+  - out/**
+  - package.json
+  - "!node_modules/react/**"
+  - "!node_modules/react-dom/**"
+  - "!node_modules/scheduler/**"
+
+# Executables cannot run from inside the archive.
+asarUnpack:
+  - node_modules/ffmpeg-static/**
+  - node_modules/@ffprobe-installer/**
+
+mac:
+  category: public.app-category.video
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch: arm64
+  minimumSystemVersion: "14.0"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # The native helpers (capture, transcription), where the main process looks for them.
+  extraResources:
+    - from: dist-native/darwin
+      to: native
+  binaries:
+    - Contents/Resources/native/screenrx-capture
+    - Contents/Resources/native/screenrx-transcribe
+  extendInfo:
+    NSMicrophoneUsageDescription: O ScreenRx grava o microfone junto com a tela quando você o ativa na barra de gravação.
+    NSCameraUsageDescription: O ScreenRx grava a câmera junto com a tela quando você a ativa na barra de gravação.
+    NSSpeechRecognitionUsageDescription: O ScreenRx transcreve a fala das gravações, neste Mac, para gerar legendas.
+    NSAudioCaptureUsageDescription: O ScreenRx grava o áudio do sistema junto com a tela quando você o ativa.
+
+dmg:
+  title: ScreenRx ${version}
+  artifactName: ScreenRx-${version}-${arch}.dmg
+
+# Nothing is published or uploaded by a build.
+publish: null

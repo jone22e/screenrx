@@ -1,6 +1,9 @@
 import { access } from 'node:fs/promises'
 import { Menu, app, dialog, ipcMain, shell } from 'electron'
 import type { IpcInvokeChannel, IpcInvokeContract } from '@shared/ipc/contract'
+import type { AiProvider } from '@shared/models/ai'
+import { isAiProviderId, parseAiChoice } from '@shared/models/ai'
+import { parseTranscriptionRequest } from '@shared/models/captions'
 import type { CaptureSourceCatalog } from '@shared/models/capture'
 import { isDeviceId } from '@shared/models/devices'
 import type { AppError, IpcResult } from '@shared/models/errors'
@@ -11,6 +14,12 @@ import type { PermissionKind, PermissionReport } from '@shared/models/permission
 import { isSessionId } from '@shared/models/session'
 import type { ProjectStore } from '../project/ProjectStore'
 import { isExportTrackName } from '@shared/models/export'
+import { AiError } from '../ai/AiCliService'
+import { AI_PROVIDER_SPECS } from '../ai/aiCatalog'
+import type { AiSetupService } from '../ai/AiSetupService'
+import type { CutSuggestionService } from '../ai/CutSuggestionService'
+import { TranscriptionError } from '../captions/TranscriptionService'
+import type { TranscriptionService } from '../captions/TranscriptionService'
 import type { CaptureEngine } from '../capture/CaptureEngine'
 import { CaptureError } from '../capture/CaptureEngine'
 import { ExportError } from '../export/ExportService'
@@ -32,6 +41,9 @@ export interface IpcDependencies {
   sessions: SessionStore
   projects: ProjectStore
   exports: ExportService
+  transcriptions: TranscriptionService
+  suggestions: CutSuggestionService
+  aiSetup: AiSetupService
   waveforms: WaveformService
   thumbnails: ThumbnailService
   windows: WindowManager
@@ -53,8 +65,21 @@ const SYSTEM_SETTINGS_URLS: Record<PermissionKind, string> = {
  * paths, only with ids that the main process resolves itself.
  */
 export function registerIpc(deps: IpcDependencies): void {
-  const { engine, controller, sessions, projects, exports, waveforms, thumbnails, windows, logger, ownPids } =
-    deps
+  const {
+    engine,
+    controller,
+    sessions,
+    projects,
+    exports,
+    transcriptions,
+    suggestions,
+    aiSetup,
+    waveforms,
+    thumbnails,
+    windows,
+    logger,
+    ownPids
+  } = deps
 
   function handle<Channel extends IpcInvokeChannel>(
     channel: Channel,
@@ -228,6 +253,89 @@ export function registerIpc(deps: IpcDependencies): void {
       return { ok: false, error: appError('storage-unavailable', String(error)) }
     }
   })
+
+  handle('captions:generate', async ([sessionId, value]) => {
+    const request = parseTranscriptionRequest(value)
+    if (!isSessionId(sessionId) || !request) {
+      return { ok: false, error: appError('transcription-failed', 'invalid transcription request') }
+    }
+    try {
+      return { ok: true, value: await transcriptions.generate(sessionId, request) }
+    } catch (error) {
+      const failure =
+        error instanceof TranscriptionError ? error.appError : appError('transcription-failed', String(error))
+      if (failure.code !== 'transcription-cancelled') {
+        logger.error('transcription failed', { sessionId, code: failure.code, detail: failure.detail })
+      }
+      return { ok: false, error: failure }
+    }
+  })
+
+  handle('captions:cancel', () => transcriptions.cancel())
+
+  handle('ai:providers', ([refresh]) => aiSetup.providers(refresh === true))
+
+  const aiSetupResult = async (
+    fallback: 'ai-install-failed' | 'ai-login-failed',
+    operation: () => Promise<AiProvider[]>
+  ): Promise<IpcResult<AiProvider[]>> => {
+    try {
+      return { ok: true, value: await operation() }
+    } catch (error) {
+      const failure = error instanceof AiError ? error.appError : appError(fallback, String(error))
+      logger.warn('AI tool setup failed', { code: failure.code, detail: failure.detail })
+      return { ok: false, error: failure }
+    }
+  }
+
+  handle('ai:install', async ([provider]) => {
+    if (!isAiProviderId(provider)) return { ok: false, error: appError('ai-install-failed', 'unknown tool') }
+    // Installing downloads and runs the vendor's installer: never without the user saying so.
+    const spec = AI_PROVIDER_SPECS[provider]
+    const owner = windows.mainWindow
+    const options = {
+      type: 'question' as const,
+      message: `Instalar o ${spec.toolName}?`,
+      detail: `O ScreenRx vai baixar e executar o instalador oficial (${spec.installer}). A ferramenta é instalada na sua pasta pessoal, em ~/.local/bin.`,
+      buttons: ['Instalar', 'Cancelar'],
+      defaultId: 0,
+      cancelId: 1
+    }
+    const answer = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
+    if (answer.response !== 0) return { ok: true, value: await aiSetup.providers() }
+    return aiSetupResult('ai-install-failed', () => aiSetup.install(provider))
+  })
+
+  handle('ai:login', ([provider]) =>
+    isAiProviderId(provider)
+      ? aiSetupResult('ai-login-failed', () => aiSetup.login(provider))
+      : { ok: false, error: appError('ai-login-failed', 'unknown tool') }
+  )
+
+  handle('ai:cancel-setup', () => aiSetup.cancel())
+
+  handle('ai:suggest-cuts', async ([sessionId, value]) => {
+    const choice = parseAiChoice(value)
+    if (!isSessionId(sessionId) || !choice) {
+      return { ok: false, error: appError('ai-failed', 'invalid suggestion request') }
+    }
+    try {
+      return { ok: true, value: await suggestions.suggest(sessionId, choice) }
+    } catch (error) {
+      const failure = error instanceof AiError ? error.appError : appError('ai-failed', String(error))
+      if (failure.code !== 'ai-cancelled') {
+        logger.error('cut suggestions failed', {
+          sessionId,
+          provider: choice.provider,
+          code: failure.code,
+          detail: failure.detail
+        })
+      }
+      return { ok: false, error: failure }
+    }
+  })
+
+  handle('ai:cancel', () => suggestions.cancel())
 
   const exportResult = async <T>(operation: () => Promise<T>): Promise<IpcResult<T>> => {
     try {

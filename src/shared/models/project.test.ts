@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   BACKGROUND_LIMITS,
+  CAPTION_LIMITS,
   DEFAULT_BACKGROUND,
+  DEFAULT_CAPTION_STYLE,
   DEFAULT_WEBCAM,
   WEBCAM_LIMITS,
   createProject,
@@ -51,7 +53,16 @@ describe('parseProject', () => {
 
   it('repairs export settings rather than rejecting the project', () => {
     const parsed = parseProject({ ...createProject(sessionId), export: { speed: -3 } }, sessionId)
-    expect(parsed?.export).toEqual({ format: 'mp4', quality: 'high', speed: 1 })
+    expect(parsed?.export).toEqual({ format: 'mp4', quality: 'high', fps: 30, speed: 1 })
+  })
+
+  it('keeps a supported export frame rate and repairs any other', () => {
+    const withFps = (fps: unknown) => parseProject({ ...createProject(sessionId), export: { fps } }, sessionId)?.export.fps
+    expect(withFps(24)).toBe(24)
+    expect(withFps(60)).toBe(60)
+    expect(withFps(25)).toBe(30)
+    expect(withFps('60')).toBe(30)
+    expect(withFps(undefined)).toBe(30)
   })
 })
 
@@ -99,6 +110,64 @@ describe('parseProject framing', () => {
       sizeRatio: WEBCAM_LIMITS.maxSizeRatio,
       position: { x: 1, y: DEFAULT_WEBCAM.position.y }
     })
+  })
+})
+
+describe('parseProject captions', () => {
+  const cue = { id: 'cue-1', startMs: 0, endMs: 1200, text: 'Olá, pessoal.' }
+
+  it('gives projects saved before captions existed none, with the default style', () => {
+    const { captions, ...legacy } = createProject(sessionId)
+    expect(captions).toEqual({ visible: true, length: 'medium', style: DEFAULT_CAPTION_STYLE, cues: [] })
+    expect(parseProject(legacy, sessionId)?.captions).toEqual(captions)
+  })
+
+  it('round-trips captions with their style', () => {
+    const captions = {
+      visible: false,
+      length: 'short',
+      style: {
+        font: 'impact',
+        sizeRatio: 0.06,
+        bold: false,
+        uppercase: true,
+        color: '#ffe14d',
+        backdrop: 'outline',
+        backdropColor: '#101010',
+        position: { x: 0.3, y: 0.12 }
+      },
+      cues: [cue, { id: 'cue-2', startMs: 1200, endMs: 2500, text: 'Hoje vamos exportar.' }]
+    }
+    expect(parseProject({ ...createProject(sessionId), captions }, sessionId)?.captions).toEqual(captions)
+  })
+
+  it('repairs a nonsense style instead of rejecting the project', () => {
+    const style = { font: 'comic', sizeRatio: 3, bold: 'yes', color: 'red', backdrop: 'glow', backdropColor: '#12', position: { x: -4 } }
+    expect(parseProject({ ...createProject(sessionId), captions: { length: 'huge', style } }, sessionId)?.captions).toEqual({
+      visible: true,
+      length: 'medium',
+      style: {
+        ...DEFAULT_CAPTION_STYLE,
+        sizeRatio: CAPTION_LIMITS.maxSizeRatio,
+        position: { x: 0, y: DEFAULT_CAPTION_STYLE.position.y }
+      },
+      cues: []
+    })
+  })
+
+  it('drops malformed and overlapping captions, keeping the rest', () => {
+    const cues = [
+      cue,
+      { id: 'overlaps', startMs: 800, endMs: 1500, text: 'sobreposta' },
+      { id: 'inverted', startMs: 3000, endMs: 2000, text: 'invertida' },
+      { id: 'no-text', startMs: 3000, endMs: 3500 },
+      'not a cue',
+      { id: 'cue-2', startMs: 4000, endMs: 5000, text: 'x'.repeat(1000), extra: true }
+    ]
+    const parsed = parseProject({ ...createProject(sessionId), captions: { cues } }, sessionId)?.captions.cues
+    expect(parsed?.map((entry) => entry.id)).toEqual(['cue-1', 'cue-2'])
+    expect(parsed?.[1]?.text).toHaveLength(CAPTION_LIMITS.maxTextLength)
+    expect(parsed?.[1]).not.toHaveProperty('extra')
   })
 })
 

@@ -5,7 +5,8 @@ import type { RecordingSummary } from '@shared/models/session'
 import { PermissionNotice } from './PermissionNotice'
 import { RecordingCard } from './RecordingCard'
 import { usePermissions } from './hooks'
-import { FilmIcon, SearchIcon } from './icons'
+import { openSettings } from '../common/settingsScreen'
+import { FilmIcon, GearIcon, SearchIcon } from './icons'
 
 interface Props {
   state: RecordingStateSnapshot
@@ -76,6 +77,9 @@ export function Home({ state, recordings, onEdit }: Props) {
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
+        <button className="bar-icon" aria-label="Configurações" title="Configurações" onClick={openSettings}>
+          <GearIcon />
+        </button>
         <button className="new-recording" onClick={() => void window.screenrx.recorder.open()}>
           <span className="new-recording-dot" aria-hidden="true" />
           Nova gravação

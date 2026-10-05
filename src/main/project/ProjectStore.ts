@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { generateAutoZooms } from '@engine/zoom/autoZoom'
 import { SESSION_FILES } from '@shared/config/recording'
+import { parseTranscript } from '@shared/models/captions'
 import type { EditorSession } from '@shared/models/editor'
 import { trackUrl } from '@shared/models/media'
 import type { Project } from '@shared/models/project'
@@ -87,6 +88,8 @@ export class ProjectStore {
         .filter((kind) => manifest.assets[kind])
         .map((kind) => ({ kind, url: trackUrl(sessionId, kind) })),
       interactions,
+      // A transcript that does not parse is simply absent: it can be generated again.
+      transcript: parseTranscript(await this.readJson(sessionId, SESSION_FILES.transcript)),
       project
     }
   }

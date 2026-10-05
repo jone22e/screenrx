@@ -46,10 +46,14 @@ native/macos/CaptureHelper/        Pacote Swift
   Sources/screenrx-capture/        executável: ScreenRecorder, CompanionTracks,
                                    MediaTrackWriter, Devices, PointerTelemetry,
                                    SessionClock, SourceCatalog, CommandServer…
+  Sources/screenrx-transcribe/     executável separado: fala → palavras com tempo
+                                   (SpeechAnalyzer, no próprio Mac)
   Tests/CaptureCoreTests/
 src/
   shared/                          TypeScript puro, usado por main, preload e renderer
-    models/                        capture, session, recording, permissions, errors, project
+    models/                        capture, session, recording, permissions, errors, project,
+                                   captions (transcrição), suggestions (propostas da IA),
+                                   ai (ferramentas, modelos, esforço, escolha do usuário)
     ipc/contract.ts                contrato tipado de todos os canais IPC
     time/RecordingClock.ts         relógio lógico (espelho do relógio nativo)
     config/recording.ts            constantes da gravação
@@ -62,10 +66,18 @@ src/
     timeline/                      spanEditing (mover/redimensionar regiões), trimConfig
     export/                        exportPlan (tamanho, quadros), audioFilters
                                    (atempo, grafo de áudio), exportConfig
+    captions/                      captionCues (palavras → legendas, legenda do instante),
+                                   captionLayout (quebra de linha e posição), captionConfig
+    suggestions/cutSuggestions.ts  pedido à IA (palavras numeradas) e validação da resposta
   main/
     capture/                       CaptureEngine (interface) + macos/ (cliente do helper)
     recording/                     RecordingController, SessionStore, diagnostics
     project/ProjectStore.ts        project.json: abertura, auto zoom inicial, salvamento
+    captions/TranscriptionService  executa o transcritor, grava transcript.json
+    ai/                            AiCliService (único lugar que pergunta algo a uma IA: CLI
+                                   do Claude, do Codex ou do Antigravity), AiSetupService
+                                   (situação, instalação e login das ferramentas), aiCatalog
+                                   (modelos e esforços), CutSuggestionService
     export/                        FfmpegService (único lugar que executa FFmpeg),
                                    ExportService, leitura do avcC do MP4
     media/                         protocolo screenrx-media:// (streaming por faixas),
@@ -80,13 +92,14 @@ src/
     src/app/                       janela principal: biblioteca de gravações
     src/camera/                    janela flutuante com a imagem da câmera
     src/editor/                    editor: EditorStore, PreviewPlayer, Timeline, Sidebar…
-    src/rendering/composeFrame.ts  desenha um quadro final (fundo, zoom, câmera)
+    src/rendering/composeFrame.ts  desenha um quadro final (fundo, zoom, câmera, legenda)
     src/export/                    renderExport (laço de quadros), TrackFrameReader
                                    (decodificação sequencial com WebCodecs)
+    src/settings/                  tela de Configurações (ferramentas de IA)
     src/hud/                       HUD
     src/common/                    store de estado e estilos base
 scripts/
-  build-native.mjs                 compila o helper e copia para dist-native/
+  build-native.mjs                 compila os helpers e copia para dist-native/
   e2e-recording.mjs                validação de ponta a ponta com o app real
 ```
 
@@ -122,6 +135,9 @@ trilhas são **imutáveis**: o helper se recusa a escrever sobre um arquivo exis
   intervalo em **tempo de origem**, então uma edição nunca invalida as outras.
 - `ExportSettings.speed` é a velocidade global de exportação. É um conceito
   separado de `SpeedEffect` desde o modelo.
+- `CaptionSettings`: se as legendas aparecem, o tamanho do texto por legenda, o
+  estilo (fonte, tamanho, cores, fundo do texto, posição) e as legendas em si
+  (`CaptionCue`: intervalo em tempo de origem + texto). Ver "Legendas" na seção 6.
 - Três espaços de tempo com tipos distintos: `SourceMs`, `TimelineMs`, `OutputMs`.
   As conversões (`sourceTimeToTimelineTime` etc.) serão o único lugar com
   aritmética de tempo.
@@ -269,6 +285,87 @@ passo — e salva sozinho 400 ms após a última alteração (escrita atômica),
 também ao sair do editor. Seleção e demais estados de interface não são
 persistidos.
 
+### Legendas
+
+```
+trilha de áudio → screenrx-transcribe (SpeechAnalyzer, local) → transcript.json
+                                                                     ↓ buildCues
+                          project.json: captions.cues (editáveis) + estilo
+                                                                     ↓ cueAt(tempo de origem)
+                                  composeFrame → preview e exportação
+```
+
+- **Transcrição.** `screenrx-transcribe` é um executável à parte do helper de
+  captura (uma transcrição nunca pode interferir em uma gravação). Recebe a
+  trilha e o idioma, reconhece a fala no próprio Mac — o áudio não é enviado a
+  lugar nenhum — e escreve em stdout, como linhas JSON, o estado e as palavras
+  com início e fim em milissegundos. Cancelar é encerrar o processo. Requer
+  macOS 26 (`SpeechAnalyzer`); em sistemas anteriores responde `unsupported-os`.
+  Não pede permissão de reconhecimento de fala. O modelo do idioma é baixado
+  pelo sistema no primeiro uso.
+- **`TranscriptionService`** (main) executa o transcritor, uma transcrição por
+  vez, limpa as palavras (`normalizeWords`) e grava `transcript.json` na sessão.
+  É dado derivado: pode ser apagado e gerado de novo; a trilha só é lida.
+- **Palavras → legendas** (`buildCues`): uma legenda termina quando enche (18, 42
+  ou 84 caracteres), no fim de uma frase ou em uma pausa, e não fica na tela
+  muito depois da última palavra. Trocar o tamanho refaz as legendas a partir da
+  mesma transcrição.
+- **As legendas pertencem ao projeto.** Depois de geradas são do usuário: texto
+  corrigido no painel, tempo ajustado na linha do tempo, tudo com desfazer. Ficam
+  em tempo de origem, então um corte simplesmente não mostra a legenda daquele
+  trecho, e a velocidade de exportação não exige nenhum ajuste.
+- **Desenho** (`layoutCaption` + `composeFrame`): tamanho da fonte e posição são
+  proporções da saída, linhas equilibradas, bloco sempre dentro do quadro. A
+  legenda é desenhada por cima do quadro pronto (não sofre zoom). Preview e
+  exportação usam a mesma função. Só fontes do sistema, nada é embutido.
+- **No preview** a legenda pode ser arrastada, como a câmera.
+
+### Sugestões de corte por IA
+
+```
+transcript.json → buildCutPrompt (palavras numeradas + pausas)
+        ↓ AiCliService: CLI do Claude, do Codex ou do Antigravity, uma pergunta, resposta em JSON
+parseCutResponse → propostas (trecho, tipo, motivo, texto) → painel e linha do tempo
+        ↓ o usuário aceita
+corte comum (TrimEffect) no project.json, com desfazer
+```
+
+- **A IA só propõe.** A resposta vira uma lista de sugestões, que é estado de
+  interface e nunca entra no projeto. Aceitar uma sugestão cria um corte comum;
+  desfazer o corte traz a sugestão de volta; rejeitar a remove.
+- **O que ela procura:** frases recomeçadas e o aviso do recomeço (`retake`),
+  vícios de fala (`filler`) e trechos fora do assunto (`off-topic`). Pausas sem
+  fala não são sugeridas: em uma gravação de tela o silêncio costuma ser alguém
+  fazendo algo na tela, e isso a transcrição não mostra.
+- **Índices de palavras, não tempos.** A IA responde com o intervalo de palavras
+  a remover; o tempo vem da transcrição. O corte vai do início da primeira
+  palavra ao início da palavra seguinte à última, então nenhuma palavra é
+  cortada ao meio. A resposta não é confiável: intervalos inválidos ou
+  sobrepostos são descartados.
+- **`AiCliService`** usa as ferramentas que o usuário já tem instaladas e com
+  login (`claude --print`, `codex exec`, `agy --print`); o app não guarda chave
+  de API. As ferramentas rodam sem nada com que agir: sem ferramentas
+  (`--tools ""`), em sandbox somente leitura ou em modo plano, sem persistir
+  sessão, em um diretório temporário vazio, com limite de tempo. Variáveis de uma
+  sessão do Claude Code em que o app tenha sido iniciado não são repassadas.
+- **Ferramenta, modelo e esforço** são escolha do usuário (`AiChoice`), feita na
+  tela de Configurações e guardada pela janela (`localStorage`), não no projeto.
+  O id do modelo vai para uma linha de comando, então só identificadores simples
+  são aceitos (`isAiModelId`); o esforço é mapeado para o nível mais próximo que
+  cada ferramenta aceita (`toolEffort`).
+- **`AiSetupService`** diz como cada ferramenta está neste Mac: instalada,
+  versão, com login (e em qual conta), modelos e níveis de esforço. Os modelos do
+  Claude são os apelidos do próprio CLI (seguem sempre a versão mais nova); os do
+  Codex vêm do catálogo que ele guarda em `~/.codex/models_cache.json`; os do
+  Antigravity, de `agy models`. Também instala (o instalador oficial de cada
+  fornecedor, só depois de uma confirmação nativa) e inicia o login do Claude e
+  do Codex (o próprio CLI abre o navegador; o fim é percebido consultando o
+  status). O Antigravity não tem comando de login: entra na primeira execução no
+  Terminal.
+- **Privacidade:** só o texto da transcrição é enviado ao provedor da ferramenta
+  escolhida, e só quando o usuário pede. Áudio, vídeo, caminhos e ids ficam no Mac.
+- Transcrições muito longas são analisadas até 12 000 palavras, e o painel avisa.
+
 ### Janelas
 
 O app tem dois modos, e só um está na tela por vez. Abre na **biblioteca**; "Nova
@@ -335,6 +432,11 @@ FFmpeg: codifica H.264 uma única vez, processa o áudio, gera o MP4
 
 - O renderer desenha cada quadro de saída diretamente no seu instante final. Uma
   exportação em 2× tem metade dos quadros; não existe render em 1× recodificado.
+- A taxa de quadros é escolha do usuário (`ExportSettings.fps`: 24, 30 ou 60;
+  padrão 30) e só muda quantos instantes são desenhados: o mesmo tempo de saída
+  mostra o mesmo instante da gravação em qualquer taxa. A taxa de bits acompanha
+  a de quadros, dentro dos limites. A tela é gravada a 60 fps, então 60 na saída
+  não inventa quadros.
 - O main descreve cada trilha de vídeo (tabela de quadros via FFprobe e a
   configuração do decodificador lida do MP4) e serve os bytes sob demanda. O
   `TrackFrameReader` mantém poucos quadros em memória e, depois de um corte longo,
@@ -347,7 +449,9 @@ FFmpeg: codifica H.264 uma única vez, processa o áudio, gera o MP4
   tempo ajustado por `buildAtempoFilter` — que preserva o tom e encadeia filtros
   quando a velocidade passa do limite de um só (4× → `atempo=2,atempo=2`) — e as
   trilhas são mixadas. Tudo no mesmo FFmpeg da codificação.
-- O FFmpeg e o FFprobe vêm embutidos (`ffmpeg-static`, `ffprobe-static`); o
+- **Legendas** são desenhadas em cada quadro pelo `composeFrame`, como no
+  preview; não há trilha de legenda no arquivo nem filtro de texto no FFmpeg.
+- O FFmpeg e o FFprobe vêm embutidos (`ffmpeg-static`, `@ffprobe-installer/ffprobe`, ambos nativos de Apple Silicon); o
   `FfmpegService` é o único código que os executa.
 
 ## 8. HUD fora da captura
@@ -393,6 +497,10 @@ só o conteúdo daquela janela, mesmo coberta por outras.
 | Arquivo vazio ou sem quadros | `recording-invalid`; a sessão vazia é removida. |
 | App fechado durante a gravação | `before-quit` finaliza o arquivo antes de sair. |
 | Sessão `recording` encontrada ao iniciar | Marcada `failed` (o app caiu no meio). |
+| Transcrição indisponível (macOS anterior ao 26, idioma sem suporte, transcritor ausente) | `transcription-unavailable`, explicado no painel de legendas; o resto do editor funciona. |
+| Instalação ou login de uma ferramenta de IA não conclui | `ai-install-failed` / `ai-login-failed`, com a última linha que a ferramenta escreveu no log; o cartão da ferramenta mostra o aviso e a situação é lida de novo. |
+| CLI de IA ausente, sem login, sem resposta em 5 min ou com resposta inválida | `ai-unavailable` / `ai-failed`, explicado no painel; nenhuma sugestão é criada e nada é cortado. |
+| Transcrição falha, é cancelada ou não encontra fala | Nada é gravado em caso de falha ou cancelamento; sem fala, o painel avisa e o projeto fica sem legendas. Sair do editor cancela a transcrição em andamento. |
 | Chamadas do ScreenCaptureKit que não retornam | Limite de tempo em `stopCapture`; o início usa o primeiro quadro como sinal de sucesso, com timeout. |
 
 ## 11. Riscos técnicos
@@ -457,13 +565,38 @@ só o conteúdo daquela janela, mesmo coberta por outras.
 | 7 | Exportação MP4 (FfmpegService) | **concluída** |
 | 8 | Velocidade global de exportação com pitch preservado | **concluída** |
 | 9 | Refinamento visual, otimização, Windows | pendente |
+| — | Instalador para macOS (`npm run dist`): `.dmg` para Apple Silicon, assinatura local | **concluído**; assinatura Developer ID disponível (`dist:signed`), notarização não configurada |
+| — | Legendas automáticas (pedido posterior à especificação): transcrição local, estilo, posição, edição do texto, exportação | **concluída** (só macOS 26+) |
+| — | Sugestões de corte por IA (CLI do Claude, do Codex ou do Antigravity) a partir da transcrição | **concluída** (depende da transcrição: macOS 26+) |
+| — | Configurações: instalar e entrar nas ferramentas de IA, escolher modelo e esforço | **concluída** (instalar e entrar sem verificação real) |
 
 Ao fim de cada fase: compilar, typecheck, testes, validar o fluxo e atualizar este
 documento antes de avançar.
 
+### Empacotamento
+
+`electron-builder.yml` monta o app a partir de `out/`: os helpers nativos vão para
+`Contents/Resources/native` (onde o main os procura quando empacotado) e os
+pacotes que carregam executáveis (`ffmpeg-static`, `@ffprobe-installer`) ficam
+fora do `asar`. Todos os executáveis embutidos são nativos de Apple Silicon — o
+`ffprobe-static` usado antes entregava um binário Intel na pasta "arm64", que só
+rodava com o Rosetta instalado, e por isso foi trocado. O `Info.plist` declara os
+textos de uso de microfone, câmera, áudio do sistema e reconhecimento de fala; os
+entitlements (JIT do Electron, microfone, câmera) valem para a assinatura com
+hardened runtime. Só Apple Silicon por enquanto (os helpers e o FFmpeg são
+compilados/baixados para a arquitetura da máquina que gera o pacote).
+
+`npm run dist:check` abre o app empacotado com um perfil descartável e confere
+assinatura, arquitetura dos executáveis, FFmpeg/FFprobe fora do arquivo, helper de
+captura, transcritor, ferramentas de IA e a extração de uma capa. **Não
+verificado:** abrir o app pelo Finder depois de instalado (é aí que o macOS pede
+a permissão de Gravação de Tela em nome do "ScreenRx"; no teste o app é iniciado
+pelo terminal e herda a permissão dele), a build assinada com Developer ID e a
+instalação em outro Mac.
+
 ### O que foi validado
 
-`npm run test:e2e` conduz o app real e verifica 51 pontos, entre eles:
+`npm run test:e2e` conduz o app real e verifica 73 pontos, entre eles:
 
 - o app sobe com as duas janelas, renderer isolado e só a ponte explícita;
 - gravar → pausar → retomar → finalizar gera `screen.mp4` (H.264, yuv420p) e
@@ -481,7 +614,33 @@ documento antes de avançar.
 - a exportação gera MP4 H.264 `yuv420p` com o áudio mixado e a duração da edição;
   o quadro exportado bate com o preview do mesmo instante; com um corte e 2×, a
   duração é (gravação − corte) ÷ 2, com o áudio acompanhando; cancelar não deixa
-  arquivo.
+  arquivo; o arquivo sai a 30 fps por padrão e a 60 fps quando escolhido (taxa e
+  número de quadros conferidos no arquivo).
+
+- legendas: em uma cópia da gravação com uma trilha de fala sintetizada (`say`), a
+  fala é transcrita com as palavras certas e em ordem, as legendas vão para o
+  `project.json`, aparecem no preview, mudam com o tamanho, o estilo e a posição,
+  podem ser arrastadas e corrigidas, e saem no vídeo exportado como no preview.
+
+- sugestões da IA: com uma CLI substituta (o teste não gasta cota de ninguém), a
+  resposta vira proposta no painel e na linha do tempo sem cortar nada; a
+  ferramenta recebe só as palavras numeradas; aceitar cria um corte nos limites
+  das palavras; desfazer devolve a sugestão; rejeitar a remove;
+- configurações: a tela abre pela biblioteca e pelo editor, mostra cada
+  ferramenta como está (pronta, sem login, não instalada), e o modelo e o esforço
+  escolhidos são os que a ferramenta recebe.
+
+As CLIs reais foram verificadas à parte (`SCREENRX_AI_LIVE=1 npx vitest run
+src/main/ai`): Claude, Codex e Antigravity acharam o começo abandonado de uma fala
+de exemplo e preservaram a retomada, e a situação das três (versão, login,
+modelos) foi lida corretamente. A qualidade das sugestões em uma narração real
+não foi medida. **Instalar e entrar nunca foram executados de verdade** (as três
+ferramentas já estavam instaladas e com login na máquina de desenvolvimento, e
+sair de uma conta para testar não é aceitável): esses dois caminhos só têm testes
+com ferramentas substitutas.
+
+A transcrição foi verificada com voz sintetizada em português; a qualidade com
+fala real (sotaque, ruído, termos técnicos) não foi medida.
 
 O tom da voz preservado em 2× não é verificado automaticamente (o teste confere a
 duração do áudio, não o tom); a escolha do filtro `atempo` é coberta por testes

@@ -14,16 +14,20 @@
     "build": "npm run build:native && electron-vite build",
     "start": "electron-vite preview",
     "build:native": "node scripts/build-native.mjs",
+    "icon": "python3 scripts/make-icon.py build/icon.png",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "lint": "eslint .",
     "test": "vitest run",
     "test:native": "swift test --package-path native/macos/CaptureHelper",
     "test:e2e": "node scripts/e2e-recording.mjs",
-    "check": "npm run typecheck && npm run lint && npm run test && npm run test:native"
+    "check": "npm run typecheck && npm run lint && npm run test && npm run test:native",
+    "dist": "npm run build && electron-builder --mac --arm64 -c.mac.identity=- -c.mac.hardenedRuntime=false",
+    "dist:signed": "npm run build && electron-builder --mac --arm64",
+    "dist:check": "node scripts/smoke-packaged.mjs"
   },
   "dependencies": {
+    "@ffprobe-installer/ffprobe": "^2.1.2",
     "ffmpeg-static": "^5.3.0",
-    "ffprobe-static": "^3.1.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },
@@ -34,6 +38,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "eslint": "^10.12.0",
     "eslint-plugin-react-hooks": "^7.1.1",

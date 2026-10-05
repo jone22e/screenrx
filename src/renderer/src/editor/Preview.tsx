@@ -17,19 +17,22 @@ interface Props {
 /** What a press on the picture is doing. */
 type Press =
   | { kind: 'webcam'; grabX: number; grabY: number }
+  | { kind: 'caption'; grabX: number; grabY: number }
   | { kind: 'picture' }
 
 const settingsOf = (state: EditorState): PreviewSettings => ({
   timeMap: state.timeMap,
   zooms: state.zooms,
   background: state.background,
-  webcam: state.webcam
+  webcam: state.webcam,
+  captions: state.captions
 })
 
 /**
- * The canvas showing the finished look — backdrop, zooms, webcam — in real
- * time. The webcam can be dragged to where it should sit; with a zoom
- * selected, clicking the picture moves the zoom's focus there.
+ * The canvas showing the finished look — backdrop, zooms, webcam, captions —
+ * in real time. The webcam and the caption can be dragged to where they
+ * should sit; with a zoom selected, clicking the picture moves the zoom's
+ * focus there.
  */
 export function Preview({ session, store, onPlayerReady }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -55,7 +58,7 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     }
   }, [session, store, onPlayerReady])
 
-  /** The pointer position in output pixels, and the webcam picture if it is under it. */
+  /** The pointer position in output pixels, and what of the webcam and the caption is under it. */
   const locate = (event: PointerEvent<HTMLCanvasElement>) => {
     const instance = player.current
     if (!instance) return null
@@ -65,18 +68,28 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     const y = ((event.clientY - bounds.top) / bounds.height) * output.height
     const { webcam } = store.getState()
     const picture = session.webcam && webcam.visible ? layoutWebcam(output, webcam) : null
-    return { instance, output, x, y, picture: picture && containsPoint(picture, x, y) ? picture : null }
+    const caption = instance.captionBox
+    return {
+      instance,
+      output,
+      x,
+      y,
+      picture: picture && containsPoint(picture, x, y) ? picture : null,
+      caption: caption && containsPoint(caption, x, y) ? caption : null
+    }
   }
 
   const onPointerDown = (event: PointerEvent<HTMLCanvasElement>): void => {
     const at = locate(event)
     if (!at) return
     event.currentTarget.setPointerCapture(event.pointerId)
-    press.current = at.picture
+    // The caption is drawn over everything else, so it is what a press on it grabs.
+    const grabbed = at.caption ?? at.picture
+    press.current = grabbed
       ? {
-          kind: 'webcam',
-          grabX: at.x - (at.picture.x + at.picture.width / 2),
-          grabY: at.y - (at.picture.y + at.picture.height / 2)
+          kind: at.caption ? 'caption' : 'webcam',
+          grabX: at.x - (grabbed.x + grabbed.width / 2),
+          grabY: at.y - (grabbed.y + grabbed.height / 2)
         }
       : { kind: 'picture' }
   }
@@ -99,7 +112,19 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       )
       return
     }
-    event.currentTarget.style.cursor = at.picture
+    if (current?.kind === 'caption') {
+      store.setCaptionStyle(
+        {
+          position: {
+            x: (at.x - current.grabX) / at.output.width,
+            y: (at.y - current.grabY) / at.output.height
+          }
+        },
+        'caption-move'
+      )
+      return
+    }
+    event.currentTarget.style.cursor = at.caption || at.picture
       ? 'grab'
       : store.getState().selectedZoomId !== null
         ? 'crosshair'
@@ -109,7 +134,7 @@ export function Preview({ session, store, onPlayerReady }: Props) {
   const onPointerUp = (event: PointerEvent<HTMLCanvasElement>): void => {
     const current = press.current
     press.current = null
-    if (current?.kind === 'webcam') {
+    if (current?.kind === 'webcam' || current?.kind === 'caption') {
       store.endGesture()
       return
     }

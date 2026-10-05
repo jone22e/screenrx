@@ -3,6 +3,8 @@ import { EXPORT_CONFIG } from '@engine/export/exportConfig'
 import { createExportPlan } from '@engine/export/exportPlan'
 import { formatBytes, formatClock } from '@shared/format'
 import type { ExportResult } from '@shared/models/export'
+import type { ExportFps } from '@shared/models/project'
+import { EXPORT_FRAME_RATES } from '@shared/models/project'
 import { ExportAbortedError, ExportFailedError, renderExport } from '../export/renderExport'
 import type { EditorStore } from './EditorStore'
 
@@ -16,6 +18,12 @@ type Phase =
   | { kind: 'rendering'; exportId: string | null; framesDone: number; frameCount: number }
   | { kind: 'done'; result: ExportResult }
   | { kind: 'failed'; message: string }
+
+const FPS_HINTS: Record<ExportFps, string> = {
+  24: 'Aparência de cinema. O arquivo é o menor e o mais rápido de exportar.',
+  30: 'O padrão para vídeos na web.',
+  60: 'Movimento mais fluido, como a tela foi gravada. O arquivo fica maior e a exportação leva mais tempo.'
+}
 
 const speedLabel = (speed: number): string => `${String(speed).replace('.', ',')}×`
 
@@ -98,6 +106,24 @@ export function ExportDialog({ store, onClose }: Props) {
               <p className="panel-hint">
                 Acelera ou desacelera o vídeo inteiro. A voz mantém o tom natural.
               </p>
+            </div>
+
+            <div className="dialog-field">
+              <span className="dialog-label">Quadros por segundo</span>
+              <div className="chips" role="radiogroup" aria-label="Quadros por segundo">
+                {EXPORT_FRAME_RATES.map((fps) => (
+                  <button
+                    key={fps}
+                    className="chip"
+                    role="radio"
+                    aria-checked={fps === exportSettings.fps}
+                    onClick={() => store.setExportSettings({ fps })}
+                  >
+                    {fps} fps
+                  </button>
+                ))}
+              </div>
+              <p className="panel-hint">{FPS_HINTS[exportSettings.fps]}</p>
             </div>
 
             <div className="dialog-field">

@@ -4,8 +4,8 @@ import { buildTimeMap } from '@engine/time/timeMapping'
 import { encodeArguments, suggestedFileName } from './ExportService'
 
 const map = buildTimeMap(60_000, [])
-const plan = (speed: number) =>
-  createExportPlan({ width: 3600, height: 2338 }, map, { format: 'mp4', quality: 'standard', speed })
+const plan = (speed: number, fps: 24 | 30 | 60 = 30) =>
+  createExportPlan({ width: 3600, height: 2338 }, map, { format: 'mp4', quality: 'standard', fps, speed })
 
 const valueAfter = (args: string[], flag: string): string | undefined => args[args.indexOf(flag) + 1]
 
@@ -16,6 +16,7 @@ describe('encodeArguments', () => {
     expect(valueAfter(args, '-c:v')).toBe('h264_videotoolbox')
     expect(valueAfter(args, '-vf')).toContain('format=yuv420p')
     expect(valueAfter(args, '-t')).toBe('60.000')
+    expect(valueAfter(encodeArguments(plan(1, 60), 'h264_videotoolbox', [], map, '/tmp/o'), '-framerate')).toBe('60')
     expect(args.slice(-3)).toEqual(['-f', 'mp4', '/tmp/out.mp4.part'])
     // No audio tracks, so no audio processing at all.
     expect(args).not.toContain('-filter_complex')

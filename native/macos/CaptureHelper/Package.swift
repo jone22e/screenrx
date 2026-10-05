@@ -5,7 +5,8 @@ let package = Package(
     name: "CaptureHelper",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "screenrx-capture", targets: ["screenrx-capture"])
+        .executable(name: "screenrx-capture", targets: ["screenrx-capture"]),
+        .executable(name: "screenrx-transcribe", targets: ["screenrx-transcribe"]),
     ],
     targets: [
         // Pure logic (clock, geometry, telemetry, wire protocol) with no
@@ -14,6 +15,9 @@ let package = Package(
         .executableTarget(
             name: "screenrx-capture",
             dependencies: ["CaptureCore"]),
+        // Speech-to-text for captions. A separate executable: it must never
+        // share a process (or an executable identity) with a running capture.
+        .executableTarget(name: "screenrx-transcribe"),
         .testTarget(name: "CaptureCoreTests", dependencies: ["CaptureCore"]),
     ]
 )

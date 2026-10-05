@@ -1,13 +1,14 @@
-// Builds the native capture helper for the current platform and copies the
-// binary to dist-native/<platform>/, where the main process looks for it in
-// development (packaged builds ship it under Resources/native).
+// Builds the native helpers (capture, transcription) for the current platform
+// and copies the binaries to dist-native/<platform>/, where the main process
+// looks for them in development (packaged builds ship them under
+// Resources/native).
 import { spawnSync } from 'node:child_process'
 import { copyFileSync, mkdirSync, renameSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const HELPER_NAME = 'screenrx-capture'
+const HELPER_NAMES = ['screenrx-capture', 'screenrx-transcribe']
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, stdio: 'inherit' })
@@ -23,21 +24,23 @@ function buildMacos() {
   const archArgs = universal ? ['--arch', 'arm64', '--arch', 'x86_64'] : []
   run('swift', ['build', '-c', 'release', ...archArgs], packageDir)
 
-  const builtBinary = universal
-    ? join(packageDir, '.build', 'apple', 'Products', 'Release', HELPER_NAME)
-    : join(packageDir, '.build', 'release', HELPER_NAME)
+  const buildDir = universal
+    ? join(packageDir, '.build', 'apple', 'Products', 'Release')
+    : join(packageDir, '.build', 'release')
   const outputDir = join(projectRoot, 'dist-native', 'darwin')
   mkdirSync(outputDir, { recursive: true })
-  // Replace by rename: a helper that is currently running keeps its own copy
-  // instead of having its executable rewritten underneath it.
-  const staged = join(outputDir, `${HELPER_NAME}.new`)
-  copyFileSync(builtBinary, staged)
-  renameSync(staged, join(outputDir, HELPER_NAME))
-  console.log(`[build-native] ${HELPER_NAME} -> ${join(outputDir, HELPER_NAME)}`)
+  for (const name of HELPER_NAMES) {
+    // Replace by rename: a helper that is currently running keeps its own copy
+    // instead of having its executable rewritten underneath it.
+    const staged = join(outputDir, `${name}.new`)
+    copyFileSync(join(buildDir, name), staged)
+    renameSync(staged, join(outputDir, name))
+    console.log(`[build-native] ${name} -> ${join(outputDir, name)}`)
+  }
 }
 
 if (process.platform === 'darwin') {
   buildMacos()
 } else {
-  console.log(`[build-native] no native capture helper for ${process.platform} yet; skipping`)
+  console.log(`[build-native] no native helpers for ${process.platform} yet; skipping`)
 }

@@ -1,8 +1,14 @@
+import os from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { app, dialog, session } from 'electron'
 import { appError } from '@shared/models/errors'
+import { AiCliService } from './ai/AiCliService'
+import { AiSetupService } from './ai/AiSetupService'
+import { defaultAiSearchDirs } from './ai/cliProcess'
+import { CutSuggestionService } from './ai/CutSuggestionService'
 import { createCaptureEngine } from './capture/createCaptureEngine'
+import { TranscriptionService } from './captions/TranscriptionService'
 import { ExportService } from './export/ExportService'
 import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
 import { registerIpc } from './ipc/registerIpc'
@@ -16,6 +22,7 @@ import { SessionStore } from './recording/SessionStore'
 import { WindowManager } from './windows/WindowManager'
 
 const HELPER_BINARY = 'screenrx-capture'
+const TRANSCRIBER_BINARY = 'screenrx-transcribe'
 
 const logger = createLogger('app')
 
@@ -36,6 +43,24 @@ function helperPath(): string {
   return override
     ? path.resolve(override)
     : path.join(app.getAppPath(), 'dist-native', process.platform, HELPER_BINARY)
+}
+
+/** The speech-to-text helper; only macOS has one for now. */
+function transcriberPath(): string | null {
+  if (process.platform !== 'darwin') return null
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'native', TRANSCRIBER_BINARY)
+    : path.join(app.getAppPath(), 'dist-native', process.platform, TRANSCRIBER_BINARY)
+}
+
+/**
+ * Where the AI command-line tools are looked for. Development builds may
+ * point at a single directory instead (the end-to-end test puts a stand-in
+ * there, so it never spends the user's AI quota).
+ */
+function aiSearchDirs(): string[] {
+  const override = app.isPackaged ? undefined : process.env['SCREENRX_AI_CLI_DIR']
+  return override ? [path.resolve(override)] : defaultAiSearchDirs(process.env, os.homedir())
 }
 
 /**
@@ -126,12 +151,26 @@ async function bootstrap(): Promise<void> {
     chooseOutputPath: (fileName) => chooseExportPath(windows, fileName)
   })
 
+  const transcriptions = new TranscriptionService({
+    binaryPath: transcriberPath(),
+    sessions,
+    logger: createLogger('captions'),
+    onProgress: (progress) => windows.broadcast('captions:progress', progress)
+  })
+
+  const aiTools = { logger: createLogger('ai'), searchDirs: aiSearchDirs(), env: process.env }
+  const ai = new AiCliService(aiTools)
+  const aiSetup = new AiSetupService({ ...aiTools, home: os.homedir() })
+
   registerIpc({
     engine,
     controller,
     sessions,
     projects,
     exports,
+    transcriptions,
+    suggestions: new CutSuggestionService(ai, sessions, createLogger('ai')),
+    aiSetup,
     waveforms: new WaveformService(ffmpeg, sessions),
     thumbnails,
     windows,
@@ -160,6 +199,9 @@ async function bootstrap(): Promise<void> {
     event.preventDefault()
     void (async () => {
       try {
+        transcriptions.cancel()
+        ai.cancel()
+        aiSetup.cancel()
         await exports.cancel()
         await controller.shutdown()
         await engine.dispose()

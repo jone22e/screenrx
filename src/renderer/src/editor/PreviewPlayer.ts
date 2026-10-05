@@ -1,10 +1,11 @@
-import type { Size } from '@engine/rendering/frameLayout'
+import { cueAt } from '@engine/captions/captionCues'
+import type { Rect, Size } from '@engine/rendering/frameLayout'
 import type { TimeMap } from '@engine/time/timeMapping'
 import { nextKeptSourceTime } from '@engine/time/timeMapping'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { cameraAt } from '@engine/zoom/zoomCamera'
 import type { EditorSession } from '@shared/models/editor'
-import type { BackgroundSettings, WebcamSettings, ZoomEffect } from '@shared/models/project'
+import type { BackgroundSettings, CaptionSettings, WebcamSettings, ZoomEffect } from '@shared/models/project'
 import { composeFrame } from '../rendering/composeFrame'
 
 /** The preview canvas never needs more pixels than this, whatever the recording's size. */
@@ -21,6 +22,7 @@ export interface PreviewSettings {
   zooms: readonly ZoomEffect[]
   background: BackgroundSettings
   webcam: WebcamSettings
+  captions: CaptionSettings
 }
 
 /**
@@ -29,8 +31,8 @@ export interface PreviewSettings {
  * This is the frame engine: it runs outside React, redraws on its own
  * animation loop, and reports time through callbacks so the UI can follow
  * the playhead without re-rendering components on every frame. Frames are
- * drawn by `composeFrame` with the camera from `cameraAt` — the same code
- * the export will use.
+ * drawn by `composeFrame` with the camera from `cameraAt` and the caption
+ * from `cueAt` — the same code the export uses.
  *
  * The screen track is the master clock; the webcam and the audio tracks are
  * separate files that follow it.
@@ -44,6 +46,7 @@ export class PreviewPlayer {
   private settings: PreviewSettings
   private frameRequest = 0
   private destroyed = false
+  private drawnCaption: Rect | null = null
   private readonly timeListeners = new Set<(timeMs: number) => void>()
   private readonly playingListeners = new Set<(playing: boolean) => void>()
   private readonly errorListeners = new Set<() => void>()
@@ -97,6 +100,11 @@ export class PreviewPlayer {
   /** The camera currently applied to the frame on screen. */
   get camera(): Camera {
     return cameraAt(this.settings.zooms, this.currentTimeMs)
+  }
+
+  /** The block of the caption currently on screen, in output pixels; `null` when there is none. */
+  get captionBox(): Rect | null {
+    return this.drawnCaption
   }
 
   /** Size of the rendered output, for mapping pointer positions. */
@@ -188,7 +196,10 @@ export class PreviewPlayer {
       this.settings.webcam.visible &&
       webcam.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
 
-    composeFrame(this.context, this.output, {
+    const { captions } = this.settings
+    const cue = captions.visible ? cueAt(captions.cues, timeMs) : null
+
+    const regions = composeFrame(this.context, this.output, {
       screen: this.video,
       screenSize: { width: this.video.videoWidth, height: this.video.videoHeight },
       webcam: showWebcam
@@ -199,8 +210,10 @@ export class PreviewPlayer {
           }
         : null,
       camera: cameraAt(this.settings.zooms, timeMs),
-      background: this.settings.background
+      background: this.settings.background,
+      caption: cue ? { text: cue.text, style: captions.style } : null
     })
+    this.drawnCaption = regions.caption
     for (const listener of this.timeListeners) listener(timeMs)
   }
 

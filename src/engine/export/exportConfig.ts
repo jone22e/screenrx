@@ -2,7 +2,6 @@ import type { ExportSettings } from '@shared/models/project'
 
 /** Every tunable of the export, in one place. */
 export const EXPORT_CONFIG = {
-  fps: 30,
   /** Widest output per quality; narrower recordings are never upscaled. */
   maxWidthPx: { standard: 1920, high: 2560 } satisfies Record<ExportSettings['quality'], number>,
   bitsPerPixelPerFrame: 0.14,

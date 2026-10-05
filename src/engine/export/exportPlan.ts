@@ -26,12 +26,14 @@ function outputSize(source: Size, quality: ExportSettings['quality']): Size {
 export function createExportPlan(source: Size, map: TimeMap, settings: ExportSettings): ExportPlan {
   const { width, height } = outputSize(source, settings.quality)
   const durationMs = outputDurationMs(map, settings.speed)
-  const bitrate = width * height * EXPORT_CONFIG.fps * EXPORT_CONFIG.bitsPerPixelPerFrame
+  const { fps } = settings
+  // More frames per second need proportionally more bits to look the same.
+  const bitrate = width * height * fps * EXPORT_CONFIG.bitsPerPixelPerFrame
   return {
     width,
     height,
-    fps: EXPORT_CONFIG.fps,
-    frameCount: Math.max(1, Math.round((durationMs / 1000) * EXPORT_CONFIG.fps)),
+    fps,
+    frameCount: Math.max(1, Math.round((durationMs / 1000) * fps)),
     speed: settings.speed,
     outputDurationMs: durationMs,
     videoBitrate: Math.round(

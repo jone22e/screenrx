@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import type { Writable } from 'node:stream'
 import ffmpegPath from 'ffmpeg-static'
-import ffprobe from 'ffprobe-static'
+import ffprobe from '@ffprobe-installer/ffprobe'
 import type { Logger } from '../logging/logger'
 
 export interface FfmpegBinaries {

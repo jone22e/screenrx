@@ -6,11 +6,15 @@ import { formatTimecode } from '@shared/format'
 import type { EditorSession } from '@shared/models/editor'
 import type { WebcamCorner, WebcamShape } from '@shared/models/project'
 import { BACKGROUND_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
+import { CaptionsPanel } from './CaptionsPanel'
 import type { EditorStore } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
+import { SuggestionsPanel } from './SuggestionsPanel'
+import { Section, Segmented, Slider } from './panelControls'
 import {
   BackdropIcon,
   CameraIcon,
+  CaptionsIcon,
   PlusIcon,
   ScissorsIcon,
   SparklesIcon,
@@ -24,7 +28,7 @@ interface Props {
   player: PreviewPlayer | null
 }
 
-type Tab = 'cuts' | 'zoom' | 'background' | 'webcam'
+type Tab = 'cuts' | 'zoom' | 'captions' | 'background' | 'webcam'
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
 const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
@@ -35,11 +39,18 @@ export function Sidebar({ session, store, player }: Props) {
   const state = useSyncExternalStore(store.subscribe, store.getState)
   const [chosen, setChosen] = useState<Tab>('cuts')
   // Selecting a region on the timeline brings up its settings.
-  const tab: Tab = state.selectedZoomId ? 'zoom' : state.selectedTrimId ? 'cuts' : chosen
+  const tab: Tab = state.selectedZoomId
+    ? 'zoom'
+    : state.selectedTrimId
+      ? 'cuts'
+      : state.selectedCueId
+        ? 'captions'
+        : chosen
 
   const tabs: Array<{ id: Tab; label: string; icon: ReactNode }> = [
     { id: 'cuts', label: 'Cortes', icon: <ScissorsIcon /> },
     { id: 'zoom', label: 'Zoom', icon: <ZoomIcon /> },
+    { id: 'captions', label: 'Legendas', icon: <CaptionsIcon /> },
     { id: 'background', label: 'Fundo', icon: <BackdropIcon /> },
     ...(session.webcam ? [{ id: 'webcam' as const, label: 'Câmera', icon: <CameraIcon /> }] : [])
   ]
@@ -61,75 +72,11 @@ export function Sidebar({ session, store, player }: Props) {
       <div className="sidebar-body">
         {tab === 'cuts' && <CutsPanel session={session} store={store} player={player} />}
         {tab === 'zoom' && <ZoomPanel session={session} store={store} player={player} />}
+        {tab === 'captions' && <CaptionsPanel session={session} store={store} player={player} />}
         {tab === 'background' && <BackgroundPanel store={store} />}
         {tab === 'webcam' && <WebcamPanel store={store} />}
       </div>
     </aside>
-  )
-}
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="panel">
-      <h2 className="panel-title">{title}</h2>
-      {children}
-    </section>
-  )
-}
-
-function Slider(props: {
-  label: string
-  value: string
-  min: number
-  max: number
-  step: number
-  current: number
-  onChange: (value: number) => void
-  onCommit: () => void
-}) {
-  return (
-    <label className="field">
-      <span className="field-label">
-        {props.label} <strong>{props.value}</strong>
-      </span>
-      <input
-        type="range"
-        min={props.min}
-        max={props.max}
-        step={props.step}
-        value={props.current}
-        onChange={(event) => props.onChange(Number(event.target.value))}
-        onPointerUp={props.onCommit}
-        onKeyUp={props.onCommit}
-      />
-    </label>
-  )
-}
-
-function Segmented<Value extends string>(props: {
-  label: string
-  value: Value
-  options: ReadonlyArray<{ value: Value; label: string; icon?: ReactNode }>
-  onChange: (value: Value) => void
-}) {
-  return (
-    <div className="field">
-      <span className="field-label">{props.label}</span>
-      <div className="segmented" role="radiogroup" aria-label={props.label}>
-        {props.options.map((option) => (
-          <button
-            key={option.value}
-            className="segment"
-            role="radio"
-            aria-checked={option.value === props.value}
-            onClick={() => props.onChange(option.value)}
-          >
-            {option.icon}
-            {option.label}
-          </button>
-        ))}
-      </div>
-    </div>
   )
 }
 
@@ -170,6 +117,8 @@ function CutsPanel({ session, store, player }: Props) {
           </>
         )}
       </Section>
+
+      <SuggestionsPanel store={store} player={player} />
 
       <Section title={`Cortes${trims.length > 0 ? ` (${trims.length})` : ''}`}>
         {trims.length === 0 ? (

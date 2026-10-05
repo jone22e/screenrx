@@ -1,3 +1,4 @@
+import { cueAt } from '@engine/captions/captionCues'
 import { frameSourceTimeMs } from '@engine/export/exportPlan'
 import { buildTimeMap } from '@engine/time/timeMapping'
 import { cameraAt } from '@engine/zoom/zoomCamera'
@@ -45,6 +46,7 @@ export async function renderExport(
   const api = window.screenrx.export
   const map = buildTimeMap(session.durationMs, project.effects)
   const zooms = zoomsOf(project)
+  const { captions } = project
   const output = { width: plan.width, height: plan.height }
 
   // Composited on the GPU, like the preview; each finished frame is then read back once.
@@ -68,6 +70,7 @@ export async function renderExport(
       const frame = await screen.frameAt(sourceMs * 1000)
       if (!frame) throw new Error('The screen track has no frames')
       const webcamFrame = webcam ? await webcam.frameAt(sourceMs * 1000) : null
+      const cue = captions.visible ? cueAt(captions.cues, sourceMs) : null
 
       composeFrame(context, output, {
         screen: frame,
@@ -80,7 +83,8 @@ export async function renderExport(
             }
           : null,
         camera: cameraAt(zooms, sourceMs),
-        background: project.background
+        background: project.background,
+        caption: cue ? { text: cue.text, style: captions.style } : null
       })
 
       const rendered = new VideoFrame(canvas, { timestamp: 0 })
