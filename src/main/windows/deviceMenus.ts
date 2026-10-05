@@ -4,7 +4,6 @@ import type { CaptureDevice, RecordingOptions } from '@shared/models/devices'
 
 export interface DeviceMenuActions {
   setMicrophone: (deviceId: string | null) => void
-  setSystemAudio: (enabled: boolean) => void
   setCamera: (deviceId: string | null) => void
 }
 
@@ -27,7 +26,7 @@ function deviceItems(
   ]
 }
 
-/** Audio choices: which microphone to record, and whether to record what the computer plays. */
+/** Which microphone to record. What the computer plays has its own switch on the bar. */
 export function showMicrophoneMenu(
   window: BrowserWindow,
   microphones: CaptureDevice[],
@@ -36,14 +35,7 @@ export function showMicrophoneMenu(
 ): void {
   Menu.buildFromTemplate([
     { label: 'Microfone', enabled: false },
-    ...deviceItems(microphones, options.microphoneId, actions.setMicrophone, 'Sem microfone'),
-    { type: 'separator' },
-    {
-      label: 'Gravar áudio do sistema',
-      type: 'checkbox',
-      checked: options.systemAudio,
-      click: () => actions.setSystemAudio(!options.systemAudio)
-    }
+    ...deviceItems(microphones, options.microphoneId, actions.setMicrophone, 'Sem microfone')
   ]).popup({ window })
 }
 

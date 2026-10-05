@@ -15,7 +15,6 @@ import { _electron as electron } from 'playwright-core'
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const appPath = join(projectRoot, 'release', 'mac-arm64', 'ScreenRx.app')
 const resources = join(appPath, 'Contents', 'Resources')
-const profile = mkdtempSync(join(tmpdir(), 'screenrx-smoke-'))
 
 const checks = []
 function check(name, passed, detail = '') {
@@ -57,6 +56,7 @@ check(
 )
 check('the bundled transcriber starts and answers', /"unreadable-audio"|"unsupported-os"/.test(transcriber.text), transcriber.text.split('\n').pop())
 
+const profile = mkdtempSync(join(tmpdir(), 'screenrx-smoke-'))
 const app = await electron.launch({
   executablePath: join(appPath, 'Contents', 'MacOS', 'ScreenRx'),
   args: [`--user-data-dir=${profile}`]

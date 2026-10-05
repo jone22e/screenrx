@@ -3,8 +3,8 @@ import type { RecordingPhase } from '@shared/models/recording'
 /** Geometry of the recording HUD, in points. */
 export const HUD_LAYOUT = {
   heightPt: 62,
-  /** Source, microphone, camera, record and window controls. */
-  idleWidthPt: 540,
+  /** Source, microphone, computer sound, camera, record and window controls. */
+  idleWidthPt: 580,
   /** Timer, pause/resume and stop. */
   activeWidthPt: 300,
   /** Distance from the bottom of the work area on first show. */

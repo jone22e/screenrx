@@ -26,7 +26,8 @@ export interface RecordingOptions {
 export const DEFAULT_RECORDING_OPTIONS: RecordingOptions = {
   microphoneId: null,
   microphoneName: null,
-  systemAudio: false,
+  // What the computer plays is part of what is on screen: recorded unless turned off.
+  systemAudio: true,
   cameraId: null,
   cameraName: null
 }

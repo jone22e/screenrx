@@ -161,14 +161,15 @@ final class MediaTrackWriter: @unchecked Sendable {
         switch kind {
         case .audio:
             guard let description = format.audioStreamBasicDescription else { return false }
-            let channels = min(2, max(1, Int(description.mChannelsPerFrame)))
+            let channels = AudioEncoding.channels(forSource: Int(description.mChannelsPerFrame))
             fileType = .m4a
             mediaType = .audio
+            // The writer resamples when the device's rate is not the one written.
             settings = [
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: description.mSampleRate > 0 ? description.mSampleRate : CaptureDefaults.audioSampleRate,
+                AVSampleRateKey: AudioEncoding.sampleRate(forSource: description.mSampleRate),
                 AVNumberOfChannelsKey: channels,
-                AVEncoderBitRateKey: CaptureDefaults.audioBitratePerChannel * channels,
+                AVEncoderBitRateKey: AudioEncoding.bitrate(channels: channels),
             ]
         case .video(let fps):
             let dimensions = CMVideoFormatDescriptionGetDimensions(format)

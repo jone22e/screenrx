@@ -6,9 +6,12 @@ export interface DisplaySource {
   /** Stable identifier within the app, e.g. `display:1`. */
   id: string
   displayId: number
-  /** 1-based position, main display first ("Display 1"). */
+  /** 1-based position, main display first. */
   index: number
-  /** Name reported by the system, e.g. "Built-in Retina Display". */
+  /**
+   * What the user knows the monitor by: the name the system reports (e.g.
+   * "Built-in Retina Display", "LG UltraWide"), made unique among the displays.
+   */
   name: string
   isMain: boolean
   widthPx: number
@@ -51,11 +54,24 @@ export function isCaptureSourceId(value: unknown): value is string {
   return typeof value === 'string' && SOURCE_ID_PATTERN.test(value)
 }
 
-/** Short label used in menus and in the HUD. */
+/** Short label used in menus, in the HUD and as the title of a recording. */
 export function sourceLabel(source: CaptureSource): string {
   return source.kind === 'display'
-    ? `Display ${source.index}`
+    ? source.name.trim() || `Tela ${source.index}`
     : `${source.appName} — ${source.title}`
+}
+
+/**
+ * Names for a list of displays, in the same order, with no two alike: two
+ * monitors of the same model become "DELL U2720Q" and "DELL U2720Q (2)".
+ */
+export function uniqueDisplayNames(names: readonly string[]): string[] {
+  const seen = new Map<string, number>()
+  return names.map((name) => {
+    const count = (seen.get(name) ?? 0) + 1
+    seen.set(name, count)
+    return count === 1 ? name : `${name} (${count})`
+  })
 }
 
 export function findSource(catalog: CaptureSourceCatalog, id: string): CaptureSource | null {

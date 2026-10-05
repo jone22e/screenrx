@@ -15,6 +15,7 @@ import {
   PauseIcon,
   PlayIcon,
   SpeakerIcon,
+  SpeakerOffIcon,
   WindowIcon
 } from './icons'
 
@@ -24,7 +25,7 @@ const TIMER_REFRESH_MS = 200
  * The always-on-top recording bar. It stays on screen for the whole
  * recording, yet never shows up in the video: the capture excludes it.
  *
- * Before recording: source, microphone, camera and the record button.
+ * Before recording: source, microphone, the computer's sound, camera and the record button.
  * While recording: the timer, what is being recorded, pause/resume and stop.
  */
 export function Hud() {
@@ -52,16 +53,25 @@ export function Hud() {
         <Divider />
         <button
           className="hud-icon"
-          data-active={microphoneName !== null || systemAudio}
+          data-active={microphoneName !== null}
           disabled={starting}
-          aria-label="Microfone e áudio"
-          title={[
-            `Microfone: ${microphoneName ?? 'desligado'}`,
-            `Áudio do sistema: ${systemAudio ? 'ligado' : 'desligado'}`
-          ].join(' · ')}
+          aria-label="Microfone"
+          title={`Microfone: ${microphoneName ?? 'desligado'}`}
           onClick={() => void hud.showMicrophoneMenu()}
         >
-          {microphoneName !== null ? <MicIcon /> : systemAudio ? <SpeakerIcon /> : <MicOffIcon />}
+          {microphoneName !== null ? <MicIcon /> : <MicOffIcon />}
+        </button>
+        <button
+          className="hud-icon"
+          data-active={systemAudio}
+          disabled={starting}
+          role="switch"
+          aria-checked={systemAudio}
+          aria-label="Som do computador"
+          title={`Som do computador: ${systemAudio ? 'será gravado' : 'não será gravado'}`}
+          onClick={() => void recording.setSystemAudio(!systemAudio)}
+        >
+          {systemAudio ? <SpeakerIcon /> : <SpeakerOffIcon />}
         </button>
         <button
           className="hud-icon"

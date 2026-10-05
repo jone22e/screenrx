@@ -375,8 +375,16 @@ gravação nova aberta no editor, ou com o motivo do erro). O `WindowManager`
 concentra essa troca (`openRecorder` / `showLibrary`).
 
 - **Barra de gravação (HUD)** — o único lugar onde se escolhe o que gravar: fonte,
-  microfone, áudio do sistema e câmera, por menus nativos. Só existe na tela
-  enquanto o usuário está prestes a gravar ou gravando.
+  microfone e câmera por menus nativos, e o som do computador por um interruptor
+  próprio, ligado por padrão (o que o computador toca faz parte do que está na
+  tela; quando vinha desligado e escondido no menu do microfone, gravações saíam
+  mudas sem o usuário perceber). Só existe na tela
+  enquanto o usuário está prestes a gravar ou gravando. No menu de fontes cada
+  monitor aparece pelo nome que o sistema lhe dá (no idioma do usuário), com uma
+  miniatura do que está nele, o tamanho em pontos, se é o principal ou onde fica
+  em relação a ele ("acima da principal") e em qual está a barra — dois monitores
+  do mesmo modelo têm nome e tamanho iguais, e é a posição e a miniatura que os
+  distinguem. O nome do monitor é também o título da gravação.
 - **Janela principal** — a biblioteca: uma grade de gravações agrupadas por dia,
   cada uma com capa, duração, trilhas presentes, tamanho e resolução; busca por
   nome; abrir no editor, mostrar no Finder e excluir. Excluir pede confirmação e
@@ -496,6 +504,7 @@ só o conteúdo daquela janela, mesmo coberta por outras.
 | Helper morre | Estado volta a `idle` com erro; janelas restauradas; sessão marcada `failed` (arquivo parcial preservado); o helper é recriado na próxima ação. |
 | Arquivo vazio ou sem quadros | `recording-invalid`; a sessão vazia é removida. |
 | App fechado durante a gravação | `before-quit` finaliza o arquivo antes de sair. |
+| Microfone com taxa de amostragem fora do padrão (fone Bluetooth: 16 kHz) | A trilha é reamostrada para 48 kHz ao gravar (`AudioEncoding`). Antes disso o codificador AAC recusava a configuração e a trilha do microfone se perdia, com o diagnóstico `track-missing`. |
 | Sessão `recording` encontrada ao iniciar | Marcada `failed` (o app caiu no meio). |
 | Transcrição indisponível (macOS anterior ao 26, idioma sem suporte, transcritor ausente) | `transcription-unavailable`, explicado no painel de legendas; o resto do editor funciona. |
 | Instalação ou login de uma ferramenta de IA não conclui | `ai-install-failed` / `ai-login-failed`, com a última linha que a ferramenta escreveu no log; o cartão da ferramenta mostra o aviso e a situação é lida de novo. |
@@ -596,7 +605,7 @@ instalação em outro Mac.
 
 ### O que foi validado
 
-`npm run test:e2e` conduz o app real e verifica 73 pontos, entre eles:
+`npm run test:e2e` conduz o app real e verifica 75 pontos, entre eles:
 
 - o app sobe com as duas janelas, renderer isolado e só a ponte explícita;
 - gravar → pausar → retomar → finalizar gera `screen.mp4` (H.264, yuv420p) e

@@ -1,5 +1,5 @@
 import { access } from 'node:fs/promises'
-import { Menu, app, dialog, ipcMain, shell } from 'electron'
+import { Menu, app, dialog, ipcMain, screen, shell } from 'electron'
 import type { IpcInvokeChannel, IpcInvokeContract } from '@shared/ipc/contract'
 import type { AiProvider } from '@shared/models/ai'
 import { isAiProviderId, parseAiChoice } from '@shared/models/ai'
@@ -33,7 +33,7 @@ import type { SessionStore } from '../recording/SessionStore'
 import type { WindowManager } from '../windows/WindowManager'
 import type { DeviceMenuActions } from '../windows/deviceMenus'
 import { showCameraMenu, showMicrophoneMenu } from '../windows/deviceMenus'
-import { showSourceMenu } from '../windows/sourceMenu'
+import { DISPLAY_THUMBNAIL_WIDTH_PX, showSourceMenu } from '../windows/sourceMenu'
 
 export interface IpcDependencies {
   engine: CaptureEngine
@@ -208,11 +208,17 @@ export function registerIpc(deps: IpcDependencies): void {
     if (!hud || controller.getState().phase !== 'idle') return
     let catalog: CaptureSourceCatalog | null = null
     try {
-      catalog = await engine.listSources({
-        excludePids: ownPids(),
-        includeWindows: true,
-        thumbnailMaxWidthPx: null
-      })
+      // Displays come with a miniature of what is on them, to tell them apart;
+      // windows are listed by name only, so the menu opens quickly.
+      const [withMiniatures, withWindows] = await Promise.all([
+        engine.listSources({
+          excludePids: ownPids(),
+          includeWindows: false,
+          thumbnailMaxWidthPx: DISPLAY_THUMBNAIL_WIDTH_PX
+        }),
+        engine.listSources({ excludePids: ownPids(), includeWindows: true, thumbnailMaxWidthPx: null })
+      ])
+      catalog = { displays: withMiniatures.displays, windows: withWindows.windows }
     } catch (error) {
       logger.info('source menu unavailable', { error: String(error) })
     }
@@ -220,6 +226,9 @@ export function registerIpc(deps: IpcDependencies): void {
       window: hud,
       catalog,
       selectedSourceId: controller.getState().selectedSource?.id ?? null,
+      // On macOS Electron's display id is the system's own, the one sources are listed by.
+      barDisplayId: screen.getDisplayMatching(hud.getBounds()).id,
+      arrangement: screen.getAllDisplays().map((display) => ({ displayId: display.id, bounds: display.bounds })),
       onSelect: (sourceId) => void controller.selectSource(sourceId),
       onOpenMainWindow: () => windows.showLibrary()
     })
@@ -390,7 +399,6 @@ export function registerIpc(deps: IpcDependencies): void {
 
   const deviceActions: DeviceMenuActions = {
     setMicrophone: (deviceId) => void controller.setMicrophone(deviceId),
-    setSystemAudio: (enabled) => void controller.setSystemAudio(enabled),
     setCamera: (deviceId) => void controller.setCamera(deviceId)
   }
 

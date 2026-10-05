@@ -295,7 +295,18 @@ async function main() {
     )
     const microphone = media.microphone === 'granted' ? devices.value?.microphones[0] : undefined
     const camera = media.camera === 'granted' ? devices.value?.cameras[0] : undefined
-    await hud.evaluate(() => window.screenrx.recording.setSystemAudio(true))
+    // The computer's sound is recorded unless turned off, with its own switch on the bar.
+    const soundSwitch = hud.getByRole('switch', { name: 'Som do computador' })
+    const soundByDefault = (await hud.evaluate(() => window.screenrx.recording.getState())).options.systemAudio
+    await soundSwitch.click()
+    await sleep(300)
+    const soundOff = (await hud.evaluate(() => window.screenrx.recording.getState())).options.systemAudio
+    await soundSwitch.click()
+    await sleep(300)
+    check(
+      "the computer's sound is on by default and has its own switch on the bar",
+      soundByDefault === true && soundOff === false && (await soundSwitch.getAttribute('aria-checked')) === 'true'
+    )
     if (microphone) await hud.evaluate((id) => window.screenrx.recording.setMicrophone(id), microphone.id)
     else note('microphone not authorized for this launcher', 'its track is not exercised')
     if (camera) await hud.evaluate((id) => window.screenrx.recording.setCamera(id), camera.id)
@@ -305,6 +316,41 @@ async function main() {
       'companion tracks are enabled',
       options.systemAudio && Boolean(options.microphoneId) === Boolean(microphone) && Boolean(options.cameraId) === Boolean(camera),
       JSON.stringify({ microphone: options.microphoneName, systemAudio: options.systemAudio, camera: options.cameraName })
+    )
+
+    // --- source menu: the displays can be told apart ----------------------------
+    // The menu is native, so what it shows is read from the template it is built from.
+    await app.evaluate(({ Menu }) => {
+      const build = Menu.buildFromTemplate.bind(Menu)
+      Menu.buildFromTemplate = (template) => {
+        const menu = build(template)
+        globalThis.__sourceMenu = {
+          menu,
+          items: template.map((item) => ({ label: item.label ?? null, sublabel: item.sublabel ?? null, icon: Boolean(item.icon) }))
+        }
+        return menu
+      }
+    })
+    void hud.evaluate(() => window.screenrx.hud.showSourceMenu()).catch(() => undefined)
+    let menuItems = null
+    for (let attempt = 0; attempt < 100 && !menuItems; attempt++) {
+      await sleep(100)
+      menuItems = await app.evaluate(() => globalThis.__sourceMenu?.items ?? null)
+    }
+    await sleep(300)
+    await app.evaluate(() => globalThis.__sourceMenu?.menu.closePopup())
+    await sleep(300)
+    const firstSeparator = (menuItems ?? []).findIndex((item) => item.label === null)
+    const displayItems = (menuItems ?? []).slice(1, firstSeparator === -1 ? undefined : firstSeparator)
+    check(
+      'the source menu tells the displays apart: name, size, a miniature, and where the bar is',
+      displayItems.length >= 1 &&
+        new Set(displayItems.map((item) => item.label)).size === displayItems.length &&
+        displayItems.every((item) => item.label && /^\d+ × \d+/.test(item.sublabel ?? '') && item.icon) &&
+        displayItems.filter((item) => item.sublabel.includes('principal') && !item.sublabel.includes('da principal')).length === 1 &&
+        displayItems.filter((item) => item.sublabel.includes('onde está esta barra')).length === 1 &&
+        displayItems.filter((item) => !/principal/.test(item.sublabel)).length === 0,
+      displayItems.map((item) => `${item.label} (${item.sublabel})`).join(' | ')
     )
 
     // --- control: while idle, a plain screenshot does show the HUD ------------

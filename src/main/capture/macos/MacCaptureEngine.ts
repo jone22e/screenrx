@@ -1,6 +1,6 @@
 import type { Unsubscribe } from '@shared/ipc/contract'
 import type { CaptureSourceCatalog } from '@shared/models/capture'
-import { displaySourceId, windowSourceId } from '@shared/models/capture'
+import { displaySourceId, uniqueDisplayNames, windowSourceId } from '@shared/models/capture'
 import { appError } from '@shared/models/errors'
 import type { CaptureDevices } from '@shared/models/devices'
 import type { MediaPermissionKind, PermissionReport } from '@shared/models/permissions'
@@ -57,7 +57,9 @@ export class MacCaptureEngine implements CaptureEngine {
 
   constructor(
     private readonly helper: HelperProcess,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    /** A display's name in the user's language; the helper's own is the fallback. */
+    private readonly displayName: (displayId: number) => string | null = () => null
   ) {
     helper.onEvent((name, payload) => {
       if (name !== HELPER_EVENT_INTERRUPTED) return
@@ -124,13 +126,16 @@ export class MacCaptureEngine implements CaptureEngine {
       },
       TIMEOUTS_MS.listSources
     )
+    const names = uniqueDisplayNames(
+      result.displays.map((display) => this.displayName(display.displayId)?.trim() || display.name)
+    )
     return {
       displays: result.displays.map((display, position) => ({
         kind: 'display',
         id: displaySourceId(display.displayId),
         displayId: display.displayId,
         index: position + 1,
-        name: display.name,
+        name: names[position] ?? display.name,
         isMain: display.isMain,
         widthPx: display.widthPx,
         heightPx: display.heightPx,

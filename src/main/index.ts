@@ -1,7 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
-import { app, dialog, session } from 'electron'
+import { app, dialog, screen, session } from 'electron'
 import { appError } from '@shared/models/errors'
 import { AiCliService } from './ai/AiCliService'
 import { AiSetupService } from './ai/AiSetupService'
@@ -113,7 +113,11 @@ async function bootstrap(): Promise<void> {
     rendererDevUrl: app.isPackaged ? null : (process.env['ELECTRON_RENDERER_URL'] ?? null),
     logger: createLogger('windows')
   })
-  const engine = createCaptureEngine({ helperPath: helperPath() })
+  const engine = createCaptureEngine({
+    helperPath: helperPath(),
+    // Electron names displays in the user's language, by the same id the system uses.
+    displayName: (displayId) => screen.getAllDisplays().find((display) => display.id === displayId)?.label || null
+  })
   const sessions = new SessionStore(recordingsRoot(), createLogger('sessions'))
   const projects = new ProjectStore(sessions, createLogger('autozoom'))
   const controller = new RecordingController({

@@ -97,7 +97,8 @@ class FakeEngine implements CaptureEngine {
   dispose = async () => undefined
 
   async finishFile(): Promise<CaptureResult> {
-    const outputPath = this.startRequests.at(-1)?.outputPath ?? ''
+    const request = this.startRequests.at(-1)
+    const outputPath = request?.outputPath ?? ''
     if (this.fileBytes > 0) await writeFile(outputPath, Buffer.alloc(this.fileBytes))
     return {
       outputPath,
@@ -111,7 +112,10 @@ class FakeEngine implements CaptureEngine {
       pauses: [],
       telemetry: { cursorSamples: 150, interactions: 4 },
       microphone: null,
-      systemAudio: null,
+      // Like the real engine: the computer's sound comes back as a track when it was asked for.
+      systemAudio: request?.systemAudio
+        ? { durationMs: 4990, fileSizeBytes: 1024, widthPx: null, heightPx: null }
+        : null,
       webcam: null,
       ...this.resultOverrides
     }
@@ -177,7 +181,7 @@ describe('RecordingController', () => {
 
     const state = controller.getState()
     expect(state.phase).toBe('recording')
-    expect(state.selectedSource).toEqual({ id: 'display:1', kind: 'display', label: 'Display 1' })
+    expect(state.selectedSource).toEqual({ id: 'display:1', kind: 'display', label: 'Built-in Display' })
     expect(state.sessionId).toBe('recording-20261003-201530-123')
     expect(state.clockRunning).toBe(true)
     expect(shield.engaged).toBe(true)
@@ -275,9 +279,26 @@ describe('RecordingController', () => {
     expect((await sessions.list())[0]?.hasWarnings).toBe(true)
   })
 
-  it('records only the screen unless companion tracks are enabled', async () => {
+  it("records the screen and the computer's sound by default, without microphone or camera", async () => {
+    expect(controller.getState().options).toMatchObject({ microphoneId: null, systemAudio: true, cameraId: null })
+    await controller.start()
+    expect(engine.startRequests[0]).toMatchObject({
+      microphone: null,
+      systemAudio: { outputPath: path.join(root, 'recording-20261003-201530-123', 'system.m4a') },
+      webcam: null
+    })
+    await controller.stop()
+    const manifest = await readManifest('recording-20261003-201530-123')
+    expect(manifest.assets.systemAudio).toMatchObject({ file: 'system.m4a' })
+    expect(manifest.diagnostics).toEqual([])
+  })
+
+  it("records only the screen when the computer's sound is turned off", async () => {
+    await controller.setSystemAudio(false)
     await controller.start()
     expect(engine.startRequests[0]).toMatchObject({ microphone: null, systemAudio: null, webcam: null })
+    await controller.stop()
+    expect((await readManifest('recording-20261003-201530-123')).assets.systemAudio).toBeUndefined()
   })
 
   it('records the enabled microphone, system audio and camera to their own files', async () => {

@@ -102,6 +102,12 @@ body {
   background: rgba(91, 140, 255, 0.16);
 }
 
+/* A switch that was just turned on still looks on with the pointer over it. */
+.hud-icon[data-active='true']:hover:not(:disabled) {
+  color: #a9c0ff;
+  background: rgba(91, 140, 255, 0.26);
+}
+
 /* What is being recorded besides the screen; indicators, not controls. */
 .hud-tracks {
   display: flex;

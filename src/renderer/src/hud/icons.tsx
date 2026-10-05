@@ -65,6 +65,13 @@ export const SpeakerIcon = () => (
   </Icon>
 )
 
+export const SpeakerOffIcon = () => (
+  <Icon>
+    <path d="M11 5 6 9H3v6h3l5 4z" />
+    <path d="m16 9 5 6M21 9l-5 6" />
+  </Icon>
+)
+
 export const MicOffIcon = () => (
   <Icon>
     <path d="M9 9v2a3 3 0 0 0 5.1 2.1M15 9.3V6a3 3 0 0 0-5.7-1.3" />
