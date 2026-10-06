@@ -44,6 +44,7 @@ export interface IpcInvokeContract {
   'library:open-video': { args: [sessionId: string]; result: IpcResult<null> }
   'library:reveal': { args: [sessionId: string]; result: IpcResult<null> }
   'library:delete': { args: [sessionId: string]; result: IpcResult<{ deleted: boolean }> }
+  'library:rename': { args: [sessionId: string, title: string]; result: IpcResult<null> }
 
   'editor:open': { args: [sessionId: string]; result: IpcResult<EditorSession> }
   'project:save': { args: [project: Project]; result: IpcResult<null> }
@@ -138,6 +139,8 @@ export interface ScreenRxApi {
     reveal(sessionId: string): Promise<IpcResult<null>>
     /** Asks for confirmation, then moves the whole recording to the system Trash. */
     delete(sessionId: string): Promise<IpcResult<{ deleted: boolean }>>
+    /** Gives the recording a name; an empty one brings the source's label back. */
+    rename(sessionId: string, title: string): Promise<IpcResult<null>>
     onChanged(listener: () => void): Unsubscribe
   }
   editor: {

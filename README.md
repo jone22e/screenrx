@@ -43,19 +43,19 @@ As gravações ficam em `~/Movies/ScreenRx/`, uma pasta por sessão. Os logs fic
 ## Instalador (macOS)
 
 ```bash
-npm run dist
+make update
 ```
 
-Gera `release/ScreenRx-<versão>-arm64.dmg` (Apple Silicon), com os helpers nativos
+Equivale a `npm run dist` e gera `release/ScreenRx-<versão>-arm64.dmg` (Apple Silicon), com os helpers nativos
 e o FFmpeg dentro do app. A assinatura é local ("ad hoc"): o app abre neste Mac,
 mas em outro Mac o macOS o bloqueia até ser liberado manualmente, e as permissões
 (Gravação de Tela, microfone, câmera) são pedidas de novo a cada nova versão.
 
 ```bash
-npm run dist:check
+make check
 ```
 
-Abre o app empacotado e confere o que só existe no pacote (helpers, FFmpeg, ícone).
+Equivale a `npm run dist:check`: abre o app empacotado e confere o que só existe no pacote (helpers, FFmpeg, ícone).
 
 Para distribuir a outras pessoas, `npm run dist:signed` assina com o certificado
 "Developer ID Application" do Chaveiro (com hardened runtime); a notarização na

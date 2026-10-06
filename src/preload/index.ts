@@ -58,6 +58,7 @@ const api: ScreenRxApi = {
     openVideo: (sessionId) => invoke('library:open-video', sessionId),
     reveal: (sessionId) => invoke('library:reveal', sessionId),
     delete: (sessionId) => invoke('library:delete', sessionId),
+    rename: (sessionId, title) => invoke('library:rename', sessionId, title),
     onChanged: (listener) => subscribe('library:changed', () => listener())
   },
   editor: {

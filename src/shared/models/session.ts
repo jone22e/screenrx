@@ -18,6 +18,20 @@ export function createSessionId(date: Date): string {
 
 export type SessionStatus = 'recording' | 'completed' | 'failed'
 
+/** Longest name a recording can be given. */
+export const SESSION_TITLE_MAX_LENGTH = 120
+
+/**
+ * The name a recording is given by the user, tidied: trimmed, inner
+ * whitespace collapsed, cut to the maximum length. `null` when nothing is
+ * left, which means "back to the source's label".
+ */
+export function normalizeSessionTitle(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const title = value.replace(/\s+/g, ' ').trim().slice(0, SESSION_TITLE_MAX_LENGTH).trim()
+  return title.length > 0 ? title : null
+}
+
 export interface SessionSource {
   kind: 'display' | 'window'
   /** Human readable, e.g. "Display 1" or "Google Chrome — Docs". */
@@ -92,6 +106,8 @@ export interface RecordingSessionManifest {
   createdAt: string
   status: SessionStatus
   source: SessionSource
+  /** Name given by the user; absent until the recording is renamed. */
+  title?: string
   capture: {
     fps: number
     cursorInVideo: boolean
@@ -119,6 +135,8 @@ export interface RecordingSummary {
   id: string
   createdAt: string
   status: SessionStatus
+  /** What the recording is called: the user's name for it, or the source's label. */
+  title: string
   sourceLabel: string
   durationMs: number
   /** Every track of the session together. */

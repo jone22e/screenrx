@@ -9,7 +9,12 @@ import type {
   RecordingSummary,
   SessionSource
 } from '@shared/models/session'
-import { SESSION_SCHEMA_VERSION, createSessionId, isSessionId } from '@shared/models/session'
+import {
+  SESSION_SCHEMA_VERSION,
+  createSessionId,
+  isSessionId,
+  normalizeSessionTitle
+} from '@shared/models/session'
 import { writeJsonAtomic } from '../filesystem/atomicWrite'
 import { resolveInside } from '../filesystem/safePaths'
 import type { Logger } from '../logging/logger'
@@ -112,6 +117,18 @@ export class SessionStore {
     }
   }
 
+  /**
+   * Gives a recording a name of the user's choosing. An empty name removes
+   * the custom one, so the source's label shows again. Returns `false` when
+   * the session has no readable manifest.
+   */
+  async rename(sessionId: string, title: string | null): Promise<boolean> {
+    const manifest = await this.read(sessionId)
+    if (!manifest) return false
+    await this.write(withTitle(manifest, title))
+    return true
+  }
+
   /** Newest first. Directories without a valid manifest are skipped. */
   async list(): Promise<RecordingSummary[]> {
     let entries: string[]
@@ -202,7 +219,17 @@ function parseManifest(value: unknown, expectedId: string): RecordingSessionMani
     typeof manifest.assets === 'object' &&
     manifest.assets !== null &&
     Array.isArray(manifest.diagnostics)
-  return valid ? (manifest as RecordingSessionManifest) : null
+  if (!valid) return null
+  // A name that is not a usable string is dropped rather than failing the whole manifest.
+  return withTitle(manifest as RecordingSessionManifest, normalizeSessionTitle(manifest.title))
+}
+
+/** A copy of the manifest with the given name, or without one when `title` is `null`. */
+function withTitle(manifest: RecordingSessionManifest, title: string | null): RecordingSessionManifest {
+  const next = { ...manifest }
+  if (title === null) delete next.title
+  else next.title = title
+  return next
 }
 
 function toSummary(manifest: RecordingSessionManifest): RecordingSummary {
@@ -211,6 +238,7 @@ function toSummary(manifest: RecordingSessionManifest): RecordingSummary {
     id: manifest.id,
     createdAt: manifest.createdAt,
     status: manifest.status,
+    title: manifest.title ?? manifest.source.label,
     sourceLabel: manifest.source.label,
     durationMs: manifest.clock.durationMs,
     sizeBytes: [screen, microphone, systemAudio, webcam].reduce((total, asset) => total + (asset?.sizeBytes ?? 0), 0),

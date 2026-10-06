@@ -91,7 +91,8 @@ src/
                                    ExportService, leitura do avcC do MP4
     media/                         protocolo screenrx-media:// (streaming por faixas),
                                    ThumbnailService (capas), WaveformService (formas de onda)
-    windows/                       WindowManager, HUD, menu de fontes
+    windows/                       WindowManager, HUD, menu de fontes, ícone da barra de
+                                   menus (tray.ts; a imagem vem de scripts/make-tray-icon.py)
     ipc/registerIpc.ts             handlers, validação de argumentos e de remetente
     filesystem/                    safePaths, atomicWrite
     logging/logger.ts              logger estruturado por escopo
@@ -135,8 +136,11 @@ recording-20261003-203556-847/
 
 `session.json` (`RecordingSessionManifest`) registra fonte, parâmetros de captura,
 duração segundo o relógio, pausas, as trilhas presentes e diagnósticos. É escrito
-no início (`status: "recording"`) e finalizado uma única vez ao terminar. As
-trilhas são **imutáveis**: o helper se recusa a escrever sobre um arquivo existente.
+no início (`status: "recording"`) e finalizado uma única vez ao terminar; depois
+disso só muda quando a gravação é renomeada na biblioteca (campo opcional `title`,
+que substitui o rótulo da fonte na lista, no editor e no nome sugerido da
+exportação). As trilhas são **imutáveis**: o helper se recusa a escrever sobre um
+arquivo existente.
 
 ### Projeto (`src/shared/models/project.ts`)
 
@@ -462,7 +466,10 @@ O app tem dois modos, e só um está na tela por vez. Abre na **biblioteca**; "N
 gravação" esconde a biblioteca e mostra a **barra de gravação**. Fechar a barra,
 terminar uma gravação ou um erro ao prepará-la devolvem a biblioteca (com a
 gravação nova aberta no editor, ou com o motivo do erro). O `WindowManager`
-concentra essa troca (`openRecorder` / `showLibrary`).
+concentra essa troca (`openRecorder` / `showLibrary`). O **ícone na barra de
+menus** do macOS (`tray.ts`) é um atalho para o mesmo `openRecorder`: um clique
+sobe a barra de gravação sem passar pela biblioteca; o clique direito oferece
+biblioteca e sair.
 
 - **Barra de gravação (HUD)** — o único lugar onde se escolhe o que gravar: fonte,
   microfone e câmera por menus nativos, e o som do computador por um interruptor

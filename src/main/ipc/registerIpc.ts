@@ -12,7 +12,7 @@ import { appError } from '@shared/models/errors'
 import { isPermissionKind } from '@shared/models/permissions'
 import { parseProject } from '@shared/models/project'
 import type { PermissionKind, PermissionReport } from '@shared/models/permissions'
-import { isSessionId } from '@shared/models/session'
+import { isSessionId, normalizeSessionTitle } from '@shared/models/session'
 import type { ProjectStore } from '../project/ProjectStore'
 import { isExportTrackName } from '@shared/models/export'
 import { AiError } from '../ai/AiCliService'
@@ -207,6 +207,21 @@ export function registerIpc(deps: IpcDependencies): void {
       return { ok: true, value: { deleted: true } }
     } catch (error) {
       logger.error('could not delete recording', { sessionId, error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('library:rename', async ([sessionId, title]) => {
+    if (!isSessionId(sessionId) || typeof title !== 'string') {
+      return { ok: false, error: appError('invalid-state', 'invalid rename') }
+    }
+    try {
+      const renamed = await sessions.rename(sessionId, normalizeSessionTitle(title))
+      if (!renamed) return { ok: false, error: appError('invalid-state', 'session not found') }
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: null }
+    } catch (error) {
+      logger.error('could not rename recording', { sessionId, error: String(error) })
       return { ok: false, error: appError('storage-unavailable', String(error)) }
     }
   })

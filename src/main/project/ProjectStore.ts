@@ -74,7 +74,7 @@ export class ProjectStore {
 
     return {
       sessionId,
-      title: manifest.source.label,
+      title: manifest.title ?? manifest.source.label,
       createdAt: manifest.createdAt,
       durationMs,
       video: {

@@ -9,3 +9,4 @@ dist-native/
 coverage/
 release/
 native/macos/VoiceHelper/Vendor/
+tmp/

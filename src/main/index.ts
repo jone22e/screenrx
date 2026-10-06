@@ -22,6 +22,7 @@ import { ProjectStore } from './project/ProjectStore'
 import { RecordingController } from './recording/RecordingController'
 import { SessionStore } from './recording/SessionStore'
 import { WindowManager } from './windows/WindowManager'
+import { createTray } from './windows/tray'
 
 const HELPER_BINARY = 'screenrx-capture'
 const TRANSCRIBER_BINARY = 'screenrx-transcribe'
@@ -222,6 +223,20 @@ async function bootstrap(): Promise<void> {
   // The app opens on the library; the recording bar appears on "Nova gravação".
   windows.showMain()
   void controller.selectDefaultSource()
+
+  // The menu bar icon is the quickest way to a new recording — the same as
+  // "Nova gravação" in the library. Kept referenced so it is never collected.
+  const tray = createTray({
+    openRecorder: () => {
+      if (controller.getState().phase === 'idle') controller.dismissError()
+      windows.openRecorder()
+    },
+    showLibrary: () => {
+      if (controller.getState().phase === 'idle') windows.showLibrary()
+    },
+    quit: () => app.quit()
+  })
+  app.on('will-quit', () => tray.destroy())
 
   // Reopening the app (Dock, second launch) brings the library back, unless a
   // recording is running — then the bar is where the user needs to be.

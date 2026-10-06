@@ -76,3 +76,24 @@ export const EditIcon = () => (
     <path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" />
   </Icon>
 )
+
+export const RenameIcon = () => (
+  <Icon size={15}>
+    <path d="M12 4v16M9 4h6M9 20h6M4 8h4v8H4zM16 8h4v8h-4" />
+  </Icon>
+)
+
+export const GridIcon = () => (
+  <Icon size={15}>
+    <rect x="3" y="3" width="7" height="7" rx="1.5" />
+    <rect x="14" y="3" width="7" height="7" rx="1.5" />
+    <rect x="3" y="14" width="7" height="7" rx="1.5" />
+    <rect x="14" y="14" width="7" height="7" rx="1.5" />
+  </Icon>
+)
+
+export const ListIcon = () => (
+  <Icon size={15}>
+    <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+  </Icon>
+)
