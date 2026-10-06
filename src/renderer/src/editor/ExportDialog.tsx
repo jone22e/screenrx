@@ -104,7 +104,8 @@ export function ExportDialog({ store, onClose }: Props) {
                 ))}
               </div>
               <p className="panel-hint">
-                Acelera ou desacelera o vídeo inteiro. A voz mantém o tom natural.
+                Acelera ou desacelera o vídeo inteiro. A voz mantém o tom natural. É a mesma velocidade do
+                seletor ao lado do play, no editor, onde dá para assistir antes de exportar.
               </p>
             </div>
 

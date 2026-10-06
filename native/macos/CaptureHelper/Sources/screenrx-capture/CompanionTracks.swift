@@ -80,6 +80,9 @@ final class CompanionTracks: @unchecked Sendable {
     }
 
     /// Fixes the instant the recording ended for every companion track.
+    /// Whether any of the tracks is audio, which arrives later than it is heard.
+    var recordsAudio: Bool { microphone != nil || systemAudio != nil }
+
     func seal(atNs endNs: Int64) {
         microphone?.writer.seal(atNs: endNs)
         webcam?.writer.seal(atNs: endNs)

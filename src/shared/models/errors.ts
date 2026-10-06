@@ -26,6 +26,12 @@ export type AppErrorCode =
   | 'ai-busy'
   | 'ai-no-transcript'
   | 'ai-install-failed'
+  | 'dub-unavailable'
+  | 'dub-model-missing'
+  | 'dub-download-failed'
+  | 'dub-failed'
+  | 'dub-cancelled'
+  | 'dub-busy'
   | 'ai-login-failed'
   | 'platform-unsupported'
   | 'invalid-state'
@@ -76,6 +82,12 @@ const MESSAGES: Record<AppErrorCode, string> = {
     'A IA não respondeu como esperado. Confira se o login da ferramenta está ativo e tente de novo.',
   'ai-cancelled': 'A análise foi cancelada.',
   'ai-busy': 'Já existe uma análise em andamento.',
+  'dub-unavailable': 'A dublagem não está disponível nesta versão do app (ela precisa de um Mac com Apple Silicon).',
+  'dub-model-missing': 'O modelo de voz ainda não foi baixado. Baixe-o para gerar a dublagem.',
+  'dub-download-failed': 'Não foi possível baixar o modelo de voz. Confira a conexão e tente de novo.',
+  'dub-failed': 'Não foi possível gerar a dublagem.',
+  'dub-cancelled': 'A dublagem foi cancelada.',
+  'dub-busy': 'Já existe uma dublagem ou um download em andamento.',
   'ai-install-failed': 'A instalação não foi concluída.',
   'ai-login-failed': 'O login não foi concluído.',
   'ai-no-transcript': 'A IA lê a transcrição da fala. Gere as legendas desta gravação primeiro.',

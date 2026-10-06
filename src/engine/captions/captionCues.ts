@@ -1,5 +1,5 @@
 import type { TranscriptWord } from '@shared/models/captions'
-import type { CaptionCue, CaptionLength } from '@shared/models/project'
+import type { CaptionCue, CaptionLength, CaptionSettings } from '@shared/models/project'
 import { CAPTION_CONFIG } from './captionConfig'
 
 const HAS_LETTER_OR_DIGIT = /[\p{L}\p{N}]/u
@@ -93,4 +93,20 @@ export function cueAt(cues: readonly CaptionCue[], timeMs: number): CaptionCue |
     else return cue
   }
   return null
+}
+
+/**
+ * The text a caption shows: its translation into the chosen language when
+ * there is one, otherwise what was spoken.
+ */
+export function cueText(captions: Pick<CaptionSettings, 'language' | 'translations'>, cue: CaptionCue): string {
+  const translated = captions.language ? captions.translations[captions.language]?.[cue.id] : undefined
+  return translated ?? cue.text
+}
+
+/** The text on screen at `timeMs` (source time), in the chosen language; `null` when there is none. */
+export function captionAt(captions: CaptionSettings, timeMs: number): string | null {
+  if (!captions.visible) return null
+  const cue = cueAt(captions.cues, timeMs)
+  return cue ? cueText(captions, cue) : null
 }

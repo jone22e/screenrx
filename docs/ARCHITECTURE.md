@@ -48,6 +48,12 @@ native/macos/CaptureHelper/        Pacote Swift
                                    SessionClock, SourceCatalog, CommandServer…
   Sources/screenrx-transcribe/     executável separado: fala → palavras com tempo
                                    (SpeechAnalyzer, no próprio Mac)
+native/macos/VoiceHelper/          Pacote Swift à parte: dublagem com voz clonada
+  Sources/VoiceCore/               lógica pura e testável: formato compacto dos pesos,
+                                   regra de encaixe no tempo
+  Sources/screenrx-dub/            executável: baixa e prepara o modelo de voz, sintetiza
+  patches/                         alterações do projeto ao runtime de voz
+  Vendor/                          runtime de voz (mlx-audio-swift), baixado na compilação
   Tests/CaptureCoreTests/
 src/
   shared/                          TypeScript puro, usado por main, preload e renderer
@@ -66,6 +72,8 @@ src/
     timeline/                      spanEditing (mover/redimensionar regiões), trimConfig
     export/                        exportPlan (tamanho, quadros), audioFilters
                                    (atempo, grafo de áudio), exportConfig
+    dub/                           dubUnits (legendas → trechos de fala, referência de voz,
+                                   posição dos trechos), dubVerification, dubConfig
     captions/                      captionCues (palavras → legendas, legenda do instante),
                                    captionLayout (quebra de linha e posição), captionConfig
     suggestions/cutSuggestions.ts  pedido à IA (palavras numeradas) e validação da resposta
@@ -74,6 +82,7 @@ src/
     recording/                     RecordingController, SessionStore, diagnostics
     project/ProjectStore.ts        project.json: abertura, auto zoom inicial, salvamento
     captions/TranscriptionService  executa o transcritor, grava transcript.json
+    dub/DubbingService             executa o helper de voz, confere os trechos e monta a trilha
     ai/                            AiCliService (único lugar que pergunta algo a uma IA: CLI
                                    do Claude, do Codex ou do Antigravity), AiSetupService
                                    (situação, instalação e login das ferramentas), aiCatalog
@@ -100,6 +109,7 @@ src/
     src/common/                    store de estado e estilos base
 scripts/
   build-native.mjs                 compila os helpers e copia para dist-native/
+  build-voice.mjs                  compila o helper de voz (à parte: leva minutos)
   e2e-recording.mjs                validação de ponta a ponta com o app real
 ```
 
@@ -319,6 +329,86 @@ trilha de áudio → screenrx-transcribe (SpeechAnalyzer, local) → transcript.
   legenda é desenhada por cima do quadro pronto (não sofre zoom). Preview e
   exportação usam a mesma função. Só fontes do sistema, nada é embutido.
 - **No preview** a legenda pode ser arrastada, como a câmera.
+- **Idioma.** As legendas guardam o texto falado; `captions.translations` guarda,
+  por idioma (inglês, espanhol, chinês, português) e por id de legenda, o texto
+  traduzido, e `captions.language` diz qual é mostrado (`null`: o original). A
+  tradução é pedida à ferramenta de IA escolhida nas Configurações
+  (`CaptionTranslationService`: legendas numeradas, em lotes de 150, resposta
+  validada; uma legenda sem tradução mostra o original). Trocar de idioma depois
+  de traduzido é instantâneo; o texto traduzido é corrigido na mesma lista.
+  Refazer as legendas (novo tamanho, nova transcrição) descarta as traduções,
+  porque os ids mudam. Idiomas sem espaços quebram linha entre caracteres
+  (`captionPieces`), com a pontuação de fechamento presa ao caractere anterior.
+
+### Dublagem com a voz de quem gravou
+
+```
+legendas traduzidas → buildDubUnits (frases) ─┐
+microfone + transcrição → pickVoiceReference ─┤
+                                              ↓
+        screenrx-dub (OmniVoice em MLX, no próprio Mac): um WAV por frase
+                                              ↓ transcritor: o que se entende de cada um?
+                       trechos mal entendidos são falados de novo (até 3 tomadas)
+                                              ↓ layoutDubClips + FFmpeg
+                    dub-<idioma>.m4a na sessão → preview e exportação
+```
+
+- **Separada das legendas.** Dublagem e legenda são coisas distintas na interface:
+  a dublagem tem a própria aba no editor (`DubbingPanel`), e dublar não muda o que
+  as legendas mostram (`captions.language`, visibilidade). O que elas compartilham
+  é o texto: a dublagem parte das legendas geradas e da tradução guardada em
+  `captions.translations`. "Dublar em X" (`EditorStore.dubInto`) traduz sozinho
+  quando ainda não há tradução para X, sem trocar o idioma da legenda, e em
+  seguida gera a voz. Dá para ter legenda sem dublagem, dublagem com legenda
+  oculta, ou legenda em um idioma e voz em outro.
+- **O que é.** O texto traduzido, falado no idioma dele com o timbre de quem
+  gravou. A voz é clonada de 3 a 6,5 s do microfone (com o texto correspondente,
+  que a transcrição já tem) e sintetizada **neste Mac**; nada é enviado. O
+  resultado é mais uma trilha da sessão, derivada: pode ser gerada de novo, e as
+  trilhas gravadas só são lidas. `project.dub.language` diz qual dublagem toca;
+  em uso, ela toma o lugar do microfone no preview e na exportação.
+- **Modelo e runtime.** OmniVoice (Apache 2.0, mais de 600 idiomas) na conversão
+  compacta `mlx-community/OmniVoice-4bit`, executado por `mlx-audio-swift` (MIT)
+  sobre MLX — Swift nativo, na GPU do Mac, sem Python. O modelo (1,14 GB) **não
+  vem no instalador**: é baixado por dentro do app, uma vez, só quando o usuário
+  pede (Configurações › Dublagem, ou a aba Dublagem do editor), para
+  `userData/voice-models`. Só Apple Silicon.
+- **`screenrx-dub`** (`native/macos/VoiceHelper`): `prepare` baixa o modelo e o
+  desempacota; `synthesize` carrega o modelo uma vez e fala cada trecho. Fala por
+  linhas JSON em stdout, como o transcritor; cancelar é encerrar o processo.
+  Três coisas que o runtime não faz sozinho e o helper resolve:
+  - *Formato compacto.* A conversão de 4 bits usa um formato próprio
+    ("omnivoice-rowwise": grupos de 64 valores, um fator por grupo, dois valores
+    por byte) que o runtime não lê. O helper o converte uma vez para o formato
+    comum, no disco (`RowwiseWeights` é a especificação testada).
+  - *Onde procurar o modelo.* O runtime ignora o cache que recebe e usa o do
+    ambiente; o helper aponta esse ambiente para a pasta do app, então nada é
+    lido nem gravado no cache pessoal do usuário.
+  - *Biblioteca de shaders.* O MLX carrega `mlx.metallib` de ao lado do
+    executável, e a compilação por linha de comando não a gera.
+    `scripts/build-voice.mjs` a compila com o Metal Toolchain do Xcode quando ele
+    está instalado, ou a extrai da distribuição do MLX da própria Apple, na mesma
+    versão.
+- **Runtime fixado e com patch.** O `mlx-audio-swift` é baixado em uma revisão
+  fixa para `Vendor/` (fora do repositório) e recebe os patches de `patches/`;
+  as versões de MLX que essa revisão usa também são fixadas. O patch atual iguala
+  a junção de textos à do modelo original: sem espaço entre o texto da referência
+  e um texto em chinês — com o espaço, as primeiras sílabas saíam trocadas.
+- **Trechos de fala** (`buildDubUnits`): legendas são cortadas para leitura; uma
+  voz precisa de frases. Legendas seguidas são unidas até o fim da frase, uma
+  pausa ou 12 s. Cada trecho começa quando a primeira legenda dele começa.
+- **Encaixe no tempo.** Cada trecho tem até o início do seguinte. O que passa
+  disso é falado de novo com a duração pedida ao modelo (`DubTiming`), no máximo
+  1,35× mais rápido; se ainda assim invadir o seguinte, o seguinte espera
+  (`layoutDubClips`) — dois trechos nunca tocam ao mesmo tempo, e a pausa
+  seguinte absorve o atraso.
+- **Conferência.** Clonar voz entre idiomas erra às vezes (uma palavra engolida,
+  um trecho ininteligível). Cada trecho gerado é ouvido pelo transcritor no idioma
+  de destino e comparado com o texto (`speechSimilarity`); abaixo de 80% de
+  acerto, é falado de novo com outra semente, até três tomadas, e fica a melhor.
+- **Montagem.** O `FfmpegService` posiciona os trechos em uma trilha do tamanho da
+  gravação (`mixClips`, em grupos de 48 entradas) e grava AAC; o arquivo é escrito
+  como `.part` e renomeado ao terminar.
 
 ### Sugestões de corte por IA
 
@@ -426,6 +516,14 @@ inteira no momento da exportação; `SpeedEffect` é uma edição criativa de um
 trecho. O mapeamento de tempo e o grafo de áudio já tratam os dois (e os
 multiplicam onde se sobrepõem); a interface ainda só oferece a velocidade global.
 
+A velocidade global é escolhida **no editor**, no seletor ao lado do play
+(`Transport`), e não só na hora de exportar: o preview toca nela
+(`PreviewPlayer.applySpeed` ajusta `playbackRate` da tela, da câmera, das trilhas
+de áudio e da dublagem, com o tom da voz preservado, como o `atempo` faz no
+arquivo), e ao lado aparece a duração que o vídeo final terá. O diálogo de
+exportação mostra o mesmo valor (`project.export.speed`), que continua sendo a
+única fonte. A linha do tempo segue em tempo de edição, sem a velocidade.
+
 ### Exportação
 
 ```
@@ -457,6 +555,10 @@ FFmpeg: codifica H.264 uma única vez, processa o áudio, gera o MP4
   tempo ajustado por `buildAtempoFilter` — que preserva o tom e encadeia filtros
   quando a velocidade passa do limite de um só (4× → `atempo=2,atempo=2`) — e as
   trilhas são mixadas. Tudo no mesmo FFmpeg da codificação.
+- **Trilhas silenciadas** (`project.audio[trilha].muted`, o interruptor no rótulo
+  da trilha na linha do tempo) continuam tocando mudas no preview, para o som
+  voltar no mesmo instante, e simplesmente não são entregues ao FFmpeg na
+  exportação; com todas silenciadas o arquivo sai sem trilha de áudio.
 - **Legendas** são desenhadas em cada quadro pelo `composeFrame`, como no
   preview; não há trilha de legenda no arquivo nem filtro de texto no FFmpeg.
 - O FFmpeg e o FFprobe vêm embutidos (`ffmpeg-static`, `@ffprobe-installer/ffprobe`, ambos nativos de Apple Silicon); o
@@ -504,6 +606,9 @@ só o conteúdo daquela janela, mesmo coberta por outras.
 | Helper morre | Estado volta a `idle` com erro; janelas restauradas; sessão marcada `failed` (arquivo parcial preservado); o helper é recriado na próxima ação. |
 | Arquivo vazio ou sem quadros | `recording-invalid`; a sessão vazia é removida. |
 | App fechado durante a gravação | `before-quit` finaliza o arquivo antes de sair. |
+| Fim do áudio ainda a caminho quando o usuário para a gravação (o áudio chega em blocos, com atraso maior por Bluetooth) | As fontes de áudio seguem ligadas por 0,35 s depois do pedido de parada; o que foi ouvido antes da parada e chega nesse tempo é gravado, o que veio depois fica de fora. Sem isso a trilha do som do sistema terminava ~0,2 s antes do vídeo e a sessão recebia o aviso `duration-drift`. |
+| Áudio que falta em uma trilha (o primeiro bloco chega depois do início; um bloco se perde em cada pausa) | O intervalo é preenchido com silêncio na gravação (`AudioEncoding.silenceToFill`), de modo que toda trilha de áudio começa em zero e segue o relógio. Sem isso, tudo o que vinha depois do intervalo tocava adiantado no valor dele. Um intervalo acima de 30 s não é preenchido: é o dispositivo que parou. |
+| Dublagem: helper de voz ausente, modelo não baixado, download interrompido, síntese falha | `dub-unavailable` / `dub-model-missing` / `dub-download-failed` / `dub-failed`, explicados no painel; nenhuma trilha parcial fica na sessão e o resto do editor funciona. |
 | Microfone com taxa de amostragem fora do padrão (fone Bluetooth: 16 kHz) | A trilha é reamostrada para 48 kHz ao gravar (`AudioEncoding`). Antes disso o codificador AAC recusava a configuração e a trilha do microfone se perdia, com o diagnóstico `track-missing`. |
 | Sessão `recording` encontrada ao iniciar | Marcada `failed` (o app caiu no meio). |
 | Transcrição indisponível (macOS anterior ao 26, idioma sem suporte, transcritor ausente) | `transcription-unavailable`, explicado no painel de legendas; o resto do editor funciona. |
@@ -578,6 +683,7 @@ só o conteúdo daquela janela, mesmo coberta por outras.
 | — | Legendas automáticas (pedido posterior à especificação): transcrição local, estilo, posição, edição do texto, exportação | **concluída** (só macOS 26+) |
 | — | Sugestões de corte por IA (CLI do Claude, do Codex ou do Antigravity) a partir da transcrição | **concluída** (depende da transcrição: macOS 26+) |
 | — | Configurações: instalar e entrar nas ferramentas de IA, escolher modelo e esforço | **concluída** (instalar e entrar sem verificação real) |
+| — | Dublagem com voz clonada (OmniVoice em MLX, local), modelo baixado por dentro do app | **concluída** (só Apple Silicon; qualidade da voz não avaliada por ouvido) |
 
 Ao fim de cada fase: compilar, typecheck, testes, validar o fluxo e atualizar este
 documento antes de avançar.
@@ -605,7 +711,9 @@ instalação em outro Mac.
 
 ### O que foi validado
 
-`npm run test:e2e` conduz o app real e verifica 75 pontos, entre eles:
+`npm run test:e2e` conduz o app real e verifica mais de 85 pontos (ele grava a
+tela e abre janelas por alguns minutos: vale rodar quando se mexe em gravação ou
+exportação, não a cada mudança de interface), entre eles:
 
 - o app sobe com as duas janelas, renderer isolado e só a ponte explícita;
 - gravar → pausar → retomar → finalizar gera `screen.mp4` (H.264, yuv420p) e
@@ -635,6 +743,16 @@ instalação em outro Mac.
   resposta vira proposta no painel e na linha do tempo sem cortar nada; a
   ferramenta recebe só as palavras numeradas; aceitar cria um corte nos limites
   das palavras; desfazer devolve a sugestão; rejeitar a remove;
+- trilhas e idioma: silenciar as trilhas na linha do tempo tira o áudio do arquivo
+  exportado e religar as devolve; com a CLI substituta respondendo em chinês, as
+  legendas traduzidas vão para o projeto sem alterar o texto falado, aparecem no
+  preview, e alternar entre os idiomas não pede nova tradução;
+- dublagem: com um helper de voz substituto, o modelo só é "baixado" quando
+  pedido, a dublagem vira uma trilha da sessão do tamanho da gravação, ganha a
+  faixa dela na linha do tempo no lugar do microfone, vai para o vídeo exportado e
+  pode ser desligada. Com `SCREENRX_E2E_VOICE_MODELS` apontando para um modelo já
+  baixado, o helper real clona a voz da gravação de teste e o transcritor confere
+  que a trilha diz o texto traduzido (100% em chinês na verificação feita);
 - configurações: a tela abre pela biblioteca e pelo editor, mostra cada
   ferramenta como está (pronta, sem login, não instalada), e o modelo e o esforço
   escolhidos são os que a ferramenta recebe.

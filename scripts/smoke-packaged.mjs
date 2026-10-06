@@ -47,12 +47,24 @@ const architectures = runs('file', [
   join(unpacked, 'ffmpeg-static', 'ffmpeg'),
   ffprobePath,
   join(resources, 'native', 'screenrx-capture'),
-  join(resources, 'native', 'screenrx-transcribe')
+  join(resources, 'native', 'screenrx-transcribe'),
+  join(resources, 'native', 'screenrx-dub')
 ])
 check(
   'every bundled executable is native to Apple Silicon',
   architectures.ok && architectures.text.split('\n').every((line) => line.includes('arm64')),
   architectures.text.split('\n').map((line) => line.split(' ').pop()).join(', ')
+)
+// Asked to synthesize without a model, the voice helper must answer that the model is missing:
+// that it answers at all means it found its shader library and its own libraries.
+const voice = runs(join(resources, 'native', 'screenrx-dub'), [
+  'synthesize', '--models', join(tmpdir(), 'screenrx-smoke-no-models'), '--reference', '/dev/null',
+  '--reference-text', '/dev/null', '--language', 'en', '--jobs', '/dev/null'
+])
+check(
+  'the bundled voice helper starts, with its shader library beside it',
+  /"bad-arguments"|"model-missing"/.test(voice.text) && existsSync(join(resources, 'native', 'mlx.metallib')),
+  voice.text.split('\n').pop()
 )
 check('the bundled transcriber starts and answers', /"unreadable-audio"|"unsupported-os"/.test(transcriber.text), transcriber.text.split('\n').pop())
 
@@ -79,6 +91,9 @@ try {
   )
 
   const tools = await page.evaluate(() => window.screenrx.ai.providers(true))
+  const dub = await page.evaluate(() => window.screenrx.dub.status())
+  check('dubbing is available in the packaged app', dub.available === true, `voice model: ${dub.model}`)
+
   check(
     'the AI tools installed on this Mac are found from the packaged app',
     tools.length === 3,

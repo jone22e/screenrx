@@ -102,6 +102,22 @@ export interface WebcamSettings {
   mirrored: boolean
 }
 
+/** The audio tracks a session can have, each recorded to its own file. */
+export type AudioTrackKind = 'microphone' | 'systemAudio'
+export const AUDIO_TRACK_KINDS: readonly AudioTrackKind[] = ['microphone', 'systemAudio']
+
+/** How one audio track takes part in the edit. The track itself is never changed. */
+export interface AudioTrackSettings {
+  /** A muted track is left out of the preview and of the exported file. */
+  muted: boolean
+}
+
+export type AudioSettings = Record<AudioTrackKind, AudioTrackSettings>
+
+/** Languages captions can be translated into. */
+export type CaptionLanguage = 'en' | 'es' | 'zh' | 'pt'
+export const CAPTION_LANGUAGES: readonly CaptionLanguage[] = ['en', 'es', 'zh', 'pt']
+
 /** One caption: a line of text shown over a span of SOURCE time. */
 export interface CaptionCue {
   id: string
@@ -139,8 +155,12 @@ export interface CaptionSettings {
   visible: boolean
   length: CaptionLength
   style: CaptionStyle
-  /** Sorted by start time, never overlapping. */
+  /** Sorted by start time, never overlapping. Their text is in the language that was spoken. */
   cues: CaptionCue[]
+  /** The language shown: a translation, or `null` for the captions as spoken. */
+  language: CaptionLanguage | null
+  /** Translated text of each caption, by language and then by caption id. */
+  translations: Partial<Record<CaptionLanguage, Record<string, string>>>
 }
 
 export const PROJECT_SCHEMA_VERSION = 1
@@ -152,8 +172,24 @@ export interface Project {
   background: BackgroundSettings
   webcam: WebcamSettings
   captions: CaptionSettings
+  audio: AudioSettings
+  dub: DubSettings
   export: ExportSettings
 }
+
+/**
+ * Which dubbing, if any, is heard instead of the recorded voice. The dubbing
+ * tracks themselves are files of the session; this only says which one plays.
+ */
+export interface DubSettings {
+  /** The language of the dubbing in use, or `null` for the voice as recorded. */
+  language: CaptionLanguage | null
+}
+
+export const createAudioSettings = (): AudioSettings => ({
+  microphone: { muted: false },
+  systemAudio: { muted: false }
+})
 
 export const DEFAULT_EXPORT_SETTINGS: ExportSettings = { format: 'mp4', quality: 'high', fps: 30, speed: 1 }
 
@@ -194,7 +230,9 @@ export function createCaptionSettings(): CaptionSettings {
     visible: true,
     length: 'medium',
     style: { ...DEFAULT_CAPTION_STYLE, position: { ...DEFAULT_CAPTION_STYLE.position } },
-    cues: []
+    cues: [],
+    language: null,
+    translations: {}
   }
 }
 
@@ -213,6 +251,8 @@ export function createProject(sessionId: string, effects: TimelineEffect[] = [])
     background: { ...DEFAULT_BACKGROUND },
     webcam: { ...DEFAULT_WEBCAM, position: { ...DEFAULT_WEBCAM.position } },
     captions: createCaptionSettings(),
+    audio: createAudioSettings(),
+    dub: { language: null },
     export: { ...DEFAULT_EXPORT_SETTINGS }
   }
 }
@@ -326,9 +366,26 @@ function parseCaptions(value: unknown): CaptionSettings {
     cues.push({ ...base, text: entry.text.slice(0, CAPTION_LIMITS.maxTextLength) })
   }
 
+  // A translation only holds text for captions that exist; a language with none left is dropped.
+  const saved = isRecord(settings.translations) ? settings.translations : {}
+  const translations: CaptionSettings['translations'] = {}
+  for (const language of CAPTION_LANGUAGES) {
+    const texts = isRecord(saved[language]) ? saved[language] : {}
+    const kept: Record<string, string> = {}
+    for (const cue of cues) {
+      const text = texts[cue.id]
+      if (typeof text === 'string') kept[cue.id] = text.slice(0, CAPTION_LIMITS.maxTextLength)
+    }
+    if (Object.keys(kept).length > 0) translations[language] = kept
+  }
+  const language =
+    includes(CAPTION_LANGUAGES, settings.language) && translations[settings.language] ? settings.language : null
+
   return {
     visible: settings.visible !== false,
     length: includes(CAPTION_LENGTHS, settings.length) ? settings.length : 'medium',
+    language,
+    translations,
     style: {
       font: includes(CAPTION_FONT_IDS, style.font) ? style.font : fallback.font,
       sizeRatio: isFiniteNumber(style.sizeRatio)
@@ -346,6 +403,17 @@ function parseCaptions(value: unknown): CaptionSettings {
     },
     cues
   }
+}
+
+/** Projects saved before tracks could be muted play every track. */
+function parseAudio(value: unknown): AudioSettings {
+  const settings = isRecord(value) ? value : {}
+  const audio = createAudioSettings()
+  for (const kind of AUDIO_TRACK_KINDS) {
+    const track = settings[kind]
+    audio[kind] = { muted: isRecord(track) && track.muted === true }
+  }
+  return audio
 }
 
 function parseBase(value: Record<string, unknown>): TimelineEffectBase | null {
@@ -407,6 +475,11 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
     background: parseBackground(value.background),
     webcam: parseWebcam(value.webcam),
     captions: parseCaptions(value.captions),
+    audio: parseAudio(value.audio),
+    dub: {
+      language:
+        isRecord(value.dub) && includes(CAPTION_LANGUAGES, value.dub.language) ? value.dub.language : null
+    },
     export: {
       format: 'mp4',
       quality: settings.quality === 'standard' ? 'standard' : 'high',

@@ -11,6 +11,10 @@ import type { ThumbnailService } from './ThumbnailService'
 import { parseByteRange } from './byteRange'
 
 const CONTENT_TYPES: Record<MediaTrack, string> = {
+  dubEn: 'audio/mp4',
+  dubEs: 'audio/mp4',
+  dubZh: 'audio/mp4',
+  dubPt: 'audio/mp4',
   screen: 'video/mp4',
   webcam: 'video/mp4',
   microphone: 'audio/mp4',

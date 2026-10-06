@@ -106,7 +106,12 @@ final class ScreenRecorder: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             phase = .finishing
             return (self.stream, clock.elapsedNs(atHostNs: HostClock.nowNs()), self.companions)
         }
+        // Nothing stamped after this instant is written; what was heard before
+        // it and is still arriving gets a moment to land (see `audioTailGraceSeconds`).
         companions?.seal(atNs: endNs)
+        if companions?.recordsAudio == true {
+            try? await Task.sleep(nanoseconds: UInt64(CaptureDefaults.audioTailGraceSeconds * 1_000_000_000))
+        }
         await halt(stream)
         return try await finishWriting(endNs: endNs)
     }

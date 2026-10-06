@@ -64,7 +64,7 @@ function note(name, detail) {
   console.log(`INFO  ${name}  (${detail})`)
 }
 
-function run(command, args) {
+function run(command, args, wantStderr = false) {
   const result = spawnSync(command, args, {
     encoding: 'buffer',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -75,7 +75,8 @@ function run(command, args) {
     const reason = result.error?.message ?? result.stderr.toString('utf8').slice(-400)
     throw new Error(`${command} failed: ${reason}`)
   }
-  return result.stdout
+  // Some tools (FFmpeg's measurements) report on stderr.
+  return wantStderr ? result.stderr.toString('utf8') : result.stdout
 }
 
 /** App windows are not drawn while the screen is locked, so nothing here could be verified. */
@@ -165,10 +166,58 @@ async function main() {
       'esac',
       `printf '%s\\n' "$@" > "$0.args"`,
       'cat > "$0.stdin"',
-      `echo '{"type":"result","is_error":false,"structured_output":{"cuts":[{"fromWord":0,"toWord":1,"kind":"filler","reason":"Saudação que pode sair."}]}}'`
+      // Asked for translations (the schema names them), it answers in Chinese; otherwise, with a cut.
+      'case "$*" in',
+      `  *translations*) echo '{"type":"result","is_error":false,"structured_output":{"translations":[{"index":0,"text":"大家好，今天"},{"index":1,"text":"我们来导出"},{"index":2,"text":"一个视频。"},{"index":3,"text":"谢谢。"},{"index":4,"text":"再见。"},{"index":5,"text":"好的。"}]}}';;`,
+      `  *) echo '{"type":"result","is_error":false,"structured_output":{"cuts":[{"fromWord":0,"toWord":1,"kind":"filler","reason":"Saudação que pode sair."}]}}';;`,
+      'esac'
+
     ].join('\n')
   )
   chmodSync(aiStub, 0o755)
+
+  // Dubbing: with SCREENRX_E2E_VOICE_MODELS pointing at a folder that already
+  // holds the voice model, the real helper clones the fixture's voice. Without
+  // it, a stand-in "speaks" a short tone per stretch, so the app's own flow —
+  // download, generate, use, export — is exercised without a 1 GB download.
+  const realVoiceModels = process.env.SCREENRX_E2E_VOICE_MODELS ?? null
+  const voiceStub = join(aiDir, 'screenrx-dub.mjs')
+  writeFileSync(
+    voiceStub,
+    `#!/usr/bin/env node
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+const args = process.argv.slice(2)
+const value = (name) => args[args.indexOf(name) + 1]
+const say = (message) => console.log(JSON.stringify(message))
+const tone = (seconds) => {
+  const rate = 24000, count = Math.round(seconds * rate), data = Buffer.alloc(count * 2)
+  for (let i = 0; i < count; i++) data.writeInt16LE(Math.round(Math.sin((i / rate) * 2 * Math.PI * 330) * 9000), i * 2)
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0); header.writeUInt32LE(36 + data.length, 4); header.write('WAVEfmt ', 8)
+  header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(1, 22)
+  header.writeUInt32LE(rate, 24); header.writeUInt32LE(rate * 2, 28); header.writeUInt16LE(2, 32); header.writeUInt16LE(16, 34)
+  header.write('data', 36); header.writeUInt32LE(data.length, 40)
+  return Buffer.concat([header, data])
+}
+if (args[0] === 'prepare') {
+  say({ type: 'status', state: 'downloading' })
+  say({ type: 'progress', fraction: 0.5 })
+  const dir = join(value('--models'), 'mlx-audio', 'mlx-community_OmniVoice-4bit')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, '.screenrx-unpacked'), '')
+  say({ type: 'done' })
+} else {
+  say({ type: 'status', state: 'synthesizing' })
+  for (const job of JSON.parse(readFileSync(value('--jobs'), 'utf8'))) {
+    writeFileSync(job.output, tone(1.2))
+    say({ type: 'item', id: job.id, durationMs: 1200 })
+  }
+  say({ type: 'done' })
+}
+`
+  )
+  chmodSync(voiceStub, 0o755)
 
   const app = await electron.launch({
     // Screenshots are compared with exported frames: without this, a wide-gamut
@@ -180,7 +229,9 @@ async function main() {
       SCREENRX_RECORDINGS_DIR: recordingsDir,
       SCREENRX_HELPER_PATH: helperCopy,
       SCREENRX_EXPORT_DIR: exportsDir,
-      SCREENRX_AI_CLI_DIR: aiDir
+      SCREENRX_AI_CLI_DIR: aiDir,
+      SCREENRX_VOICE_MODELS_DIR: realVoiceModels ?? join(workDir, 'voice-models'),
+      ...(realVoiceModels ? {} : { SCREENRX_VOICE_HELPER_PATH: voiceStub })
     }
   })
 
@@ -600,6 +651,35 @@ async function main() {
         }
       }
 
+      // The speed of the finished video is chosen in the editor, where it can be watched first.
+      {
+        const clock = async () => {
+          const [minutes, rest] = (await mainPage.locator('.transport-time span').first().innerText()).split(':')
+          return Number(minutes) * 60 + Number(rest.replace(',', '.'))
+        }
+        const speedPicker = mainPage.getByLabel('Velocidade do vídeo')
+        await mainPage.getByLabel('Voltar ao início').click()
+        await speedPicker.selectOption('2')
+        await sleep(600)
+        const savedSpeed = JSON.parse(readFileSync(join(sessionDir, 'project.json'), 'utf8')).export.speed
+        const from = await clock()
+        await mainPage.keyboard.press('Space')
+        await sleep(1500)
+        await mainPage.keyboard.press('Space')
+        const played = (await clock()) - from
+        await mainPage.getByRole('button', { name: 'Exportar', exact: true }).click()
+        const offered = await mainPage.getByRole('radio', { name: '2×', exact: true }).getAttribute('aria-checked')
+        await mainPage.getByRole('button', { name: 'Cancelar', exact: true }).click()
+        check(
+          'the speed is chosen in the editor: the preview plays at it and the export dialog starts from it',
+          savedSpeed === 2 && played > 2.2 && played < 4 && offered === 'true',
+          `${played.toFixed(1)} s of video played in 1.5 s at 2×`
+        )
+        await speedPicker.selectOption('1')
+        await mainPage.getByLabel('Voltar ao início').click()
+        await sleep(400)
+      }
+
       // 1x, no cuts: the file must match the recording and the preview.
       const normal = await exportNow('1×')
       const normalMs = Number(normal.video?.duration) * 1000
@@ -681,6 +761,24 @@ async function main() {
       const durationLabel = await mainPage.locator('.transport-duration').innerText()
       check('the editor clock shows the edited duration', durationLabel.includes(`0${Math.floor(keptMs / 1000)}`.slice(-2)), durationLabel.trim())
 
+      // A muted track is silent in the edit: with every track muted, the file has no audio at all.
+      const trackSwitches = mainPage.locator('.timeline-label-toggle')
+      const trackCount = await trackSwitches.count()
+      for (let index = 0; index < trackCount; index++) await trackSwitches.nth(index).click()
+      await sleep(700)
+      const mutedProject = JSON.parse(readFileSync(join(sessionDir, 'project.json'), 'utf8')).audio
+      const silent = await exportNow('2×', '30 fps')
+      check(
+        'muting the audio tracks on the timeline leaves them out of the exported file',
+        trackCount >= 1 && mutedProject.systemAudio.muted === true && !silent.error && !silent.audio && Boolean(silent.video),
+        silent.error ?? `${trackCount} tracks muted, audio stream: ${silent.audio ? 'present' : 'none'}`
+      )
+      // Heard again for what follows.
+      for (let index = 0; index < trackCount; index++) await trackSwitches.nth(index).click()
+      await sleep(700)
+      const unmuted = JSON.parse(readFileSync(join(sessionDir, 'project.json'), 'utf8')).audio
+      check('a muted track can be turned back on', Object.values(unmuted).every((track) => track.muted === false))
+
       const fast = await exportNow('2×', '60 fps')
       const fastMs = Number(fast.video?.duration) * 1000
       check(
@@ -737,15 +835,21 @@ async function main() {
         note('no Portuguese voice on this Mac to synthesize speech with', 'caption checks skipped')
       } else {
         cpSync(sessionDir, captionDir, { recursive: true })
-        for (const file of ['project.json', 'microphone.m4a']) rmSync(join(captionDir, file), { force: true })
-        const speechPath = join(captionDir, 'system.m4a')
+        // The speech is the fixture's microphone: captions, and the voice a dubbing clones, come from it.
+        for (const file of ['project.json', 'system.m4a']) rmSync(join(captionDir, file), { force: true })
+        const speechPath = join(captionDir, 'microphone.m4a')
         run('afconvert', ['-f', 'm4af', '-d', 'aac', speechAiff, speechPath])
         const speechMs = Number(run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', speechPath]).toString()) * 1000
         const fixture = JSON.parse(JSON.stringify(manifest))
         fixture.id = captionId
         fixture.createdAt = '2020-01-01T12:00:00.000Z'
-        fixture.assets.systemAudio = { ...fixture.assets.systemAudio, durationMs: speechMs }
-        delete fixture.assets.microphone
+        fixture.assets.microphone = {
+          file: 'microphone.m4a',
+          sizeBytes: readFileSync(speechPath).length,
+          durationMs: speechMs,
+          deviceName: 'Voz sintetizada'
+        }
+        delete fixture.assets.systemAudio
         writeFileSync(join(captionDir, 'session.json'), JSON.stringify(fixture, null, 2) + '\n')
         const speechBefore = readFileSync(speechPath)
         const readCaptionFile = (file) => JSON.parse(readFileSync(join(captionDir, file), 'utf8'))
@@ -760,6 +864,26 @@ async function main() {
           await mainPage.locator('.card-poster').first().waitFor()
         }
         await reloadToLibrary()
+        // Every audio element the editor creates is kept track of, to see what the preview plays.
+        await mainPage.evaluate(() => {
+          const Original = window.Audio
+          window.__audios = []
+          window.Audio = function (source) {
+            const element = new Original(source)
+            window.__audios.push(element)
+            return element
+          }
+        })
+        const audioStates = () =>
+          mainPage.evaluate(() =>
+            window.__audios.map((element) => ({
+              track: element.src.split('/').pop().split('?')[0],
+              playing: !element.paused,
+              muted: element.muted,
+              timeS: element.currentTime,
+              failed: element.error !== null
+            }))
+          )
         await mainPage.locator('.card-poster').last().click()
         await canvas.waitFor()
         await mainPage.getByRole('tab', { name: 'Legendas' }).click()
@@ -777,7 +901,7 @@ async function main() {
           check(
             'speech is transcribed on this Mac, word by word, on the recording clock',
             transcript.locale === 'pt-BR' &&
-              transcript.track === 'systemAudio' &&
+              transcript.track === 'microphone' &&
               /exportar/i.test(said) &&
               /vídeo/i.test(said) &&
               transcript.words.every(
@@ -878,6 +1002,167 @@ async function main() {
             corrected === 'Texto corrigido' && undone === cue.text,
             `"${corrected}" → "${undone}"`
           )
+
+          // The captions can be shown in another language, translated by the AI tool.
+          const originalText = await mainPage.locator('.cue-text').first().inputValue()
+          await seekCaption()
+          const beforeTranslation = await shot('caption-original.png')
+          await mainPage.getByRole('radio', { name: /Chinês/ }).click()
+          const translatedText = await mainPage
+            .waitForFunction(() => /[\u4e00-\u9fff]/.test(document.querySelector('.cue-text')?.value ?? ''), null, { timeout: 30_000 })
+            .then(() => mainPage.locator('.cue-text').first().inputValue(), () => '')
+          await sleep(700)
+          const translatedCaptions = readCaptionFile('project.json').captions
+          const sentForTranslation = existsSync(`${aiStub}.stdin`) ? readFileSync(`${aiStub}.stdin`, 'utf8') : ''
+          check(
+            'captions are translated by the AI tool and saved with the project, the spoken text kept',
+            /[\u4e00-\u9fff]/.test(translatedText) &&
+              translatedCaptions.language === 'zh' &&
+              Object.keys(translatedCaptions.translations.zh ?? {}).length === translatedCaptions.cues.length &&
+              translatedCaptions.cues[0].text === originalText &&
+              sentForTranslation.includes(`0|${originalText}`),
+            `"${originalText}" → "${translatedText}"`
+          )
+          await seekCaption()
+          const afterTranslation = await shot('caption-translated.png')
+          if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, 'captions-translated.png') })
+          await mainPage.getByRole('radio', { name: /Original/ }).click()
+          await sleep(500)
+          const backToOriginal = await mainPage.locator('.cue-text').first().inputValue()
+          await mainPage.getByRole('radio', { name: /Chinês/ }).click()
+          await sleep(500)
+          const translationDifference = meanAbsoluteDifference(beforeTranslation, afterTranslation)
+          check(
+            'the preview shows the chosen language, and switching back and forth needs no new translation',
+            translationDifference > 0.2 &&
+              backToOriginal === originalText &&
+              /[\u4e00-\u9fff]/.test(await mainPage.locator('.cue-text').first().inputValue()),
+            `difference ${translationDifference.toFixed(1)} between the two languages`
+          )
+          // --- dubbing: the translated captions, spoken in the voice of the microphone ---
+          // Dubbing is its own tab, apart from captions: what the captions show does not change.
+          const captionLanguageBefore = readCaptionFile('project.json').captions.language
+          await mainPage.getByRole('tab', { name: 'Dublagem' }).click()
+          const dubPath = join(captionDir, 'dub-zh.m4a')
+          const dubButton = mainPage.getByRole('button', { name: 'Dublar em chinês' })
+          const download = mainPage.getByRole('button', { name: /Baixar modelo de voz/ })
+          await Promise.race([dubButton.waitFor({ timeout: 15_000 }), download.waitFor({ timeout: 15_000 })]).catch(() => undefined)
+          if (realVoiceModels) {
+            note('dubbing uses the real voice model', realVoiceModels)
+          } else {
+            // Nothing is downloaded until the user asks; then the dubbing can be made.
+            const offered = (await download.count()) === 1 && !existsSync(join(workDir, 'voice-models'))
+            await download.click()
+            const ready = await dubButton.waitFor({ timeout: 30_000 }).then(() => true, () => false)
+            check('the voice model is downloaded only when asked for, from inside the app', offered && ready)
+          }
+          if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, 'dubbing-before.png') })
+          const dubStartedAt = Date.now()
+          await dubButton.click()
+          const useDub = mainPage.getByLabel('Usar a dublagem em chinês no vídeo')
+          const dubbed = await useDub.waitFor({ timeout: 300_000 }).then(() => true, () => false)
+          await sleep(900)
+          if (!dubbed) {
+            const notice = await mainPage.locator('.panel-notice').last().innerText().catch(() => '')
+            check('a dubbing is generated in the voice of the microphone track', false, notice.replace(/\s+/g, ' '))
+          } else {
+            const dubMs = Number(run('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', dubPath]).toString()) * 1000
+            const dubVolume = run('ffmpeg', ['-v', 'info', '-i', dubPath, '-af', 'volumedetect', '-f', 'null', '-'], true)
+            const meanVolume = Number(/mean_volume: (-?[\d.]+)/.exec(dubVolume)?.[1])
+            check(
+              'a dubbing is generated in the voice of the microphone track, as a track of the session',
+              Math.abs(dubMs - video.durationMs) < 250 &&
+                meanVolume > -50 &&
+                readCaptionFile('project.json').dub.language === 'zh' &&
+                speechBefore.equals(readFileSync(speechPath)),
+              `${Math.round(dubMs)} ms, mean volume ${meanVolume} dB, generated in ${((Date.now() - dubStartedAt) / 1000).toFixed(1)} s`
+            )
+            check(
+              'the dubbing in use has its own lane and stands in for the microphone',
+              (await mainPage.locator('.lane-dub').count()) === 1 &&
+                (await mainPage.getByRole('switch', { name: 'Som do microfone' }).isDisabled()) &&
+                (await useDub.isChecked())
+            )
+            if (keepArtifacts) await mainPage.screenshot({ path: join(workDir, 'dubbing.png') })
+
+            // In the preview too, not only in the exported file: play, and see what is heard.
+            await mainPage.mouse.click(captionLane.x + 4, captionLane.y + captionLane.height / 2)
+            await sleep(400)
+            await mainPage.keyboard.press('Space')
+            await sleep(1300)
+            const heard = await audioStates()
+            await mainPage.keyboard.press('Space')
+            const dubAudio = heard.filter((audio) => audio.track === 'dubZh' && audio.playing)
+            const voice = heard.find((audio) => audio.track === 'microphone')
+            check(
+              'the preview plays the dubbing as soon as it is generated, with the recorded voice silenced',
+              dubAudio.length === 1 && !dubAudio[0].muted && !dubAudio[0].failed && dubAudio[0].timeS > 0.5 && voice?.muted === true,
+              JSON.stringify(heard.map((audio) => `${audio.track}${audio.playing ? ' playing' : ' stopped'}${audio.muted ? ' muted' : ''} ${audio.timeS.toFixed(1)}s`))
+            )
+
+            if (realVoiceModels) {
+              // Heard by a speech recognizer: is it the translated text, in Chinese?
+              const expected = Object.values(readCaptionFile('project.json').captions.translations.zh).join('')
+              const transcriber = spawnSync(join(projectRoot, 'dist-native', 'darwin', 'screenrx-transcribe'), ['--input', dubPath, '--locale', 'zh-CN'], { encoding: 'utf8' })
+              const heard = transcriber.stdout
+                .split('\n')
+                .filter(Boolean)
+                .flatMap((line) => { try { return JSON.parse(line).words ?? [] } catch { return [] } })
+                .map((word) => word.text)
+                .join('')
+              const strip = (text) => [...text.replace(/[^\p{L}\p{N}]/gu, '')]
+              const wanted = strip(expected)
+              const got = new Set(strip(heard))
+              const found = wanted.filter((character) => got.has(character)).length / Math.max(wanted.length, 1)
+              check(
+                'the dubbing says the translated text, as heard by a speech recognizer',
+                found >= 0.6,
+                `${Math.round(found * 100)}% of "${expected}" in "${heard}"`
+              )
+            }
+
+            const dubbedExport = await exportNow('1×')
+            check(
+              'the exported video carries the dubbing',
+              !dubbedExport.error && Boolean(dubbedExport.audio) && Math.abs(Number(dubbedExport.audio.duration) * 1000 - video.durationMs) < 250,
+              dubbedExport.error ?? `audio ${Math.round(Number(dubbedExport.audio?.duration) * 1000)} ms`
+            )
+
+            // Back to the recorded voice for what follows; the dubbing stays on disk.
+            await useDub.uncheck()
+            await sleep(700)
+            check(
+              'the dubbing can be turned off, and the recorded voice is back',
+              readCaptionFile('project.json').dub.language === null && existsSync(dubPath) && (await mainPage.locator('.lane-dub').count()) === 0
+            )
+            if (!realVoiceModels) {
+              // A language the captions were never translated into: dubbing gets the text by itself.
+              await mainPage.getByRole('button', { name: 'Dublar em espanhol' }).click()
+              const useSpanish = mainPage.getByLabel('Usar a dublagem em espanhol no vídeo')
+              const spanish = await useSpanish.waitFor({ timeout: 60_000 }).then(() => true, () => false)
+              await sleep(900)
+              const afterSpanish = readCaptionFile('project.json')
+              check(
+                'dubbing into a language translates the text by itself',
+                spanish &&
+                  existsSync(join(captionDir, 'dub-es.m4a')) &&
+                  afterSpanish.dub.language === 'es' &&
+                  Object.keys(afterSpanish.captions.translations.es ?? {}).length === afterSpanish.captions.cues.length,
+                spanish ? '' : (await mainPage.locator('.panel-notice').last().innerText().catch(() => '')).replace(/\s+/g, ' ')
+              )
+              await mainPage.getByLabel('Voz original da gravação').check()
+              await sleep(700)
+            }
+            const afterDubbing = readCaptionFile('project.json')
+            check(
+              'dubbing leaves the captions as they were, and the original voice can be chosen back',
+              afterDubbing.captions.language === captionLanguageBefore && afterDubbing.dub.language === null
+            )
+          }
+          await mainPage.getByRole('tab', { name: 'Legendas' }).click()
+
+          await mainPage.getByRole('radio', { name: /Original/ }).click()
+          await sleep(300)
 
           // What the preview shows is what the export contains.
           await mainPage.getByRole('button', { name: 'Estilo Clássica' }).click()

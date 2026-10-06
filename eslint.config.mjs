@@ -24,7 +24,14 @@ export default tseslint.config(
     files: ['scripts/**/*.mjs'],
     languageOptions: {
       // `window` and `document` appear in callbacks the end-to-end script evaluates inside the app's pages.
-      globals: { console: 'readonly', process: 'readonly', window: 'readonly', document: 'readonly' }
+      globals: {
+        console: 'readonly',
+        process: 'readonly',
+        window: 'readonly',
+        document: 'readonly',
+        fetch: 'readonly',
+        Buffer: 'readonly'
+      }
     }
   }
 )

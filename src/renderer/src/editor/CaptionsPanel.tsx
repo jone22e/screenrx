@@ -2,15 +2,24 @@ import type { CSSProperties } from 'react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { CAPTION_FONTS, CAPTION_POSITIONS } from '@engine/captions/captionConfig'
 import { cueAt } from '@engine/captions/captionCues'
+import { CAPTION_LANGUAGE_NAMES, translationTargets } from '@engine/captions/captionTranslation'
 import { formatTimecode } from '@shared/format'
 import type { CaptionLocaleId, TranscriptTrack } from '@shared/models/captions'
 import { CAPTION_LOCALES, DEFAULT_CAPTION_LOCALE, isCaptionLocale } from '@shared/models/captions'
 import type { EditorSession } from '@shared/models/editor'
-import type { CaptionBackdrop, CaptionFont, CaptionLength, CaptionStyle } from '@shared/models/project'
+import type {
+  CaptionBackdrop,
+  CaptionFont,
+  CaptionLanguage,
+  CaptionLength,
+  CaptionStyle
+} from '@shared/models/project'
 import { CAPTION_FONT_IDS, CAPTION_LIMITS } from '@shared/models/project'
+import { aiSettings, currentAiChoice } from '../common/aiSettings'
+import { openSettings } from '../common/settingsScreen'
 import type { EditorStore, TranscriptionActivity } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
-import { CaptionsIcon, RefreshIcon, TrashIcon } from './icons'
+import { CaptionsIcon, GearIcon, RefreshIcon, TrashIcon } from './icons'
 import { Section, Segmented, Slider } from './panelControls'
 
 interface Props {
@@ -105,6 +114,13 @@ export function CaptionsPanel({ session, store, player }: Props) {
   )
   const [track, setTrack] = useState<TranscriptTrack>(transcript?.track ?? tracks[0] ?? 'microphone')
   const [activeCueId, setActiveCueId] = useState<string | null>(null)
+  // Translating is done by the AI tool chosen in the settings.
+  const ai = useSyncExternalStore(aiSettings.subscribe, aiSettings.getState)
+  const aiChoice = currentAiChoice(ai)
+
+  useEffect(() => {
+    void aiSettings.load()
+  }, [])
 
   // The caption under the playhead is marked in the list; React only re-renders when it changes.
   useEffect(() => {
@@ -145,7 +161,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
   const source = (
     <>
       <label className="field">
-        <span className="field-label">Idioma falado</span>
+        <span className="field-label">Idioma em que você falou</span>
         <select
           className="select"
           value={locale}
@@ -208,6 +224,23 @@ export function CaptionsPanel({ session, store, player }: Props) {
   }
 
   const { style } = captions
+  const { translating } = state
+  const spokenLocale = transcript?.locale ?? null
+  const spoken = CAPTION_LOCALES.find((option) => option.id === spokenLocale)?.label ?? 'idioma falado'
+  const targets = translationTargets(spokenLocale)
+
+  const translate = (language: CaptionLanguage): void => {
+    if (!aiChoice) return
+    void store.translateCaptions(language, (target, cues, sourceLocale) =>
+      window.screenrx.captions.translate({ language: target, cues, sourceLocale }, aiChoice.choice)
+    )
+  }
+
+  /** Shows the captions in a language, translating them first when that has not been done yet. */
+  const chooseLanguage = (language: CaptionLanguage | null): void => {
+    if (language === null || captions.translations[language]) store.setCaptionLanguage(language)
+    else translate(language)
+  }
   const placement = PLACEMENTS.find(
     (option) => style.position.x === 0.5 && style.position.y === CAPTION_POSITIONS[option.value]
   )
@@ -229,6 +262,78 @@ export function CaptionsPanel({ session, store, player }: Props) {
           options={LENGTHS}
           onChange={(length) => store.setCaptionLength(length)}
         />
+      </Section>
+
+      <Section title="Idioma da legenda">
+        <p className="panel-hint">
+          Em que idioma o texto aparece no vídeo. Muda só a legenda; para mudar a voz, use a aba Dublagem.
+        </p>
+        <div className="languages" role="radiogroup" aria-label="Idioma da legenda">
+          <button
+            className="language"
+            role="radio"
+            aria-checked={captions.language === null}
+            disabled={translating !== null}
+            onClick={() => chooseLanguage(null)}
+          >
+            <strong>Original</strong>
+            <span>{spoken}</span>
+          </button>
+          {targets.map((language) => {
+            const translated = captions.translations[language] !== undefined
+            return (
+              <button
+                key={language}
+                className="language"
+                role="radio"
+                aria-checked={captions.language === language}
+                disabled={translating !== null || (!translated && !aiChoice)}
+                onClick={() => chooseLanguage(language)}
+              >
+                <strong>{CAPTION_LANGUAGE_NAMES[language].label}</strong>
+                <span>
+                  {translating === language ? 'traduzindo…' : translated ? 'traduzida' : 'traduzir com IA'}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+
+        {translating !== null ? (
+          <div className="progress" role="status">
+            <span className="progress-label">
+              Traduzindo para {CAPTION_LANGUAGE_NAMES[translating].label.toLowerCase()}…
+            </span>
+            <span className="progress-track">
+              <span className="progress-fill" data-indeterminate="true" style={{ width: '100%' }} />
+            </span>
+            <button className="panel-button" onClick={() => void window.screenrx.ai.cancel()}>
+              Cancelar
+            </button>
+          </div>
+        ) : !aiChoice ? (
+          <>
+            <p className="panel-hint">
+              A tradução é feita por uma ferramenta de IA, e nenhuma está pronta neste Mac.
+            </p>
+            <button className="panel-button" onClick={openSettings}>
+              <GearIcon /> Configurar IA
+            </button>
+          </>
+        ) : (
+          <>
+            {captions.language !== null && (
+              <button className="panel-button" onClick={() => captions.language && translate(captions.language)}>
+                <RefreshIcon /> Traduzir de novo
+              </button>
+            )}
+            <p className="panel-hint">
+              A tradução usa o {aiChoice.provider.label}; só o texto das legendas é enviado. Corrija o que quiser
+              na lista abaixo. Trocar o tamanho do texto refaz as legendas e descarta as traduções.
+            </p>
+          </>
+        )}
+        {captionNotice && <p className="panel-notice">{captionNotice}</p>}
       </Section>
 
       <Section title="Estilo">
@@ -367,7 +472,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
                 aria-label={`Legenda em ${formatTimecode(cue.startMs)}`}
                 rows={1}
                 maxLength={CAPTION_LIMITS.maxTextLength}
-                value={cue.text}
+                value={store.textOf(cue)}
                 onFocus={() => {
                   store.selectCue(cue.id)
                   player?.seek(cue.startMs)
@@ -388,19 +493,22 @@ export function CaptionsPanel({ session, store, player }: Props) {
         </ul>
       </Section>
 
-      <Section title="Transcrição">
+      <Section title="Refazer a transcrição">
+        <p className="panel-hint">
+          Use só se o texto original saiu errado. O idioma aqui é o que foi <strong>falado na gravação</strong>,
+          não o idioma de destino: para traduzir a legenda, use "Idioma da legenda", mais acima.
+        </p>
         {source}
         {activity ?? (
           <button className="panel-button" onClick={() => void generate(true)}>
             <RefreshIcon /> Transcrever de novo
           </button>
         )}
-        {captionNotice && <p className="panel-notice">{captionNotice}</p>}
         <button className="panel-button panel-button-danger" onClick={() => store.removeCaptions()}>
           <TrashIcon /> Remover legendas
         </button>
         <p className="panel-hint">
-          Transcrever de novo substitui o texto, inclusive as correções. Tudo pode ser desfeito com ⌘Z.
+          Transcrever de novo substitui o texto, inclusive as correções e as traduções.
         </p>
       </Section>
     </>

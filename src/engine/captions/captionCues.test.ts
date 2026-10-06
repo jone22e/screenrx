@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { TranscriptWord } from '@shared/models/captions'
-import { buildCues, cueAt, normalizeWords } from './captionCues'
+import { createCaptionSettings } from '@shared/models/project'
+import { buildCues, captionAt, cueAt, cueText, normalizeWords } from './captionCues'
 
 const word = (text: string, startMs: number, endMs: number): TranscriptWord => ({ text, startMs, endMs })
 
@@ -109,5 +110,29 @@ describe('cueAt', () => {
 
   it('finds nothing when there are no captions', () => {
     expect(cueAt([], 100)).toBeNull()
+  })
+})
+
+describe('captionAt', () => {
+  const cues = [
+    { id: 'a', startMs: 0, endMs: 1000, text: 'Olá, pessoal.' },
+    { id: 'b', startMs: 1000, endMs: 2000, text: 'Vamos exportar.' }
+  ]
+  const captions = { ...createCaptionSettings(), cues, translations: { zh: { a: '大家好。' } } }
+
+  it('shows what was spoken when no language is chosen', () => {
+    expect(captionAt(captions, 500)).toBe('Olá, pessoal.')
+    expect(captionAt(captions, 5000)).toBeNull()
+  })
+
+  it('shows the translation in the chosen language, and the original where there is none', () => {
+    const chinese = { ...captions, language: 'zh' as const }
+    expect(captionAt(chinese, 500)).toBe('大家好。')
+    expect(captionAt(chinese, 1500)).toBe('Vamos exportar.')
+    expect(cueText(chinese, cues[0] ?? { id: '', startMs: 0, endMs: 1, text: '' })).toBe('大家好。')
+  })
+
+  it('shows nothing while captions are hidden', () => {
+    expect(captionAt({ ...captions, visible: false }, 500)).toBeNull()
   })
 })

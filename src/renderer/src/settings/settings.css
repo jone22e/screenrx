@@ -63,6 +63,10 @@
   margin: 0 auto;
 }
 
+.settings-section + .settings-section {
+  margin-top: 40px;
+}
+
 .settings-section-head {
   display: flex;
   align-items: flex-start;

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { rm, writeFile } from 'node:fs/promises'
 import type { Writable } from 'node:stream'
 import ffmpegPath from 'ffmpeg-static'
 import ffprobe from '@ffprobe-installer/ffprobe'
@@ -57,6 +58,9 @@ export interface VideoPacket {
 
 /** Enough to see where there is sound; this is for drawing, not listening. */
 const PEAK_SAMPLE_RATE = 8000
+/** How a track is assembled from clips. */
+const CLIP_MIX = { clipsPerMix: 48, sampleRate: 48_000, bitrate: 128_000 } as const
+
 const STDERR_TAIL_BYTES = 16 * 1024
 const MAX_PROBE_OUTPUT_BYTES = 256 * 1024 * 1024
 
@@ -154,6 +158,91 @@ export class FfmpegService {
       '-q:v', '4',
       outputPath
     ])
+  }
+
+  /** Cuts `[startMs, endMs)` of an audio file into a mono WAV at `sampleRate`. */
+  async extractAudioClip(
+    inputPath: string,
+    outputPath: string,
+    startMs: number,
+    endMs: number,
+    sampleRate: number
+  ): Promise<void> {
+    await this.run(this.binaries.ffmpeg, [
+      '-v', 'error', '-y',
+      '-ss', (startMs / 1000).toFixed(3),
+      '-to', (endMs / 1000).toFixed(3),
+      '-i', inputPath,
+      '-ac', '1', '-ar', String(sampleRate),
+      outputPath
+    ])
+  }
+
+  /** The duration of a media file, in milliseconds. */
+  async durationOf(filePath: string): Promise<number> {
+    const output = await this.run(this.binaries.ffprobe, [
+      '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', filePath
+    ])
+    const seconds = Number(output.trim())
+    if (!Number.isFinite(seconds)) throw new FfmpegError('FFprobe reported no duration', output)
+    return seconds * 1000
+  }
+
+  /**
+   * Lays audio clips on one track: each starts at its `startMs`, the rest is
+   * silence, and the track lasts exactly `durationMs`. Written as AAC in an
+   * MP4 container, or as WAV when `outputPath` ends in `.wav`.
+   *
+   * FFmpeg opens every input at once, so a long list is mixed in groups and
+   * the groups are then mixed together.
+   */
+  async mixClips(
+    clips: ReadonlyArray<{ path: string; startMs: number }>,
+    durationMs: number,
+    outputPath: string
+  ): Promise<void> {
+    const { clipsPerMix, sampleRate, bitrate } = CLIP_MIX
+    if (clips.length > clipsPerMix) {
+      const stems: Array<{ path: string; startMs: number }> = []
+      try {
+        for (let start = 0; start < clips.length; start += clipsPerMix) {
+          const stem = `${outputPath}.stem-${stems.length}.wav`
+          stems.push({ path: stem, startMs: 0 })
+          await this.mixClips(clips.slice(start, start + clipsPerMix), durationMs, stem)
+        }
+        await this.mixClips(stems, durationMs, outputPath)
+      } finally {
+        await Promise.all(stems.map((stem) => rm(stem.path, { force: true })))
+      }
+      return
+    }
+
+    const seconds = (durationMs / 1000).toFixed(3)
+    // The graph goes in a file: with many clips it is far longer than a command line should be.
+    const graphPath = `${outputPath}.graph.txt`
+    const graph =
+      clips.length === 0
+        ? `anullsrc=channel_layout=mono:sample_rate=${sampleRate},atrim=0:${seconds}[out]`
+        : [
+            ...clips.map(
+              (clip, index) =>
+                `[${index}:a]aresample=${sampleRate},aformat=channel_layouts=mono,adelay=${Math.round(clip.startMs)}:all=1[c${index}]`
+            ),
+            `${clips.map((_, index) => `[c${index}]`).join('')}amix=inputs=${clips.length}:normalize=0:dropout_transition=0,apad,atrim=0:${seconds}[out]`
+          ].join(';\n')
+    await writeFile(graphPath, graph)
+    try {
+      await this.run(this.binaries.ffmpeg, [
+        '-v', 'error', '-y',
+        ...clips.flatMap((clip) => ['-i', clip.path]),
+        '-filter_complex_script', graphPath,
+        '-map', '[out]',
+        ...(outputPath.endsWith('.wav') ? ['-c:a', 'pcm_s16le'] : ['-c:a', 'aac', '-b:a', String(bitrate), '-f', 'mp4']),
+        outputPath
+      ])
+    } finally {
+      await rm(graphPath, { force: true })
+    }
   }
 
   /** Starts FFmpeg with `args`, to be fed through its stdin. */

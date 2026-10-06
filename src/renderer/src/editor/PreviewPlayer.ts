@@ -1,11 +1,17 @@
-import { cueAt } from '@engine/captions/captionCues'
+import { captionAt } from '@engine/captions/captionCues'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import type { TimeMap } from '@engine/time/timeMapping'
 import { nextKeptSourceTime } from '@engine/time/timeMapping'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { cameraAt } from '@engine/zoom/zoomCamera'
 import type { EditorSession } from '@shared/models/editor'
-import type { BackgroundSettings, CaptionSettings, WebcamSettings, ZoomEffect } from '@shared/models/project'
+import type {
+  AudioSettings,
+  BackgroundSettings,
+  CaptionSettings,
+  WebcamSettings,
+  ZoomEffect
+} from '@shared/models/project'
 import { composeFrame } from '../rendering/composeFrame'
 
 /** The preview canvas never needs more pixels than this, whatever the recording's size. */
@@ -23,6 +29,12 @@ export interface PreviewSettings {
   background: BackgroundSettings
   webcam: WebcamSettings
   captions: CaptionSettings
+  /** Which audio tracks are heard. */
+  audio: AudioSettings
+  /** The dubbing heard instead of the recorded voice, when one is in use. */
+  dubUrl: string | null
+  /** Global speed of the finished video: the preview plays at it, as the exported file will. */
+  speed: number
 }
 
 /**
@@ -40,7 +52,10 @@ export interface PreviewSettings {
 export class PreviewPlayer {
   private readonly video: HTMLVideoElement
   private readonly webcam: HTMLVideoElement | null
-  private readonly companions: HTMLMediaElement[]
+  private companions: HTMLMediaElement[]
+  /** The dubbing in use; created when one is chosen. */
+  private dub: { url: string; element: HTMLAudioElement } | null = null
+  private readonly audioTracks: Array<{ kind: 'microphone' | 'systemAudio'; element: HTMLAudioElement }>
   private readonly context: CanvasRenderingContext2D
   private readonly output: Size
   private settings: PreviewSettings
@@ -81,12 +96,15 @@ export class PreviewPlayer {
     this.webcam?.addEventListener('seeked', this.render)
     this.webcam?.addEventListener('loadeddata', this.render)
 
-    const audio = session.audio.map((track) => {
+    this.audioTracks = session.audio.map((track) => {
       const element = new Audio(track.url)
       element.preload = 'auto'
-      return element
+      return { kind: track.kind, element }
     })
-    this.companions = [...(this.webcam ? [this.webcam] : []), ...audio]
+    this.companions = [...(this.webcam ? [this.webcam] : []), ...this.audioTracks.map((track) => track.element)]
+    this.applyDub()
+    this.applyMutes()
+    this.applySpeed()
   }
 
   get currentTimeMs(): number {
@@ -114,6 +132,9 @@ export class PreviewPlayer {
 
   update(settings: PreviewSettings): void {
     this.settings = settings
+    this.applyDub()
+    this.applyMutes()
+    this.applySpeed()
     this.render()
   }
 
@@ -178,6 +199,51 @@ export class PreviewPlayer {
     this.errorListeners.clear()
   }
 
+  /**
+   * A muted track keeps playing in step with the others, silently, so unmuting
+   * is instant. A dubbing in use takes the place of the recorded voice.
+   */
+  private applyMutes(): void {
+    for (const track of this.audioTracks) {
+      const replaced = track.kind === 'microphone' && this.dub !== null
+      track.element.muted = replaced || this.settings.audio[track.kind].muted
+    }
+  }
+
+  /**
+   * Every track plays at the speed of the finished video. Voices keep their
+   * pitch (the media elements' default), as they do in the exported file.
+   */
+  private applySpeed(): void {
+    const { speed } = this.settings
+    for (const element of [this.video, ...this.companions]) {
+      // Both: loading a source puts the rate back to the default one.
+      if (element.defaultPlaybackRate !== speed) element.defaultPlaybackRate = speed
+      if (element.playbackRate !== speed) element.playbackRate = speed
+    }
+  }
+
+  /** Loads the dubbing that was chosen, or lets go of the one no longer in use. */
+  private applyDub(): void {
+    const url = this.settings.dubUrl
+    if (url === (this.dub?.url ?? null)) return
+    if (this.dub) {
+      const previous = this.dub.element
+      previous.pause()
+      previous.removeAttribute('src')
+      previous.load()
+      this.companions = this.companions.filter((element) => element !== previous)
+      this.dub = null
+    }
+    if (url === null) return
+    const element = new Audio(url)
+    element.preload = 'auto'
+    element.currentTime = this.video.currentTime
+    this.dub = { url, element }
+    this.companions = [...this.companions, element]
+    if (this.playing) void element.play().catch(() => undefined)
+  }
+
   private createVideo(url: string): HTMLVideoElement {
     const video = document.createElement('video')
     video.muted = true
@@ -197,7 +263,7 @@ export class PreviewPlayer {
       webcam.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
 
     const { captions } = this.settings
-    const cue = captions.visible ? cueAt(captions.cues, timeMs) : null
+    const caption = captionAt(captions, timeMs)
 
     const regions = composeFrame(this.context, this.output, {
       screen: this.video,
@@ -211,7 +277,7 @@ export class PreviewPlayer {
         : null,
       camera: cameraAt(this.settings.zooms, timeMs),
       background: this.settings.background,
-      caption: cue ? { text: cue.text, style: captions.style } : null
+      caption: caption === null ? null : { text: caption, style: captions.style }
     })
     this.drawnCaption = regions.caption
     for (const listener of this.timeListeners) listener(timeMs)
@@ -239,8 +305,10 @@ export class PreviewPlayer {
   /** Keeps the separately recorded tracks in step with the screen track. */
   private alignCompanions(): void {
     const time = this.video.currentTime
+    // The tolerance is in time as heard: played faster, the same slip covers more of the recording.
+    const tolerance = MAX_TRACK_DRIFT_S * Math.max(1, this.settings.speed)
     for (const companion of this.companions) {
-      if (Math.abs(companion.currentTime - time) > MAX_TRACK_DRIFT_S) companion.currentTime = time
+      if (Math.abs(companion.currentTime - time) > tolerance) companion.currentTime = time
     }
   }
 

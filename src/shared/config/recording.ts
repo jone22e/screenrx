@@ -30,5 +30,10 @@ export const SESSION_FILES = {
   interactions: 'interactions.json',
   project: 'project.json',
   /** Derived from an audio track; can be regenerated at any time. */
-  transcript: 'transcript.json'
+  transcript: 'transcript.json',
+  /** Dubbing tracks: speech synthesized in another language. Derived, one per language. */
+  dubEn: 'dub-en.m4a',
+  dubEs: 'dub-es.m4a',
+  dubZh: 'dub-zh.m4a',
+  dubPt: 'dub-pt.m4a'
 } as const

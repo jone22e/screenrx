@@ -3,9 +3,10 @@ import { Menu, app, dialog, ipcMain, screen, shell } from 'electron'
 import type { IpcInvokeChannel, IpcInvokeContract } from '@shared/ipc/contract'
 import type { AiProvider } from '@shared/models/ai'
 import { isAiProviderId, parseAiChoice } from '@shared/models/ai'
-import { parseTranscriptionRequest } from '@shared/models/captions'
+import { parseCaptionTranslationRequest, parseTranscriptionRequest } from '@shared/models/captions'
 import type { CaptureSourceCatalog } from '@shared/models/capture'
 import { isDeviceId } from '@shared/models/devices'
+import { parseDubRequest } from '@shared/models/dub'
 import type { AppError, IpcResult } from '@shared/models/errors'
 import { appError } from '@shared/models/errors'
 import { isPermissionKind } from '@shared/models/permissions'
@@ -17,8 +18,11 @@ import { isExportTrackName } from '@shared/models/export'
 import { AiError } from '../ai/AiCliService'
 import { AI_PROVIDER_SPECS } from '../ai/aiCatalog'
 import type { AiSetupService } from '../ai/AiSetupService'
+import type { CaptionTranslationService } from '../ai/CaptionTranslationService'
 import type { CutSuggestionService } from '../ai/CutSuggestionService'
 import { TranscriptionError } from '../captions/TranscriptionService'
+import { DubError } from '../dub/DubbingService'
+import type { DubbingService } from '../dub/DubbingService'
 import type { TranscriptionService } from '../captions/TranscriptionService'
 import type { CaptureEngine } from '../capture/CaptureEngine'
 import { CaptureError } from '../capture/CaptureEngine'
@@ -43,6 +47,8 @@ export interface IpcDependencies {
   exports: ExportService
   transcriptions: TranscriptionService
   suggestions: CutSuggestionService
+  translations: CaptionTranslationService
+  dubbing: DubbingService
   aiSetup: AiSetupService
   waveforms: WaveformService
   thumbnails: ThumbnailService
@@ -73,6 +79,8 @@ export function registerIpc(deps: IpcDependencies): void {
     exports,
     transcriptions,
     suggestions,
+    translations,
+    dubbing,
     aiSetup,
     waveforms,
     thumbnails,
@@ -282,6 +290,30 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle('captions:cancel', () => transcriptions.cancel())
 
+  const dubResult = async <T>(operation: () => Promise<T>): Promise<IpcResult<T>> => {
+    try {
+      return { ok: true, value: await operation() }
+    } catch (error) {
+      const failure = error instanceof DubError ? error.appError : appError('dub-failed', String(error))
+      if (failure.code !== 'dub-cancelled') {
+        logger.error('dubbing failed', { code: failure.code, detail: failure.detail })
+      }
+      return { ok: false, error: failure }
+    }
+  }
+
+  handle('dub:status', () => dubbing.status())
+  handle('dub:prepare-model', () => dubResult(() => dubbing.prepareModel()))
+  handle('dub:remove-model', () => dubResult(() => dubbing.removeModel()))
+  handle('dub:generate', ([sessionId, value]) => {
+    const request = parseDubRequest(value)
+    if (!isSessionId(sessionId) || !request) {
+      return { ok: false, error: appError('dub-failed', 'invalid dubbing request') }
+    }
+    return dubResult(() => dubbing.generate(sessionId, request))
+  })
+  handle('dub:cancel', () => dubbing.cancel())
+
   handle('ai:providers', ([refresh]) => aiSetup.providers(refresh === true))
 
   const aiSetupResult = async (
@@ -345,6 +377,29 @@ export function registerIpc(deps: IpcDependencies): void {
   })
 
   handle('ai:cancel', () => suggestions.cancel())
+
+  handle('captions:translate', async ([value, chosen]) => {
+    const request = parseCaptionTranslationRequest(value)
+    const choice = parseAiChoice(chosen)
+    if (!request || !choice) return { ok: false, error: appError('ai-failed', 'invalid translation request') }
+    try {
+      return {
+        ok: true,
+        value: await translations.translate(request.cues, request.sourceLocale, request.language, choice)
+      }
+    } catch (error) {
+      const failure = error instanceof AiError ? error.appError : appError('ai-failed', String(error))
+      if (failure.code !== 'ai-cancelled') {
+        logger.error('caption translation failed', {
+          provider: choice.provider,
+          language: request.language,
+          code: failure.code,
+          detail: failure.detail
+        })
+      }
+      return { ok: false, error: failure }
+    }
+  })
 
   const exportResult = async <T>(operation: () => Promise<T>): Promise<IpcResult<T>> => {
     try {

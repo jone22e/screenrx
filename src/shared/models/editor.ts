@@ -1,4 +1,5 @@
 import type { Transcript } from './captions'
+import type { DubTrack } from './dub'
 import type { Project } from './project'
 import type { InteractionEvent } from './telemetry'
 
@@ -20,6 +21,8 @@ export interface EditorSession {
   audio: Array<{ kind: 'microphone' | 'systemAudio'; url: string }>
   /** Recorded pointer interactions; empty when the session has no telemetry. */
   interactions: InteractionEvent[]
+  /** Dubbing tracks already generated for this session, one per language. */
+  dubs: DubTrack[]
   /** Speech-to-text of the session's audio, when it has been transcribed. */
   transcript: Transcript | null
   project: Project

@@ -145,6 +145,15 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
     }
   }, [session, store])
 
+  // So does dubbing: it runs in the main process and its helper.
+  useEffect(() => {
+    const unsubscribe = window.screenrx.dub.onProgress((progress) => store.setDubProgress(progress))
+    return () => {
+      unsubscribe()
+      if (store.getState().dubbing) void window.screenrx.dub.cancel()
+    }
+  }, [store])
+
   const openExport = (): void => {
     player?.pause()
     setExporting(true)

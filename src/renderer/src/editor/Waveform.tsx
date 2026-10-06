@@ -1,11 +1,20 @@
 import { useEffect, useRef, useState } from 'react'
+import type { WaveformTrack } from '@shared/ipc/contract'
 
 interface Props {
   sessionId: string
-  track: 'microphone' | 'systemAudio'
+  track: WaveformTrack
 }
 
-const COLORS = { microphone: '#7dd3fc', systemAudio: '#c4b5fd' } as const
+const DUB_COLOR = '#f0abfc'
+const COLORS: Record<WaveformTrack, string> = {
+  microphone: '#7dd3fc',
+  systemAudio: '#c4b5fd',
+  dubEn: DUB_COLOR,
+  dubEs: DUB_COLOR,
+  dubZh: DUB_COLOR,
+  dubPt: DUB_COLOR
+}
 
 /** The loudness outline of an audio track, drawn along its timeline lane. */
 export function Waveform({ sessionId, track }: Props) {

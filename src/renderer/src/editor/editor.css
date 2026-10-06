@@ -194,13 +194,45 @@
   color: var(--text-muted);
 }
 
+.transport-speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.transport-speed select {
+  height: 26px;
+  padding: 0 6px;
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+}
+
+.transport-speed[data-changed='true'] select {
+  color: #fff;
+  border-color: #5b8cff;
+}
+
+.transport-output {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
 /* --- sidebar ------------------------------------------------------------- */
 
 .sidebar {
   display: flex;
   flex: none;
   flex-direction: column;
-  width: 288px;
+  width: 344px;
   background: var(--panel);
   border-left: 1px solid var(--hairline);
 }
@@ -225,6 +257,7 @@
   background: transparent;
   border: 0;
   border-radius: 8px;
+  min-width: 0;
 }
 
 .tab:hover {
@@ -641,6 +674,122 @@ kbd {
 .color-field input[type='color']::-webkit-color-swatch {
   border: 0;
   border-radius: 3px;
+}
+
+/* The languages captions can be shown in: the one spoken, and its translations. */
+.languages {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.language {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--text-muted);
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.language strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.language span {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.language:hover:not(:disabled) {
+  border-color: rgba(91, 140, 255, 0.5);
+}
+
+.language:disabled {
+  opacity: 0.5;
+}
+
+.language[aria-checked='true'] {
+  background: rgba(91, 140, 255, 0.14);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Dubbing: one row per language the voice can speak. */
+.dub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dub-spoken {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dub-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.dub-row[data-in-use='true'] {
+  border-color: #f0abfc;
+  box-shadow: 0 0 0 1px rgba(240, 171, 252, 0.5);
+}
+
+.dub-row-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dub-row-head span {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.dub-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dub-again {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--text-muted);
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+}
+
+.dub-again:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.dub-again:disabled {
+  opacity: 0.4;
 }
 
 .cue-list {
@@ -1108,6 +1257,32 @@ kbd {
   flex: none;
   width: 13px;
   height: 13px;
+}
+
+/* The label of an audio lane is also its mute switch. */
+.timeline-label-toggle {
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.timeline-label-toggle:hover {
+  color: var(--text);
+}
+
+.timeline-label-toggle[data-muted='true'] {
+  color: #ff8a8d;
+}
+
+.timeline-label-toggle[data-muted='true'] span {
+  text-decoration: line-through;
+}
+
+.lane-audio[data-muted='true'] .waveform {
+  opacity: 0.25;
+  filter: grayscale(1);
 }
 
 .timeline-label[data-tall='true'] {

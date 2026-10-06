@@ -1,5 +1,6 @@
 import { CAPTION_CONFIG } from '@engine/captions/captionConfig'
-import { buildCues } from '@engine/captions/captionCues'
+import { buildCues, cueText } from '@engine/captions/captionCues'
+import { buildDubUnits, pickVoiceReference } from '@engine/dub/dubUnits'
 import { isExportSpeed } from '@engine/export/exportConfig'
 import { addCut, isCoveredByCuts } from '@engine/suggestions/cutSuggestions'
 import type { TimeMap } from '@engine/time/timeMapping'
@@ -11,14 +12,19 @@ import { MANUAL_ZOOM_DEFAULTS } from '@engine/zoom/zoomConfig'
 import type { TimeSpan } from '@engine/zoom/zoomEditing'
 import { clampScale, spanForNewZoom } from '@engine/zoom/zoomEditing'
 import type { Transcript, TranscriptionRequest, TranscriptionStage } from '@shared/models/captions'
+import type { DubProgress, DubRequest, DubTrack } from '@shared/models/dub'
 import type { EditorSession } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
 import type {
+  AudioSettings,
+  AudioTrackKind,
   BackgroundSettings,
   CaptionCue,
+  CaptionLanguage,
   CaptionLength,
   CaptionSettings,
   CaptionStyle,
+  DubSettings,
   ExportSettings,
   NormalizedPoint,
   Project,
@@ -53,6 +59,14 @@ export interface EditorState {
   background: BackgroundSettings
   webcam: WebcamSettings
   captions: CaptionSettings
+  audio: AudioSettings
+  /** Which dubbing is heard instead of the recorded voice. */
+  dub: DubSettings
+  /** The dubbing tracks that exist for this recording; not part of the project. */
+  dubs: readonly DubTrack[]
+  /** UI state: the dubbing being generated, if any. */
+  dubbing: (DubProgress & { language: CaptionLanguage }) | null
+  dubNotice: string | null
   exportSettings: ExportSettings
   /** The words the captions are built from; not part of the project. `null` until transcribed. */
   transcript: Transcript | null
@@ -60,6 +74,8 @@ export interface EditorState {
   transcription: TranscriptionActivity | null
   /** UI state: why the last transcription produced no captions. */
   captionNotice: string | null
+  /** UI state: the language captions are being translated into, if any. */
+  translating: CaptionLanguage | null
   /** UI state: cuts proposed by the AI and not yet decided on. Never part of the project. */
   suggestions: readonly CutSuggestion[]
   /** UI state: whether the AI is being asked for suggestions. */
@@ -84,6 +100,12 @@ export interface TranscriptionActivity {
 
 type SaveProject = (project: Project) => Promise<IpcResult<null>>
 type Transcribe = (sessionId: string, request: TranscriptionRequest) => Promise<IpcResult<Transcript>>
+type TranslateCaptions = (
+  language: CaptionLanguage,
+  cues: Array<{ id: string; text: string }>,
+  sourceLocale: string
+) => Promise<IpcResult<Record<string, string>>>
+type GenerateDub = (sessionId: string, request: DubRequest) => Promise<IpcResult<DubTrack>>
 type SuggestCuts = (sessionId: string, choice: AiChoice) => Promise<IpcResult<CutSuggestionResult>>
 
 const NO_SPEECH_NOTICE = 'Nenhuma fala foi encontrada nesta trilha de áudio.'
@@ -113,6 +135,10 @@ export class EditorStore {
   private transcript: Transcript | null
   private transcription: TranscriptionActivity | null = null
   private captionNotice: string | null = null
+  private translating: CaptionLanguage | null = null
+  private dubs: DubTrack[]
+  private dubbing: (DubProgress & { language: CaptionLanguage }) | null = null
+  private dubNotice: string | null = null
   /** Every suggestion received and not rejected; the pending ones are those no cut covers yet. */
   private allSuggestions: CutSuggestion[] = []
   private suggesting = false
@@ -132,6 +158,7 @@ export class EditorStore {
   ) {
     this.project = session.project
     this.transcript = session.transcript
+    this.dubs = [...session.dubs]
     this.state = this.derive(NOTHING_SELECTED, 'saved')
   }
 
@@ -439,31 +466,82 @@ export class EditorStore {
    */
   applyTranscript(transcript: Transcript): void {
     this.transcript = transcript
-    this.commitCaptions(
-      { ...this.project.captions, visible: true, cues: this.cuesFor(this.project.captions.length) },
-      null,
-      null
-    )
+    this.commitCaptions(this.withNewCues(this.cuesFor(this.project.captions.length), { visible: true }), null, null)
   }
 
   /** Changes how much text goes into each caption, rebuilding them from the transcript. */
   setCaptionLength(length: CaptionLength): void {
-    const cues = this.transcript ? this.cuesFor(length) : this.project.captions.cues
-    this.commitCaptions({ ...this.project.captions, length, cues }, null, null)
+    if (!this.transcript) {
+      this.commitCaptions({ ...this.project.captions, length }, null, null)
+      return
+    }
+    this.commitCaptions(this.withNewCues(this.cuesFor(length), { length }), null, null)
   }
 
   /** Builds the captions again from the transcript, discarding edits made to them. */
   rebuildCaptions(): void {
     if (!this.transcript) return
-    this.commitCaptions(
-      { ...this.project.captions, visible: true, cues: this.cuesFor(this.project.captions.length) },
-      null,
-      null
-    )
+    this.commitCaptions(this.withNewCues(this.cuesFor(this.project.captions.length), { visible: true }), null, null)
   }
 
   removeCaptions(): void {
-    this.commitCaptions({ ...this.project.captions, cues: [] }, null, null)
+    this.commitCaptions(this.withNewCues([], {}), null, null)
+  }
+
+  /**
+   * Shows the captions in `language` (`null`: as spoken). A language that has
+   * not been translated yet cannot be shown: translate it first.
+   */
+  setCaptionLanguage(language: CaptionLanguage | null): boolean {
+    if (language !== null && !this.project.captions.translations[language]) return false
+    this.commitCaptions({ ...this.project.captions, language }, null, this.state.selectedCueId)
+    return true
+  }
+
+  /**
+   * Translates every caption into `language` and shows the result. The
+   * translation is done elsewhere (by an AI, through the main process); the
+   * text it returns becomes part of the project and can be corrected like
+   * any caption.
+   */
+  async translateCaptions(language: CaptionLanguage, translate: TranslateCaptions, show = true): Promise<void> {
+    if (this.translating || this.project.captions.cues.length === 0) return
+    const cues = this.project.captions.cues.map(({ id, text }) => ({ id, text }))
+    this.translating = language
+    this.captionNotice = null
+    this.refreshCaptionActivity()
+    const result = await translate(language, cues, this.transcript?.locale ?? 'pt-BR').catch(() => null)
+    this.translating = null
+    if (result?.ok) {
+      // Captions may have changed while the translation was on its way: only those still here get it.
+      const current = this.project.captions
+      const texts: Record<string, string> = {}
+      for (const cue of current.cues) {
+        const text = result.value[cue.id]
+        if (text !== undefined) texts[cue.id] = text
+      }
+      if (Object.keys(texts).length === 0) {
+        this.captionNotice = 'A IA não devolveu nenhuma tradução. Tente de novo.'
+      } else {
+        if (Object.keys(texts).length < current.cues.length) {
+          this.captionNotice = 'Algumas legendas ficaram sem tradução e aparecem no idioma original.'
+        }
+        // `show` is false when the translation is only needed to dub: the captions on screen stay as they are.
+        this.commitCaptions(
+          {
+            ...current,
+            language: show ? language : current.language,
+            translations: { ...current.translations, [language]: texts }
+          },
+          null,
+          this.state.selectedCueId
+        )
+        return
+      }
+    } else if (result?.error.code !== 'ai-cancelled') {
+      this.captionNotice = result?.error.message ?? 'Não foi possível traduzir as legendas.'
+    }
+    this.refreshCaptionActivity()
   }
 
   setCaptionsVisible(visible: boolean): void {
@@ -480,8 +558,27 @@ export class EditorStore {
     this.commitCaptions({ ...this.project.captions, style }, gestureKey, this.state.selectedCueId)
   }
 
+  /** Corrects a caption's text, in the language being shown. */
   setCueText(cueId: string, text: string): void {
-    this.editCue(cueId, 'cue-text', (cue) => ({ ...cue, text: text.slice(0, CAPTION_LIMITS.maxTextLength) }))
+    const clipped = text.slice(0, CAPTION_LIMITS.maxTextLength)
+    const { language, translations } = this.project.captions
+    if (language === null) {
+      this.editCue(cueId, 'cue-text', (cue) => ({ ...cue, text: clipped }))
+      return
+    }
+    this.commitCaptions(
+      {
+        ...this.project.captions,
+        translations: { ...translations, [language]: { ...translations[language], [cueId]: clipped } }
+      },
+      `cue-text:${language}:${cueId}`,
+      cueId
+    )
+  }
+
+  /** The text a caption shows in the language chosen. */
+  textOf(cue: CaptionCue): string {
+    return cueText(this.project.captions, cue)
   }
 
   moveCue(original: CaptionCue, deltaMs: number): void {
@@ -508,6 +605,117 @@ export class EditorStore {
       null,
       this.state.selectedCueId === cueId ? null : this.state.selectedCueId
     )
+  }
+
+  // --- dubbing ----------------------------------------------------------------
+
+  /**
+   * Speaks the captions in `language` with the speaker's own voice and puts
+   * the result to use. The captions must already be translated into that
+   * language; the voice is learned from the first seconds of the microphone
+   * track. The work is done by the main process and its native helper.
+   */
+  async generateDub(language: CaptionLanguage, generate: GenerateDub): Promise<void> {
+    if (this.dubbing) return
+    const { captions } = this.project
+    const texts = captions.translations[language]
+    const reference =
+      this.transcript?.track === 'microphone' ? pickVoiceReference(this.transcript.words) : null
+    if (!texts) {
+      this.dubNotice = 'Traduza as legendas para este idioma antes de dublar.'
+    } else if (!reference) {
+      this.dubNotice =
+        'A voz é aprendida do microfone: a gravação precisa de alguns segundos de fala transcritos a partir dele.'
+    } else {
+      this.dubNotice = null
+    }
+    if (!texts || !reference) {
+      this.refreshDub()
+      return
+    }
+
+    const units = buildDubUnits(
+      captions.cues.map((cue) => ({ startMs: cue.startMs, endMs: cue.endMs, text: texts[cue.id] ?? '' })),
+      this.session.durationMs
+    )
+    if (units.length === 0) {
+      this.dubNotice = 'Não há texto para dublar.'
+      this.refreshDub()
+      return
+    }
+
+    this.dubbing = { language, stage: 'loading', fraction: 0 }
+    this.refreshDub()
+    const result = await generate(this.session.sessionId, { language, units, reference }).catch(() => null)
+    this.dubbing = null
+    if (result?.ok) {
+      // The track's address does not change when it is generated again: the stamp makes players reload it.
+      const track = { language, url: `${result.value.url}?v=${Date.now()}` }
+      this.dubs = [...this.dubs.filter((dub) => dub.language !== language), track]
+      this.commit({ ...this.project, dub: { language } }, this.selected(), null)
+      return
+    }
+    if (result?.error.code !== 'dub-cancelled') {
+      this.dubNotice = result?.error.message ?? 'Não foi possível gerar a dublagem.'
+    }
+    this.refreshDub()
+  }
+
+  /**
+   * Dubs the recording into `language` in one step: the text is translated
+   * first when it has not been yet — without changing the captions on screen,
+   * which are a separate matter — and then spoken.
+   */
+  async dubInto(language: CaptionLanguage, translate: TranslateCaptions | null, generate: GenerateDub): Promise<void> {
+    if (this.dubbing || this.translating) return
+    if (this.project.captions.cues.length === 0) {
+      this.dubNotice = 'A dublagem parte do que foi falado: gere as legendas primeiro, na aba Legendas.'
+      this.refreshDub()
+      return
+    }
+    if (!this.project.captions.translations[language]) {
+      if (!translate) {
+        this.dubNotice = 'A tradução do texto é feita por uma ferramenta de IA, e nenhuma está pronta neste Mac.'
+        this.refreshDub()
+        return
+      }
+      this.dubNotice = null
+      this.refreshDub()
+      await this.translateCaptions(language, translate, false)
+      if (!this.project.captions.translations[language]) {
+        // The reason is the translation's; it is shown where the user asked for the dubbing.
+        this.dubNotice = this.captionNotice ?? 'Não foi possível traduzir o texto para dublar.'
+        this.refreshDub()
+        return
+      }
+    }
+    await this.generateDub(language, generate)
+  }
+
+  /** Progress reported while a dubbing is being generated. */
+  setDubProgress(progress: DubProgress): void {
+    if (!this.dubbing) return
+    this.dubbing = { ...this.dubbing, ...progress }
+    this.refreshDub()
+  }
+
+  /** Chooses which dubbing is heard (`null`: the voice as recorded). */
+  setDubLanguage(language: CaptionLanguage | null): void {
+    if (language !== null && !this.dubs.some((dub) => dub.language === language)) return
+    this.commit({ ...this.project, dub: { language } }, this.selected(), null)
+  }
+
+  private refreshDub(): void {
+    this.state = { ...this.state, dubs: this.dubs, dubbing: this.dubbing, dubNotice: this.dubNotice }
+    this.emit()
+  }
+
+  // --- audio ------------------------------------------------------------------
+
+  /** Silences a track in the edit, or lets it be heard again. The recording keeps it either way. */
+  setTrackMuted(track: AudioTrackKind, muted: boolean): void {
+    const audio: AudioSettings = { ...this.project.audio, [track]: { ...this.project.audio[track], muted } }
+    this.commit({ ...this.project, audio }, this.selected(), null)
   }
 
   // --- history ----------------------------------------------------------------
@@ -625,6 +833,16 @@ export class EditorStore {
     )
   }
 
+  /** New captions replace the old ones entirely: translations of those no longer apply. */
+  private withNewCues(cues: CaptionCue[], change: Partial<CaptionSettings>): CaptionSettings {
+    return { ...this.project.captions, ...change, cues, language: null, translations: {} }
+  }
+
+  private refreshCaptionActivity(): void {
+    this.state = { ...this.state, translating: this.translating, captionNotice: this.captionNotice }
+    this.emit()
+  }
+
   private cuesFor(length: CaptionLength): CaptionCue[] {
     if (!this.transcript) return []
     // An audio track can run a little past the screen track; captions cannot.
@@ -693,10 +911,16 @@ export class EditorStore {
       background: this.project.background,
       webcam: this.project.webcam,
       captions: this.project.captions,
+      audio: this.project.audio,
+      dub: this.project.dub,
+      dubs: this.dubs,
+      dubbing: this.dubbing,
+      dubNotice: this.dubNotice,
       exportSettings: this.project.export,
       transcript: this.transcript,
       transcription: this.transcription,
       captionNotice: this.captionNotice,
+      translating: this.translating,
       suggestions: this.pendingSuggestions(),
       suggesting: this.suggesting,
       suggestionNotice: this.suggestionNotice,

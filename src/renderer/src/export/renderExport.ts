@@ -1,4 +1,4 @@
-import { cueAt } from '@engine/captions/captionCues'
+import { captionAt } from '@engine/captions/captionCues'
 import { frameSourceTimeMs } from '@engine/export/exportPlan'
 import { buildTimeMap } from '@engine/time/timeMapping'
 import { cameraAt } from '@engine/zoom/zoomCamera'
@@ -70,7 +70,7 @@ export async function renderExport(
       const frame = await screen.frameAt(sourceMs * 1000)
       if (!frame) throw new Error('The screen track has no frames')
       const webcamFrame = webcam ? await webcam.frameAt(sourceMs * 1000) : null
-      const cue = captions.visible ? cueAt(captions.cues, sourceMs) : null
+      const caption = captionAt(captions, sourceMs)
 
       composeFrame(context, output, {
         screen: frame,
@@ -84,7 +84,7 @@ export async function renderExport(
           : null,
         camera: cameraAt(zooms, sourceMs),
         background: project.background,
-        caption: cue ? { text: cue.text, style: captions.style } : null
+        caption: caption === null ? null : { text: caption, style: captions.style }
       })
 
       const rendered = new VideoFrame(canvas, { timestamp: 0 })

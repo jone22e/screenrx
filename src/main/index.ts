@@ -5,12 +5,14 @@ import { app, dialog, screen, session } from 'electron'
 import { appError } from '@shared/models/errors'
 import { AiCliService } from './ai/AiCliService'
 import { AiSetupService } from './ai/AiSetupService'
+import { CaptionTranslationService } from './ai/CaptionTranslationService'
 import { defaultAiSearchDirs } from './ai/cliProcess'
 import { CutSuggestionService } from './ai/CutSuggestionService'
 import { createCaptureEngine } from './capture/createCaptureEngine'
 import { TranscriptionService } from './captions/TranscriptionService'
 import { ExportService } from './export/ExportService'
 import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
+import { DubbingService } from './dub/DubbingService'
 import { registerIpc } from './ipc/registerIpc'
 import { addLogSink, consoleSink, createLogger, fileSink } from './logging/logger'
 import { ThumbnailService } from './media/ThumbnailService'
@@ -23,6 +25,7 @@ import { WindowManager } from './windows/WindowManager'
 
 const HELPER_BINARY = 'screenrx-capture'
 const TRANSCRIBER_BINARY = 'screenrx-transcribe'
+const VOICE_BINARY = 'screenrx-dub'
 
 const logger = createLogger('app')
 
@@ -51,6 +54,26 @@ function transcriberPath(): string | null {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'native', TRANSCRIBER_BINARY)
     : path.join(app.getAppPath(), 'dist-native', process.platform, TRANSCRIBER_BINARY)
+}
+
+/**
+ * The voice helper (dubbing in a cloned voice): Apple Silicon only, and built
+ * separately (`npm run build:voice`), so a development checkout may not have
+ * it. Development builds may point at a stand-in (the end-to-end test does).
+ */
+function voiceHelperPath(): string | null {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return null
+  if (app.isPackaged) return path.join(process.resourcesPath, 'native', VOICE_BINARY)
+  const candidate = process.env['SCREENRX_VOICE_HELPER_PATH']
+    ? path.resolve(process.env['SCREENRX_VOICE_HELPER_PATH'])
+    : path.join(app.getAppPath(), 'dist-native', process.platform, VOICE_BINARY)
+  return existsSync(candidate) ? candidate : null
+}
+
+/** Where the voice model is downloaded to: the app's own data. */
+function voiceModelsDirectory(): string {
+  const override = app.isPackaged ? undefined : process.env['SCREENRX_VOICE_MODELS_DIR']
+  return override ? path.resolve(override) : path.join(app.getPath('userData'), 'voice-models')
 }
 
 /**
@@ -166,6 +189,16 @@ async function bootstrap(): Promise<void> {
   const ai = new AiCliService(aiTools)
   const aiSetup = new AiSetupService({ ...aiTools, home: os.homedir() })
 
+  const dubbing = new DubbingService({
+    helperPath: voiceHelperPath(),
+    transcriberPath: transcriberPath(),
+    modelsDirectory: voiceModelsDirectory(),
+    ffmpeg,
+    sessions,
+    logger: createLogger('dub'),
+    onProgress: (progress) => windows.broadcast('dub:progress', progress)
+  })
+
   registerIpc({
     engine,
     controller,
@@ -173,7 +206,9 @@ async function bootstrap(): Promise<void> {
     projects,
     exports,
     transcriptions,
+    dubbing,
     suggestions: new CutSuggestionService(ai, sessions, createLogger('ai')),
+    translations: new CaptionTranslationService(ai, createLogger('ai')),
     aiSetup,
     waveforms: new WaveformService(ffmpeg, sessions),
     thumbnails,
@@ -206,6 +241,7 @@ async function bootstrap(): Promise<void> {
         transcriptions.cancel()
         ai.cancel()
         aiSetup.cancel()
+        dubbing.cancel()
         await exports.cancel()
         await controller.shutdown()
         await engine.dispose()

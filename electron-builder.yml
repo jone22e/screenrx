@@ -33,13 +33,15 @@ mac:
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  # The native helpers (capture, transcription), where the main process looks for them.
+  # The native helpers (capture, transcription, voice), where the main process looks for them.
+  # The voice helper comes with MLX's compiled shader library, which it loads from beside itself.
   extraResources:
     - from: dist-native/darwin
       to: native
   binaries:
     - Contents/Resources/native/screenrx-capture
     - Contents/Resources/native/screenrx-transcribe
+    - Contents/Resources/native/screenrx-dub
   extendInfo:
     NSMicrophoneUsageDescription: O ScreenRx grava o microfone junto com a tela quando você o ativa na barra de gravação.
     NSCameraUsageDescription: O ScreenRx grava a câmera junto com a tela quando você a ativa na barra de gravação.

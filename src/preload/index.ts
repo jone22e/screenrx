@@ -68,7 +68,16 @@ const api: ScreenRxApi = {
   captions: {
     generate: (sessionId, request) => invoke('captions:generate', sessionId, request),
     cancel: () => invoke('captions:cancel'),
-    onProgress: (listener) => subscribe('captions:progress', listener)
+    onProgress: (listener) => subscribe('captions:progress', listener),
+    translate: (request, choice) => invoke('captions:translate', request, choice)
+  },
+  dub: {
+    status: () => invoke('dub:status'),
+    prepareModel: () => invoke('dub:prepare-model'),
+    removeModel: () => invoke('dub:remove-model'),
+    generate: (sessionId, request) => invoke('dub:generate', sessionId, request),
+    cancel: () => invoke('dub:cancel'),
+    onProgress: (listener) => subscribe('dub:progress', listener)
   },
   ai: {
     providers: (refresh = false) => invoke('ai:providers', refresh),

@@ -144,6 +144,19 @@ export const GearIcon = () => (
   </Icon>
 )
 
+export const VoiceIcon = () => (
+  <Icon>
+    <path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4" />
+  </Icon>
+)
+
+export const MutedIcon = () => (
+  <Icon>
+    <path d="M11 5 6 9H3v6h3l5 4z" />
+    <path d="m16 9 5 6M21 9l-5 6" />
+  </Icon>
+)
+
 export const CheckIcon = () => (
   <Icon>
     <path d="m5 12 5 5L20 7" />

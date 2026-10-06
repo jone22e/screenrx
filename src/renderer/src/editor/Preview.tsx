@@ -25,7 +25,10 @@ const settingsOf = (state: EditorState): PreviewSettings => ({
   zooms: state.zooms,
   background: state.background,
   webcam: state.webcam,
-  captions: state.captions
+  captions: state.captions,
+  audio: state.audio,
+  dubUrl: state.dubs.find((dub) => dub.language === state.dub.language)?.url ?? null,
+  speed: state.exportSettings.speed
 })
 
 /**

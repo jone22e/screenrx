@@ -1,8 +1,23 @@
 /** Scheme under which the main process streams recorded media to the renderers. */
 export const MEDIA_SCHEME = 'screenrx-media'
 
-export const MEDIA_TRACKS = ['screen', 'webcam', 'microphone', 'systemAudio'] as const
+export const MEDIA_TRACKS = [
+  'screen',
+  'webcam',
+  'microphone',
+  'systemAudio',
+  'dubEn',
+  'dubEs',
+  'dubZh',
+  'dubPt'
+] as const
 export type MediaTrack = (typeof MEDIA_TRACKS)[number]
+
+/** The track that holds the dubbing in each language. */
+export const DUB_TRACKS = { en: 'dubEn', es: 'dubEs', zh: 'dubZh', pt: 'dubPt' } as const satisfies Record<
+  'en' | 'es' | 'zh' | 'pt',
+  MediaTrack
+>
 
 export function isMediaTrack(value: unknown): value is MediaTrack {
   return (MEDIA_TRACKS as readonly unknown[]).includes(value)

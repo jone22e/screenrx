@@ -10,6 +10,7 @@ import { buildTimeMap } from '@engine/time/timeMapping'
 import type { AppError } from '@shared/models/errors'
 import { appError } from '@shared/models/errors'
 import type { ExportJob, ExportResult, ExportTrack, ExportTrackName } from '@shared/models/export'
+import { DUB_TRACKS } from '@shared/models/media'
 import type { Logger } from '../logging/logger'
 import type { ProjectStore } from '../project/ProjectStore'
 import type { SessionStore } from '../recording/SessionStore'
@@ -93,7 +94,13 @@ export class ExportService {
         files.webcam = await openTrack(webcamPath)
       }
 
-      const audioPaths = session.audio.map((track) => sessions.trackPathOf(sessionId, track.kind))
+      // A track muted in the edit is simply not given to the encoder. A dubbing in
+      // use takes the place of the recorded voice.
+      const dub = session.dubs.find((track) => track.language === project.dub.language)
+      const audioPaths = session.audio
+        .filter((track) => !project.audio[track.kind].muted && !(dub && track.kind === 'microphone'))
+        .map((track) => sessions.trackPathOf(sessionId, track.kind))
+      if (dub) audioPaths.push(sessions.trackPathOf(sessionId, DUB_TRACKS[dub.language]))
       const encoder = await ffmpeg.selectH264Encoder()
       const partialPath = `${outputPath}.part`
       const process = ffmpeg.spawn(encodeArguments(plan, encoder, audioPaths, map, partialPath))

@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { generateAutoZooms } from '@engine/zoom/autoZoom'
 import { SESSION_FILES } from '@shared/config/recording'
 import { parseTranscript } from '@shared/models/captions'
 import type { EditorSession } from '@shared/models/editor'
-import { trackUrl } from '@shared/models/media'
+import type { DubTrack } from '@shared/models/dub'
+import { DUB_TRACKS, trackUrl } from '@shared/models/media'
 import type { Project } from '@shared/models/project'
-import { createProject, parseProject } from '@shared/models/project'
+import { CAPTION_LANGUAGES, createProject, parseProject } from '@shared/models/project'
 import type { InteractionEvent } from '@shared/models/telemetry'
 import { parseInteractions } from '@shared/models/telemetry'
 import { writeJsonAtomic } from '../filesystem/atomicWrite'
@@ -88,6 +89,7 @@ export class ProjectStore {
         .filter((kind) => manifest.assets[kind])
         .map((kind) => ({ kind, url: trackUrl(sessionId, kind) })),
       interactions,
+      dubs: await this.dubsOf(sessionId),
       // A transcript that does not parse is simply absent: it can be generated again.
       transcript: parseTranscript(await this.readJson(sessionId, SESSION_FILES.transcript)),
       project
@@ -104,6 +106,21 @@ export class ProjectStore {
     const project = parseProject(raw, sessionId)
     if (!project) this.logger.warn('ignoring invalid project file', { sessionId })
     return project
+  }
+
+  /** The dubbing tracks that exist on disk for a session. */
+  private async dubsOf(sessionId: string): Promise<DubTrack[]> {
+    const dubs: DubTrack[] = []
+    for (const language of CAPTION_LANGUAGES) {
+      const track = DUB_TRACKS[language]
+      try {
+        await access(this.sessions.trackPathOf(sessionId, track))
+        dubs.push({ language, url: trackUrl(sessionId, track) })
+      } catch {
+        // No dubbing in this language.
+      }
+    }
+    return dubs
   }
 
   private async readInteractions(sessionId: string): Promise<InteractionEvent[]> {

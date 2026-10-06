@@ -7,6 +7,7 @@ import type { EditorSession } from '@shared/models/editor'
 import type { WebcamCorner, WebcamShape } from '@shared/models/project'
 import { BACKGROUND_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
 import { CaptionsPanel } from './CaptionsPanel'
+import { DubbingPanel } from './DubbingSection'
 import type { EditorStore } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
 import { SuggestionsPanel } from './SuggestionsPanel'
@@ -15,6 +16,7 @@ import {
   BackdropIcon,
   CameraIcon,
   CaptionsIcon,
+  VoiceIcon,
   PlusIcon,
   ScissorsIcon,
   SparklesIcon,
@@ -28,7 +30,7 @@ interface Props {
   player: PreviewPlayer | null
 }
 
-type Tab = 'cuts' | 'zoom' | 'captions' | 'background' | 'webcam'
+type Tab = 'cuts' | 'zoom' | 'captions' | 'dub' | 'background' | 'webcam'
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
 const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
@@ -51,6 +53,7 @@ export function Sidebar({ session, store, player }: Props) {
     { id: 'cuts', label: 'Cortes', icon: <ScissorsIcon /> },
     { id: 'zoom', label: 'Zoom', icon: <ZoomIcon /> },
     { id: 'captions', label: 'Legendas', icon: <CaptionsIcon /> },
+    { id: 'dub', label: 'Dublagem', icon: <VoiceIcon /> },
     { id: 'background', label: 'Fundo', icon: <BackdropIcon /> },
     ...(session.webcam ? [{ id: 'webcam' as const, label: 'Câmera', icon: <CameraIcon /> }] : [])
   ]
@@ -73,6 +76,7 @@ export function Sidebar({ session, store, player }: Props) {
         {tab === 'cuts' && <CutsPanel session={session} store={store} player={player} />}
         {tab === 'zoom' && <ZoomPanel session={session} store={store} player={player} />}
         {tab === 'captions' && <CaptionsPanel session={session} store={store} player={player} />}
+        {tab === 'dub' && <DubbingPanel store={store} onOpenCaptions={() => choose('captions')} />}
         {tab === 'background' && <BackgroundPanel store={store} />}
         {tab === 'webcam' && <WebcamPanel store={store} />}
       </div>

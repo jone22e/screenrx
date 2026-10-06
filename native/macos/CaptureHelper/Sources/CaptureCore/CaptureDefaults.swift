@@ -29,6 +29,13 @@ public enum CaptureDefaults {
     /// How long `recording.start` waits for the first complete frame.
     public static let firstFrameTimeoutSeconds = 5.0
 
+    /// How long the audio sources keep running after a stop is requested.
+    /// Audio reaches the recorder in chunks, a moment after it is heard —
+    /// longer through a Bluetooth device — so the last fraction of a second
+    /// is still on its way when the user stops. Whatever arrives in this
+    /// time and was heard before the stop is kept; the rest is left out.
+    public static let audioTailGraceSeconds = 0.35
+
     /// How long to wait for ScreenCaptureKit to acknowledge a stop.
     public static let stopStreamTimeoutSeconds = 3.0
 

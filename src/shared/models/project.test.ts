@@ -118,7 +118,14 @@ describe('parseProject captions', () => {
 
   it('gives projects saved before captions existed none, with the default style', () => {
     const { captions, ...legacy } = createProject(sessionId)
-    expect(captions).toEqual({ visible: true, length: 'medium', style: DEFAULT_CAPTION_STYLE, cues: [] })
+    expect(captions).toEqual({
+      visible: true,
+      length: 'medium',
+      style: DEFAULT_CAPTION_STYLE,
+      cues: [],
+      language: null,
+      translations: {}
+    })
     expect(parseProject(legacy, sessionId)?.captions).toEqual(captions)
   })
 
@@ -136,7 +143,9 @@ describe('parseProject captions', () => {
         backdropColor: '#101010',
         position: { x: 0.3, y: 0.12 }
       },
-      cues: [cue, { id: 'cue-2', startMs: 1200, endMs: 2500, text: 'Hoje vamos exportar.' }]
+      cues: [cue, { id: 'cue-2', startMs: 1200, endMs: 2500, text: 'Hoje vamos exportar.' }],
+      language: 'zh',
+      translations: { zh: { 'cue-1': '大家好。', 'cue-2': '今天我们来导出。' }, en: { 'cue-1': 'Hello, everyone.' } }
     }
     expect(parseProject({ ...createProject(sessionId), captions }, sessionId)?.captions).toEqual(captions)
   })
@@ -151,8 +160,27 @@ describe('parseProject captions', () => {
         sizeRatio: CAPTION_LIMITS.maxSizeRatio,
         position: { x: 0, y: DEFAULT_CAPTION_STYLE.position.y }
       },
-      cues: []
+      cues: [],
+      language: null,
+      translations: {}
     })
+  })
+
+  it('keeps translations only of captions that exist, and never shows a language without one', () => {
+    const captions = {
+      cues: [cue],
+      language: 'es',
+      translations: {
+        en: { 'cue-1': 'Hello, everyone.', 'cue-gone': 'left over', 'cue-2': 7 },
+        es: { 'cue-gone': 'sobra' },
+        fr: { 'cue-1': 'Bonjour' },
+        zh: 'not a map'
+      }
+    }
+    const parsed = parseProject({ ...createProject(sessionId), captions }, sessionId)?.captions
+    expect(parsed?.translations).toEqual({ en: { 'cue-1': 'Hello, everyone.' } })
+    // Spanish had no caption left, so the captions are shown as spoken.
+    expect(parsed?.language).toBeNull()
   })
 
   it('drops malformed and overlapping captions, keeping the rest', () => {
@@ -168,6 +196,22 @@ describe('parseProject captions', () => {
     expect(parsed?.map((entry) => entry.id)).toEqual(['cue-1', 'cue-2'])
     expect(parsed?.[1]?.text).toHaveLength(CAPTION_LIMITS.maxTextLength)
     expect(parsed?.[1]).not.toHaveProperty('extra')
+  })
+})
+
+describe('parseProject audio', () => {
+  it('plays every track in projects saved before tracks could be muted', () => {
+    const { audio, ...legacy } = createProject(sessionId)
+    expect(audio).toEqual({ microphone: { muted: false }, systemAudio: { muted: false } })
+    expect(parseProject(legacy, sessionId)?.audio).toEqual(audio)
+  })
+
+  it('keeps which tracks are muted and repairs anything else', () => {
+    const audio = { microphone: { muted: 'yes' }, systemAudio: { muted: true, volume: 3 }, music: { muted: true } }
+    expect(parseProject({ ...createProject(sessionId), audio }, sessionId)?.audio).toEqual({
+      microphone: { muted: false },
+      systemAudio: { muted: true }
+    })
   })
 })
 

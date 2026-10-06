@@ -22,6 +22,16 @@ npm run dev
 
 `npm run dev` compila os helpers nativos (captura e transcrição) e abre o app com hot reload.
 
+A dublagem usa um terceiro helper, compilado à parte porque leva alguns minutos na
+primeira vez (precisa de um Mac com Apple Silicon):
+
+```bash
+npm run build:voice
+```
+
+Sem ele o app funciona normalmente e apenas não oferece dublagem. O modelo de voz
+(1,14 GB) não faz parte do projeto nem do instalador: é baixado por dentro do app.
+
 O macOS exige a permissão de Gravação de Tela. Em desenvolvimento ela não aparece
 como "ScreenRx": pertence ao aplicativo que executou o `npm run dev` (Terminal,
 VS Code, Claude…). A janela principal mostra qual é; ative-o em Ajustes do Sistema ›
@@ -59,6 +69,7 @@ Apple ainda não está configurada.
 | `npm run lint` | ESLint |
 | `npm test` | Testes unitários (Vitest) |
 | `npm run test:native` | Testes do helper Swift |
+| `npm run test:voice` | Testes do helper de voz (após `npm run build:voice`) |
 | `npm run check` | Todos os anteriores |
 | `npm run build` | Build de produção em `out/` |
 | `npm run dist:check` | Teste do app empacotado, após `npm run dist` |

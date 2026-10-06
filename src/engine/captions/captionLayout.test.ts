@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { CaptionStyle } from '@shared/models/project'
 import { DEFAULT_CAPTION_STYLE } from '@shared/models/project'
 import { CAPTION_LAYOUT } from './captionConfig'
-import { captionDisplayText, captionFontCss, layoutCaption } from './captionLayout'
+import { captionDisplayText, captionFontCss, captionPieces, layoutCaption } from './captionLayout'
 
 const output = { width: 1920, height: 1080 }
 const style = (change: Partial<CaptionStyle> = {}): CaptionStyle => ({ ...DEFAULT_CAPTION_STYLE, ...change })
@@ -76,5 +76,36 @@ describe('layoutCaption', () => {
     expect(small && big && small.box.x / 960).toBeCloseTo((big?.box.x ?? 0) / 1920)
     expect(small && big && small.box.width / 960).toBeCloseTo((big?.box.width ?? 0) / 1920)
     expect(small && big && small.box.y / 540).toBeCloseTo((big?.box.y ?? 0) / 1080)
+  })
+})
+
+describe('captionPieces', () => {
+  it('breaks languages written with spaces between words', () => {
+    expect(captionPieces('olá mundo, tudo bem?')).toEqual([
+      { text: 'olá', spaced: true },
+      { text: 'mundo,', spaced: true },
+      { text: 'tudo', spaced: true },
+      { text: 'bem?', spaced: true }
+    ])
+  })
+
+  it('breaks Chinese between characters, keeping punctuation with what it closes', () => {
+    expect(captionPieces('大家好，今天').map((piece) => piece.text)).toEqual(['大', '家', '好，', '今', '天'])
+    expect(captionPieces('大家好，今天').every((piece, index) => piece.spaced === (index === 0))).toBe(true)
+  })
+
+  it('keeps a word in Latin letters whole inside Chinese text', () => {
+    expect(captionPieces('导出 MP4 视频').map((piece) => piece.text)).toEqual(['导', '出', 'MP4', '视', '频'])
+  })
+})
+
+describe('layoutCaption in a language without spaces', () => {
+  it('wraps Chinese to the allowed width and loses no character', () => {
+    // 100 characters of 20 px: 2000 px, wider than the 1536 px allowed.
+    const text = '今天我们来看看如何导出视频'.repeat(8).slice(0, 100)
+    const layout = layoutCaption(text, style(), output, measure)
+    expect(layout?.lines.length).toBe(2)
+    expect(layout?.lines.map((line) => line.text).join('')).toBe(text)
+    for (const line of layout?.lines ?? []) expect(measure(line.text)).toBeLessThanOrEqual(1536)
   })
 })

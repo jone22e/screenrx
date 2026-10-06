@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { sourceTimeToTimelineTime } from '@engine/time/timeMapping'
 import { moveZoom, resizeZoom } from '@engine/zoom/zoomEditing'
 import { formatClock, formatTimecode } from '@shared/format'
+import { DUB_TRACKS } from '@shared/models/media'
 import type { EditorSession } from '@shared/models/editor'
 import type { CaptionCue, TrimEffect, ZoomEffect } from '@shared/models/project'
 import type { EditorStore } from './EditorStore'
@@ -16,6 +17,8 @@ import {
   CloseIcon,
   FilmIcon,
   MicIcon,
+  MutedIcon,
+  VoiceIcon,
   ScissorsIcon,
   SpeakerIcon,
   ZoomIcon
@@ -52,8 +55,8 @@ const MIN_LABEL_SPACING_PX = 72
 const SELECT_THRESHOLD_PX = 3
 
 const AUDIO_LANES = {
-  microphone: { label: 'Microfone', icon: <MicIcon /> },
-  systemAudio: { label: 'Sistema', icon: <SpeakerIcon /> }
+  microphone: { label: 'Microfone', name: 'o microfone', icon: <MicIcon /> },
+  systemAudio: { label: 'Sistema', name: 'o som do sistema', icon: <SpeakerIcon /> }
 } as const
 
 function rulerMarks(durationMs: number, widthPx: number): number[] {
@@ -94,6 +97,8 @@ export function Timeline({ session, store, player }: Props) {
   const duration = session.durationMs
   const { selection, timeMap } = state
   const { cues } = state.captions
+  // The dubbing in use has a lane of its own; it stands in for the microphone.
+  const dub = state.dubs.find((track) => track.language === state.dub.language) ?? null
 
   useEffect(() => {
     const element = tracks.current
@@ -276,11 +281,34 @@ export function Timeline({ session, store, player }: Props) {
               Câmera
             </LaneLabel>
           )}
-          {session.audio.map((track) => (
-            <LaneLabel key={track.kind} icon={AUDIO_LANES[track.kind].icon}>
-              {AUDIO_LANES[track.kind].label}
-            </LaneLabel>
-          ))}
+          {session.audio.map((track) => {
+            const lane = AUDIO_LANES[track.kind]
+            const replaced = track.kind === 'microphone' && dub !== null
+            const muted = state.audio[track.kind].muted || replaced
+            return (
+              <button
+                key={track.kind}
+                className="timeline-label timeline-label-toggle"
+                role="switch"
+                aria-checked={!muted}
+                aria-label={`Som d${lane.name}`}
+                disabled={replaced}
+                title={
+                  replaced
+                    ? 'A dublagem em uso toca no lugar do microfone.'
+                    : muted
+                      ? `Silenciado: ${lane.name} não toca nem vai para o vídeo exportado. Clique para ativar.`
+                      : `Clique para silenciar ${lane.name} no preview e no vídeo exportado.`
+                }
+                data-muted={muted}
+                onClick={() => store.setTrackMuted(track.kind, !muted)}
+              >
+                {muted ? <MutedIcon /> : lane.icon}
+                <span>{lane.label}</span>
+              </button>
+            )
+          })}
+          {dub && <LaneLabel icon={<VoiceIcon />}>Dublagem</LaneLabel>}
         </div>
 
         <div className="timeline-tracks" ref={tracks}>
@@ -409,7 +437,7 @@ export function Timeline({ session, store, player }: Props) {
                   key={cue.id}
                   className="region cue-block"
                   data-selected={cue.id === state.selectedCueId}
-                  title={`${cue.text} · ${formatTimecode(cue.startMs)} – ${formatTimecode(cue.endMs)}`}
+                  title={`${store.textOf(cue)} · ${formatTimecode(cue.startMs)} – ${formatTimecode(cue.endMs)}`}
                   style={span(cue)}
                   onPointerDown={beginDrag({ target: 'cue', kind: 'move', original: cue, originX: 0 })}
                   {...dragHandlers}
@@ -419,7 +447,7 @@ export function Timeline({ session, store, player }: Props) {
                     onPointerDown={beginDrag({ target: 'cue', kind: 'start', original: cue, originX: 0 })}
                     {...dragHandlers}
                   />
-                  <span className="cue-label">{cue.text}</span>
+                  <span className="cue-label">{store.textOf(cue)}</span>
                   <span
                     className="region-handle region-handle-end"
                     onPointerDown={beginDrag({ target: 'cue', kind: 'end', original: cue, originX: 0 })}
@@ -440,10 +468,21 @@ export function Timeline({ session, store, player }: Props) {
             </div>
           )}
           {session.audio.map((track) => (
-            <div key={track.kind} className="lane lane-companion lane-audio">
+            <div
+              key={track.kind}
+              className="lane lane-companion lane-audio"
+              data-muted={state.audio[track.kind].muted || (track.kind === 'microphone' && dub !== null)}
+            >
               <Waveform sessionId={session.sessionId} track={track.kind} />
             </div>
           ))}
+
+          {dub && (
+            <div className="lane lane-companion lane-audio lane-dub">
+              {/* Keyed by its address: a dubbing generated again is drawn again. */}
+              <Waveform key={dub.url} sessionId={session.sessionId} track={DUB_TRACKS[dub.language]} />
+            </div>
+          )}
 
           {/* What a cut removes is dimmed across every lane. */}
           {state.trims.map((trim) => (

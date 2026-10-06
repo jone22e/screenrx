@@ -1,0 +1,16 @@
+diff --git a/Sources/MLXAudioTTS/Models/OmniVoice/OmniVoice.swift b/Sources/MLXAudioTTS/Models/OmniVoice/OmniVoice.swift
+index 2273288..8fc898b 100644
+--- a/Sources/MLXAudioTTS/Models/OmniVoice/OmniVoice.swift
++++ b/Sources/MLXAudioTTS/Models/OmniVoice/OmniVoice.swift
+@@ -803,7 +803,10 @@ public final class OmniVoiceModel: Module, SpeechGenerationModel, @unchecked Sen
+         }
+         fullText += text.trimmingCharacters(in: .whitespacesAndNewlines)
+         fullText = fullText.components(separatedBy: .newlines).joined(separator: " ")
+-        fullText = fullText.replacingOccurrences(of: "  ", with: " ", options: .regularExpression)
++        fullText = fullText.replacingOccurrences(of: "[ \\t]+", with: " ", options: .regularExpression)
++        // Parity with the Python reference (_combine_text): no spaces around Chinese characters.
++        fullText = fullText.replacingOccurrences(
++            of: "(?<=[\\u4e00-\\u9fff])\\s+|\\s+(?=[\\u4e00-\\u9fff])", with: "", options: .regularExpression)
+         return fullText
+     }
+ 

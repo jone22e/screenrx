@@ -38,6 +38,7 @@ final class MediaTrackWriter: @unchecked Sendable {
     private var lastEnd = CMTime.zero
     private var videoSize: PixelSize?
     private var samplesDropped = 0
+    private var silenceFilledSeconds = 0.0
     private var closed = false
     /// Recording time at which the session ended; later buffers are not part of it.
     private var endLimitNs = Int64.max
@@ -76,6 +77,17 @@ final class MediaTrackWriter: @unchecked Sendable {
             // few milliseconds "early"; audio must never overlap, so it is
             // nudged to continue exactly where the previous buffer ended.
             if nextAudioTime.isValid, time < nextAudioTime { time = nextAudioTime }
+            // And where audio is missing — before the device's first buffer,
+            // around a pause — silence is written, so the track has no hole.
+            let writtenUntil = nextAudioTime.isValid ? nextAudioTime : .zero
+            let missing = AudioEncoding.silenceToFill(
+                writtenUntilSeconds: writtenUntil.seconds, bufferStartSeconds: time.seconds)
+            if missing > 0, input.isReadyForMoreMediaData,
+                let silence = Self.silence(like: sampleBuffer, at: writtenUntil, seconds: missing),
+                input.append(silence)
+            {
+                silenceFilledSeconds += missing
+            }
         case .video:
             if lastVideoTime.isValid, time <= lastVideoTime { return }
         }
@@ -107,6 +119,9 @@ final class MediaTrackWriter: @unchecked Sendable {
         let state = queue.sync { () -> (AVAssetWriter, AVAssetWriterInput, CMTime, PixelSize?, Int)? in
             closed = true
             guard let writer, let input, writer.status == .writing else { return nil }
+            if silenceFilledSeconds > 0 {
+                log.info("\(label) track: holes filled with silence", ["seconds": String(format: "%.3f", silenceFilledSeconds)])
+            }
             return (writer, input, lastEnd, videoSize, samplesDropped)
         }
         guard let (writer, input, lastEnd, size, dropped) = state else {
@@ -217,6 +232,41 @@ final class MediaTrackWriter: @unchecked Sendable {
     }
 
     /// A copy of the buffer whose first sample is presented at `time`.
+    /// A buffer of silence in the format of `sampleBuffer` (uncompressed audio), `seconds` long, at `time`.
+    private static func silence(like sampleBuffer: CMSampleBuffer, at time: CMTime, seconds: Double) -> CMSampleBuffer? {
+        guard
+            let format = sampleBuffer.formatDescription,
+            let description = format.audioStreamBasicDescription,
+            description.mFormatID == kAudioFormatLinearPCM,
+            description.mSampleRate > 0, description.mBytesPerFrame > 0
+        else { return nil }
+
+        let frames = Int((seconds * description.mSampleRate).rounded())
+        guard frames > 0 else { return nil }
+        // Non-interleaved audio keeps each channel's samples one after the other.
+        let planar = description.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+        let byteCount = frames * Int(description.mBytesPerFrame) * (planar ? Int(description.mChannelsPerFrame) : 1)
+
+        var block: CMBlockBuffer?
+        guard
+            CMBlockBufferCreateWithMemoryBlock(
+                allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: byteCount,
+                blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0,
+                dataLength: byteCount, flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block)
+                == kCMBlockBufferNoErr,
+            let block,
+            CMBlockBufferFillDataBytes(with: 0, blockBuffer: block, offsetIntoDestination: 0, dataLength: byteCount)
+                == kCMBlockBufferNoErr
+        else { return nil }
+
+        var silence: CMSampleBuffer?
+        let status = CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+            allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: format,
+            sampleCount: frames, presentationTimeStamp: time, packetDescriptions: nil,
+            sampleBufferOut: &silence)
+        return status == noErr ? silence : nil
+    }
+
     private static func retimed(_ sampleBuffer: CMSampleBuffer, to time: CMTime) -> CMSampleBuffer? {
         var count: CMItemCount = 0
         CMSampleBufferGetSampleTimingInfoArray(

@@ -1,6 +1,12 @@
 import type { AiChoice, AiProvider, AiProviderId } from '../models/ai'
-import type { Transcript, TranscriptionProgress, TranscriptionRequest } from '../models/captions'
+import type {
+  CaptionTranslationRequest,
+  Transcript,
+  TranscriptionProgress,
+  TranscriptionRequest
+} from '../models/captions'
 import type { CaptureDevices } from '../models/devices'
+import type { DubProgress, DubRequest, DubStatus, DubTrack } from '../models/dub'
 import type { EditorSession } from '../models/editor'
 import type { IpcResult } from '../models/errors'
 import type { ExportJob, ExportResult, ExportTrackName } from '../models/export'
@@ -9,6 +15,9 @@ import type { Project } from '../models/project'
 import type { RecordingStateSnapshot } from '../models/recording'
 import type { RecordingSummary } from '../models/session'
 import type { CutSuggestionResult } from '../models/suggestions'
+
+/** An audio track whose outline the timeline can draw: a recorded one, or a dubbing. */
+export type WaveformTrack = 'microphone' | 'systemAudio' | 'dubEn' | 'dubEs' | 'dubZh' | 'dubPt'
 
 /**
  * Every renderer → main call. The preload bridge exposes exactly these, one
@@ -39,7 +48,7 @@ export interface IpcInvokeContract {
   'editor:open': { args: [sessionId: string]; result: IpcResult<EditorSession> }
   'project:save': { args: [project: Project]; result: IpcResult<null> }
   'editor:waveform': {
-    args: [sessionId: string, track: 'microphone' | 'systemAudio']
+    args: [sessionId: string, track: WaveformTrack]
     result: IpcResult<number[]>
   }
 
@@ -48,6 +57,16 @@ export interface IpcInvokeContract {
     result: IpcResult<Transcript>
   }
   'captions:cancel': { args: []; result: void }
+  'captions:translate': {
+    args: [request: CaptionTranslationRequest, choice: AiChoice]
+    result: IpcResult<Record<string, string>>
+  }
+
+  'dub:status': { args: []; result: DubStatus }
+  'dub:prepare-model': { args: []; result: IpcResult<DubStatus> }
+  'dub:remove-model': { args: []; result: IpcResult<DubStatus> }
+  'dub:generate': { args: [sessionId: string, request: DubRequest]; result: IpcResult<DubTrack> }
+  'dub:cancel': { args: []; result: void }
 
   'ai:providers': { args: [refresh: boolean]; result: AiProvider[] }
   'ai:install': { args: [provider: AiProviderId]; result: IpcResult<AiProvider[]> }
@@ -83,6 +102,7 @@ export interface IpcEventContract {
   'recording:state-changed': RecordingStateSnapshot
   'library:changed': null
   'captions:progress': TranscriptionProgress
+  'dub:progress': DubProgress
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -124,7 +144,7 @@ export interface ScreenRxApi {
     open(sessionId: string): Promise<IpcResult<EditorSession>>
     saveProject(project: Project): Promise<IpcResult<null>>
     /** Loudness outline of an audio track: peaks between 0 and 1, evenly spaced in time. */
-    waveform(sessionId: string, track: 'microphone' | 'systemAudio'): Promise<IpcResult<number[]>>
+    waveform(sessionId: string, track: WaveformTrack): Promise<IpcResult<number[]>>
   }
   captions: {
     /**
@@ -134,6 +154,27 @@ export interface ScreenRxApi {
     generate(sessionId: string, request: TranscriptionRequest): Promise<IpcResult<Transcript>>
     cancel(): Promise<void>
     onProgress(listener: (progress: TranscriptionProgress) => void): Unsubscribe
+    /**
+     * Translates captions with the chosen AI tool and returns the translated
+     * text by caption id. Only the captions' text is sent. `ai.cancel` stops it.
+     */
+    translate(request: CaptionTranslationRequest, choice: AiChoice): Promise<IpcResult<Record<string, string>>>
+  }
+  dub: {
+    /** Whether this build can dub, and whether the voice model is on this machine. */
+    status(): Promise<DubStatus>
+    /** Downloads the voice model (once) and makes it ready. Progress comes through `onProgress`. */
+    prepareModel(): Promise<IpcResult<DubStatus>>
+    removeModel(): Promise<IpcResult<DubStatus>>
+    /**
+     * Speaks the given stretches in the speaker's own voice, cloned on this
+     * machine from the microphone track, and stores the result as a track of
+     * the session. Nothing is uploaded.
+     */
+    generate(sessionId: string, request: DubRequest): Promise<IpcResult<DubTrack>>
+    /** Stops a download or a dubbing in progress. */
+    cancel(): Promise<void>
+    onProgress(listener: (progress: DubProgress) => void): Unsubscribe
   }
   ai: {
     /**

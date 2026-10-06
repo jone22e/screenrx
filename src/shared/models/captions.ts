@@ -64,6 +64,33 @@ export function parseTranscriptionRequest(value: unknown): TranscriptionRequest 
   return isCaptionLocale(locale) && isTranscriptTrack(track) ? { locale, track } : null
 }
 
+/** What is asked to be translated: captions (id and text), from which language, into which. */
+export interface CaptionTranslationRequest {
+  language: 'en' | 'es' | 'zh' | 'pt'
+  sourceLocale: string
+  cues: Array<{ id: string; text: string }>
+}
+
+const MAX_TRANSLATED_CUES = 20_000
+const MAX_CUE_TEXT_LENGTH = 300
+const MAX_CUE_ID_LENGTH = 64
+
+export function parseCaptionTranslationRequest(value: unknown): CaptionTranslationRequest | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { language, sourceLocale, cues } = value as Record<string, unknown>
+  if (language !== 'en' && language !== 'es' && language !== 'zh' && language !== 'pt') return null
+  if (typeof sourceLocale !== 'string' || !/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(sourceLocale)) return null
+  if (!Array.isArray(cues) || cues.length === 0 || cues.length > MAX_TRANSLATED_CUES) return null
+  const clean: CaptionTranslationRequest['cues'] = []
+  for (const entry of cues) {
+    if (typeof entry !== 'object' || entry === null) return null
+    const { id, text } = entry as Record<string, unknown>
+    if (typeof id !== 'string' || id === '' || id.length > MAX_CUE_ID_LENGTH || typeof text !== 'string') return null
+    clean.push({ id, text: text.slice(0, MAX_CUE_TEXT_LENGTH) })
+  }
+  return { language, sourceLocale, cues: clean }
+}
+
 export type TranscriptionStage = 'preparing' | 'downloading' | 'transcribing'
 
 export interface TranscriptionProgress {

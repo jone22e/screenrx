@@ -8,3 +8,4 @@ dist-native/
 .vite/
 coverage/
 release/
+native/macos/VoiceHelper/Vendor/

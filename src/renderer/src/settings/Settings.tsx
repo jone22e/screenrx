@@ -1,7 +1,9 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import type { AiProvider } from '@shared/models/ai'
 import { AI_EFFORT_LABELS, choiceFor, effortsOf, readyProvider } from '@shared/models/ai'
+import { formatBytes } from '@shared/format'
 import { aiSettings } from '../common/aiSettings'
+import { voiceModel } from '../common/voiceModel'
 import './settings.css'
 
 interface Props {
@@ -29,8 +31,11 @@ export function Settings({ onClose }: Props) {
   const { providers, preferences, activity, failure, checking } = state
   const inUse = providers ? readyProvider(providers, preferences) : null
 
+  const voice = useSyncExternalStore(voiceModel.subscribe, voiceModel.getState)
+
   useEffect(() => {
     void aiSettings.load()
+    void voiceModel.refresh()
   }, [])
 
   useEffect(() => {
@@ -198,6 +203,77 @@ export function Settings({ onClose }: Props) {
               })}
             </ul>
           )}
+        </section>
+
+        <section className="settings-section">
+          <header className="settings-section-head">
+            <div>
+              <h2>Dublagem</h2>
+              <p>
+                A sua voz falando outro idioma: o app aprende o seu timbre a partir do microfone da gravação e
+                fala as legendas traduzidas. Tudo roda neste Mac; a sua voz não é enviada para lugar nenhum.
+              </p>
+            </div>
+          </header>
+
+          <div className="agent" data-voice-model={voice.status?.model ?? 'unknown'}>
+            <div className="agent-head">
+              <div className="agent-name">
+                <strong>Modelo de voz</strong>
+                <span>OmniVoice · inglês, espanhol, chinês, português e outros</span>
+              </div>
+              <span
+                className="agent-status"
+                data-readiness={voice.status?.model === 'ready' ? 'ready' : 'missing'}
+              >
+                {voice.status === null
+                  ? 'Verificando…'
+                  : !voice.status.available
+                    ? 'Indisponível'
+                    : voice.status.model === 'ready'
+                      ? 'Baixado'
+                      : 'Não baixado'}
+              </span>
+            </div>
+
+            {voice.status && !voice.status.available ? (
+              <p className="agent-account">A dublagem precisa de um Mac com Apple Silicon e do componente de voz desta versão.</p>
+            ) : voice.progress ? (
+              <div className="agent-busy" role="status">
+                <span className="agent-spinner" aria-hidden="true" />
+                <span>
+                  {voice.progress.stage === 'unpacking' ? 'Preparando o modelo…' : 'Baixando o modelo de voz…'}{' '}
+                  {Math.round(voice.progress.fraction * 100)}%
+                </span>
+                <button className="settings-button" onClick={() => voiceModel.cancel()}>
+                  Cancelar
+                </button>
+              </div>
+            ) : voice.status?.model === 'ready' ? (
+              <div className="agent-setup">
+                <p>Pronto para dublar. O modelo ocupa cerca de 2 GB em disco.</p>
+                <button className="settings-button" onClick={() => void voiceModel.remove()}>
+                  Remover
+                </button>
+              </div>
+            ) : voice.status ? (
+              <div className="agent-setup">
+                <p>
+                  Um download de {formatBytes(voice.status.modelDownloadBytes)}, feito uma única vez. Nada é
+                  baixado antes de você pedir.
+                </p>
+                <button className="settings-button settings-button-primary" onClick={() => void voiceModel.download()}>
+                  Baixar · {formatBytes(voice.status.modelDownloadBytes)}
+                </button>
+              </div>
+            ) : null}
+
+            {voice.failure && (
+              <p className="agent-failure" role="alert">
+                {voice.failure}
+              </p>
+            )}
+          </div>
         </section>
       </main>
     </div>
