@@ -106,6 +106,12 @@ const api: ScreenRxApi = {
   recorder: {
     open: () => invoke('recorder:open'),
     close: () => invoke('recorder:close')
+  },
+  meet: {
+    getSettings: () => invoke('meet:get-settings'),
+    saveSettings: (settings) => invoke('meet:save-settings', settings),
+    listRooms: () => invoke('meet:list-rooms'),
+    record: (code) => invoke('meet:record', code)
   }
 }
 

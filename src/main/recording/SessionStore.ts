@@ -30,6 +30,8 @@ export interface NewSession {
   source: SessionSource
   fps: number
   cursorInVideo: boolean
+  /** A name given up front (e.g. a meeting's); without it the source's label is the title. */
+  title?: string
 }
 
 export interface CreatedSession {
@@ -86,7 +88,8 @@ export class SessionStore {
       capture: { fps: session.fps, cursorInVideo: session.cursorInVideo },
       clock: { durationMs: 0, pauses: [] },
       assets: {},
-      diagnostics: []
+      diagnostics: [],
+      ...(session.title && { title: session.title })
     }
     await this.write(manifest)
     return {

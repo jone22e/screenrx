@@ -40,6 +40,15 @@ Privacidade e Segurança › Gravação do Áudio do Sistema e da Tela.
 As gravações ficam em `~/Movies/ScreenRx/`, uma pasta por sessão. Os logs ficam em
 `~/Library/Logs/ScreenRx/main.log`.
 
+## Gravar reuniões do Screen Live
+
+Em Configurações, informe o endereço do Screen Live (ex.: `https://meet.exemplo.com`) e o
+token de gravação (`API_RECORDER_TOKEN` do servidor). A biblioteca passa a listar as reuniões
+em andamento; Gravar entra na sala como gravador numa janela própria e grava essa janela; o áudio
+da reunião é capturado dentro da própria página (o macOS não entrega o áudio dessa janela à captura de
+tela) e vira a trilha de som do sistema da gravação. Quem está na reunião vê o aviso "Gravando". Finalize pela barra de gravação ou
+fechando a janela da reunião.
+
 ## Instalador (macOS)
 
 ```bash

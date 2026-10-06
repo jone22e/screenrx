@@ -10,6 +10,7 @@ import type { DubProgress, DubRequest, DubStatus, DubTrack } from '../models/dub
 import type { EditorSession } from '../models/editor'
 import type { IpcResult } from '../models/errors'
 import type { ExportJob, ExportResult, ExportTrackName } from '../models/export'
+import type { MeetRoom, MeetSettings } from '../models/meet'
 import type { PermissionKind, PermissionReport } from '../models/permissions'
 import type { Project } from '../models/project'
 import type { RecordingStateSnapshot } from '../models/recording'
@@ -96,6 +97,11 @@ export interface IpcInvokeContract {
   'hud:minimize': { args: []; result: void }
   'recorder:open': { args: []; result: void }
   'recorder:close': { args: []; result: void }
+
+  'meet:get-settings': { args: []; result: MeetSettings }
+  'meet:save-settings': { args: [settings: MeetSettings]; result: IpcResult<MeetSettings> }
+  'meet:list-rooms': { args: []; result: IpcResult<MeetRoom[]> }
+  'meet:record': { args: [code: string]; result: IpcResult<null> }
 }
 
 /** Every main → renderer broadcast. */
@@ -219,5 +225,16 @@ export interface ScreenRxApi {
     open(): Promise<void>
     /** Leaves recording mode and returns to the library. Ignored while recording. */
     close(): Promise<void>
+  }
+  meet: {
+    getSettings(): Promise<MeetSettings>
+    saveSettings(settings: MeetSettings): Promise<IpcResult<MeetSettings>>
+    /** The rooms with someone in them right now, from the meeting app. */
+    listRooms(): Promise<IpcResult<MeetRoom[]>>
+    /**
+     * Joins the room as a recorder in a window of this app and records that
+     * window with its audio. The recording bar comes up as for any recording.
+     */
+    record(code: string): Promise<IpcResult<null>>
   }
 }

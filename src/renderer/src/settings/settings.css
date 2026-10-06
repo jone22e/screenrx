@@ -261,7 +261,8 @@
   color: var(--text-muted);
 }
 
-.agent-field select {
+.agent-field select,
+.agent-field input {
   height: 32px;
   padding: 0 8px;
   font: inherit;
@@ -269,6 +270,23 @@
   background: #15161a;
   border: 1px solid var(--hairline);
   border-radius: 8px;
+}
+
+.agent-field input:focus {
+  outline: 0;
+  border-color: var(--accent);
+}
+
+.meet-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.meet-saved {
+  font-size: 13px;
+  color: var(--text-muted);
 }
 
 .efforts {

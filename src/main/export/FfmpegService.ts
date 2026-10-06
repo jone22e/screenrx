@@ -178,6 +178,23 @@ export class FfmpegService {
     ])
   }
 
+  /**
+   * Runs `filterComplex` (which must end in an `[out]` audio label) over the first audio stream of
+   * `inputPath` and writes the result as AAC in an MP4 container, like the other audio tracks.
+   */
+  async renderAudio(inputPath: string, outputPath: string, filterComplex: string): Promise<void> {
+    await this.run(this.binaries.ffmpeg, [
+      '-v', 'error', '-y',
+      '-i', inputPath,
+      '-filter_complex', filterComplex,
+      '-map', '[out]',
+      '-ar', '48000', '-ac', '2',
+      '-c:a', 'aac', '-b:a', '192k',
+      '-movflags', '+faststart',
+      outputPath
+    ])
+  }
+
   /** The duration of a media file, in milliseconds. */
   async durationOf(filePath: string): Promise<number> {
     const output = await this.run(this.binaries.ffprobe, [

@@ -11,6 +11,7 @@ import type { RecordingPhase, RecordingStateSnapshot } from '@shared/models/reco
 import type {
   RecordingSessionManifest,
   SessionDiagnostic,
+  SessionPause,
   SessionSource
 } from '@shared/models/session'
 import { RecordingClock } from '@shared/time/RecordingClock'
@@ -39,12 +40,32 @@ export interface RecordingControllerDeps {
   wallClock: () => Date
   /** Processes owning this app's windows, to be excluded from captures. */
   ownPids: () => number[]
+  /**
+   * Supplies the system-audio track when the capture engine could not: audio gathered some other
+   * way (a meeting's, captured inside its window). Called while the recording is finalized, before
+   * the session is announced as complete, with where to write the track and what the clock saw.
+   * Resolves with the written file's facts, or `null` when it has no audio for this recording.
+   */
+  externalSystemAudio?: (track: ExternalAudioRequest) => Promise<{ sizeBytes: number; durationMs: number } | null>
+}
+
+export interface ExternalAudioRequest {
+  outputPath: string
+  /** Wall clock (ms since the epoch) at which the recording clock started. */
+  startedAtWallMs: number
+  /** Recording time, pauses excluded. */
+  durationMs: number
+  pauses: SessionPause[]
 }
 
 interface ActiveRecording {
   manifest: RecordingSessionManifest
   screenPath: string
   clock: RecordingClock
+  /** Wall clock (ms since the epoch) when the recording clock started. */
+  startedAtWallMs: number
+  /** Where the system-audio track goes, for audio that does not come from the capture engine. */
+  systemAudioPath: string
   diagnostics: SessionDiagnostic[]
   /** The companion tracks this recording was started with. */
   options: RecordingOptions
@@ -59,6 +80,10 @@ interface ActiveRecording {
 export class RecordingController {
   private phase: RecordingPhase = 'idle'
   private source: CaptureSource | null = null
+  /** Name for the next recording, given with a source the caller chose itself; any other choice clears it. */
+  private sourceTitle: string | null = null
+  /** The source belongs to this one recording (a meeting's); once it ends, the default source comes back. */
+  private sourceIsOneShot = false
   private options: RecordingOptions = DEFAULT_RECORDING_OPTIONS
   private active: ActiveRecording | null = null
   private lastError: AppError | null = null
@@ -108,10 +133,27 @@ export class RecordingController {
         const source = findSource(catalog, sourceId)
         if (!source) throw new CaptureError(appError('source-unavailable', sourceId))
         this.source = source
+        this.sourceTitle = null
+        this.sourceIsOneShot = false
         this.lastError = null
       } catch (error) {
         this.lastError = toAppError(error)
       }
+      this.emit()
+    })
+  }
+
+  /**
+   * Selects a source the caller already knows: a window of this app (the
+   * meeting recorder's), which the listings leave out on purpose.
+   */
+  useSource(source: CaptureSource, title: string | null = null): Promise<void> {
+    return this.enqueue(async () => {
+      if (this.phase !== 'idle') return
+      this.source = source
+      this.sourceTitle = title
+      this.sourceIsOneShot = true
+      this.lastError = null
       this.emit()
     })
   }
@@ -269,7 +311,8 @@ export class RecordingController {
           {
             source: toSessionSource(source),
             fps: RECORDING_CONFIG.fps,
-            cursorInVideo: RECORDING_CONFIG.showCursor
+            cursorInVideo: RECORDING_CONFIG.showCursor,
+            ...(this.sourceTitle && { title: this.sourceTitle })
           },
           this.deps.wallClock()
         )
@@ -304,6 +347,7 @@ export class RecordingController {
 
       const clock = new RecordingClock(this.deps.monotonicNow)
       clock.start()
+      const startedAtWallMs = this.deps.wallClock().getTime()
       const diagnostics: SessionDiagnostic[] = []
       const selfExcluded = ownPids.some((pid) => info.excludedPids.includes(pid))
       if (source.kind === 'display' && !selfExcluded) {
@@ -320,6 +364,8 @@ export class RecordingController {
         manifest: session.manifest,
         screenPath: session.screenPath,
         clock,
+        startedAtWallMs,
+        systemAudioPath: session.systemAudioPath,
         diagnostics,
         options
       }
@@ -391,6 +437,27 @@ export class RecordingController {
       return
     }
 
+    // Audio the engine did not record (a meeting's, captured in its window) is added to the session here,
+    // before it is announced, so the editor never opens on a recording that is still missing a track.
+    let external: { sizeBytes: number; durationMs: number } | null = null
+    if (!result.systemAudio && this.deps.externalSystemAudio) {
+      try {
+        external = await this.deps.externalSystemAudio({
+          outputPath: active.systemAudioPath,
+          startedAtWallMs: active.startedAtWallMs,
+          durationMs: result.durationMs,
+          pauses: result.pauses
+        })
+      } catch (error) {
+        logger.warn('external system audio failed', { sessionId: active.manifest.id, error: String(error) })
+        active.diagnostics.push({
+          level: 'warning',
+          code: 'track-missing',
+          message: 'The meeting audio could not be added to the recording.'
+        })
+      }
+    }
+
     const diagnostics = [
       ...active.diagnostics,
       ...diagnoseCapture(result),
@@ -444,6 +511,13 @@ export class RecordingController {
             file: SESSION_FILES.systemAudio,
             sizeBytes: result.systemAudio.fileSizeBytes,
             durationMs: result.systemAudio.durationMs
+          }
+        }),
+        ...(external && {
+          systemAudio: {
+            file: SESSION_FILES.systemAudio,
+            sizeBytes: external.sizeBytes,
+            durationMs: external.durationMs
           }
         }),
         ...(result.webcam && {
@@ -507,11 +581,18 @@ export class RecordingController {
   private finish(error: AppError | null, completedSessionId: string | null): void {
     this.deps.shield.release()
     this.active = null
+    this.sourceTitle = null
+    const forgetSource = this.sourceIsOneShot
+    if (forgetSource) {
+      this.source = null
+      this.sourceIsOneShot = false
+    }
     this.phase = 'idle'
     this.lastError = error
     if (completedSessionId) this.lastCompletedSessionId = completedSessionId
     this.emit()
     this.notifyLibraryChanged()
+    if (forgetSource) void this.selectDefaultSource()
   }
 
   // MARK: helpers

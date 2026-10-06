@@ -10,6 +10,8 @@ import { CAMERA_BUBBLE_LAYOUT, HUD_LAYOUT, hudWidthFor } from './hudLayout'
 
 export interface WindowManagerOptions {
   preloadPath: string
+  /** Preload of the meeting window: the audio bridge, nothing else. */
+  meetPreloadPath: string
   /** Directory with the built renderer pages (production). */
   rendererDirectory: string
   /** Vite dev server origin, when running in development. */
@@ -20,6 +22,10 @@ export interface WindowManagerOptions {
 type Page = 'index' | 'hud' | 'camera'
 
 const MAIN_WINDOW_SIZE = { width: 980, height: 700, minWidth: 720, minHeight: 520 } as const
+/** The meeting page is drawn at this size (even sides, as the video encoder needs) and recorded as is. */
+const MEET_WINDOW_SIZE = { width: 1280, height: 720 } as const
+/** Frames per second the meeting page is drawn at. */
+const MEET_FRAME_RATE = 30
 const WINDOW_BACKGROUND = '#17181c'
 
 /**
@@ -31,10 +37,14 @@ export class WindowManager implements CaptureShield {
   private main: BrowserWindow | null = null
   private hud: BrowserWindow | null = null
   private camera: BrowserWindow | null = null
+  /** The meeting being recorded: a page of the meeting app, not one of ours. */
+  private meet: BrowserWindow | null = null
   private shielded = false
   /** Whether the app is in recording mode (bar up) rather than showing the library. */
   private recorderOpen = false
   private cameraSelected = false
+  /** The library stays on screen while recording (a meeting's), where it shows the recording state. */
+  private libraryHeld = false
 
   constructor(private readonly options: WindowManagerOptions) {}
 
@@ -44,6 +54,67 @@ export class WindowManager implements CaptureShield {
 
   get mainWindow(): BrowserWindow | null {
     return this.main
+  }
+
+  /**
+   * Keeps the library window on screen through the next recording instead of leaving the screen to the
+   * recording bar: for a meeting recording, which has no bar and is controlled from the library.
+   */
+  holdLibrary(held: boolean): void {
+    this.libraryHeld = held
+  }
+
+  get meetWindow(): BrowserWindow | null {
+    return this.meet && !this.meet.isDestroyed() ? this.meet : null
+  }
+
+  /**
+   * Opens the meeting page to be recorded — drawn off screen: there is no window to see, show, hide or
+   * cover. Unlike the app's own windows it gets only the audio-bridge preload and is never trusted by the
+   * app's IPC, and it is not part of the capture shield (it is the very thing being recorded).
+   */
+  openMeet(url: string): BrowserWindow {
+    this.closeMeet()
+    const origin = new URL(url).origin
+    const window = new BrowserWindow({
+      ...MEET_WINDOW_SIZE,
+      title: 'Reunião',
+      show: false,
+      webPreferences: {
+        preload: this.options.meetPreloadPath,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+        offscreen: true,
+        // The meeting's audio must play without a click: it is what gets recorded.
+        autoplayPolicy: 'no-user-gesture-required',
+        // Nothing is on screen to throttle the page by; keep it drawing at full rate.
+        backgroundThrottling: false
+      }
+    })
+    window.webContents.setFrameRate(MEET_FRAME_RATE)
+    window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    window.webContents.on('will-navigate', (event, target) => {
+      if (new URL(target).origin !== origin) {
+        this.options.logger.warn('blocked navigation in meeting window', { url: target })
+        event.preventDefault()
+      }
+    })
+    window.on('closed', () => {
+      if (this.meet === window) this.meet = null
+    })
+    this.meet = window
+    window.loadURL(url).catch((error: unknown) => {
+      this.options.logger.error('failed to load meeting page', { url, error: String(error) })
+    })
+    return window
+  }
+
+  closeMeet(): void {
+    const window = this.meetWindow
+    this.meet = null
+    window?.close()
   }
 
   showMain(): void {
@@ -140,8 +211,8 @@ export class WindowManager implements CaptureShield {
   engage(): void {
     this.shielded = true
     for (const window of this.windows()) window.setContentProtection(true)
-    // The bar is all the user needs while recording.
-    this.main?.hide()
+    // The bar is all the user needs while recording — unless the library is the one showing it.
+    if (!this.libraryHeld) this.main?.hide()
   }
 
   release(): void {

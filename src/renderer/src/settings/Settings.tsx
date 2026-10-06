@@ -1,8 +1,9 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { AiProvider } from '@shared/models/ai'
 import { AI_EFFORT_LABELS, choiceFor, effortsOf, readyProvider } from '@shared/models/ai'
 import { formatBytes } from '@shared/format'
 import { aiSettings } from '../common/aiSettings'
+import { meetSettings, useMeetSettings } from '../common/meetSettings'
 import { voiceModel } from '../common/voiceModel'
 import './settings.css'
 
@@ -22,9 +23,93 @@ const READINESS_LABELS: Record<Readiness, string> = {
 }
 
 /**
- * The settings screen. For now it holds the AI tools: which are installed
+ * The meeting app (Screen Live): its address and the recorder token, kept by
+ * the main process. Edits stay local until "Salvar".
+ */
+function MeetSection() {
+  const { settings, saving, failure } = useMeetSettings()
+  const [draft, setDraft] = useState<{ baseUrl: string; token: string } | null>(null)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    void meetSettings.load()
+  }, [])
+
+  const current = draft ?? settings ?? { baseUrl: '', token: '' }
+  const dirty = settings !== null && (current.baseUrl !== settings.baseUrl || current.token !== settings.token)
+
+  const save = async (): Promise<void> => {
+    if (await meetSettings.save(current)) {
+      setDraft(null)
+      setSaved(true)
+    }
+  }
+
+  return (
+    <section className="settings-section">
+      <header className="settings-section-head">
+        <div>
+          <h2>Reuniões (Screen Live)</h2>
+          <p>
+            Com o endereço do Screen Live e o token de gravação (<code>API_RECORDER_TOKEN</code> do servidor), a
+            biblioteca lista as reuniões em andamento e grava uma delas: o app entra na sala como gravador, numa
+            janela própria, e grava essa janela com o áudio. Quem está na reunião vê o aviso "Gravando".
+          </p>
+        </div>
+      </header>
+
+      <div className="agent" data-meet-configured={settings !== null && settings.baseUrl !== '' && settings.token !== ''}>
+        <div className="agent-options">
+          <label className="agent-field">
+            <span>Endereço</span>
+            <input
+              type="url"
+              placeholder="https://meet.exemplo.com"
+              value={current.baseUrl}
+              disabled={settings === null}
+              onChange={(event) => {
+                setSaved(false)
+                setDraft({ ...current, baseUrl: event.target.value })
+              }}
+            />
+            <small>Só o domínio, sem /live ou /api.</small>
+          </label>
+          <label className="agent-field">
+            <span>Token de gravação</span>
+            <input
+              type="password"
+              autoComplete="off"
+              placeholder="API_RECORDER_TOKEN"
+              value={current.token}
+              disabled={settings === null}
+              onChange={(event) => {
+                setSaved(false)
+                setDraft({ ...current, token: event.target.value })
+              }}
+            />
+            <small>Fica neste Mac, nos dados do app. Nunca é mostrado de novo depois de salvo.</small>
+          </label>
+        </div>
+        <div className="meet-actions">
+          <button className="settings-button settings-button-primary" disabled={!dirty || saving} onClick={() => void save()}>
+            {saving ? 'Salvando…' : 'Salvar'}
+          </button>
+          {saved && !dirty && <span className="meet-saved">Salvo.</span>}
+        </div>
+        {failure && (
+          <p className="agent-failure" role="alert">
+            {failure}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * The settings screen: the meeting app, the AI tools (which are installed
  * and signed in, installing and signing in from here, and which tool, model
- * and effort the app's AI features use.
+ * and effort the app's AI features use) and the dubbing voice model.
  */
 export function Settings({ onClose }: Props) {
   const state = useSyncExternalStore(aiSettings.subscribe, aiSettings.getState)
@@ -59,6 +144,8 @@ export function Settings({ onClose }: Props) {
       </header>
 
       <main className="settings-content">
+        <MeetSection />
+
         <section className="settings-section">
           <header className="settings-section-head">
             <div>

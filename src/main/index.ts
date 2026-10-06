@@ -9,6 +9,7 @@ import { CaptionTranslationService } from './ai/CaptionTranslationService'
 import { defaultAiSearchDirs } from './ai/cliProcess'
 import { CutSuggestionService } from './ai/CutSuggestionService'
 import { createCaptureEngine } from './capture/createCaptureEngine'
+import { RoutingCaptureEngine } from './capture/RoutingCaptureEngine'
 import { TranscriptionService } from './captions/TranscriptionService'
 import { ExportService } from './export/ExportService'
 import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
@@ -18,6 +19,11 @@ import { addLogSink, consoleSink, createLogger, fileSink } from './logging/logge
 import { ThumbnailService } from './media/ThumbnailService'
 import { WaveformService } from './media/WaveformService'
 import { registerMediaScheme, serveMedia } from './media/mediaProtocol'
+import { MeetApi } from './meet/MeetApi'
+import { MeetAudioCapture } from './meet/MeetAudioCapture'
+import { MeetRecorder } from './meet/MeetRecorder'
+import { OffscreenMeetingCapture } from './meet/OffscreenMeetingCapture'
+import { MeetSettingsStore } from './meet/MeetSettingsStore'
 import { ProjectStore } from './project/ProjectStore'
 import { RecordingController } from './recording/RecordingController'
 import { SessionStore } from './recording/SessionStore'
@@ -133,17 +139,23 @@ async function bootstrap(): Promise<void> {
 
   const windows = new WindowManager({
     preloadPath: path.join(__dirname, '../preload/index.js'),
+    meetPreloadPath: path.join(__dirname, '../preload/meet.js'),
     rendererDirectory: path.join(__dirname, '../renderer'),
     rendererDevUrl: app.isPackaged ? null : (process.env['ELECTRON_RENDERER_URL'] ?? null),
     logger: createLogger('windows')
   })
-  const engine = createCaptureEngine({
+  const ffmpeg = new FfmpegService(bundledFfmpegBinaries(), createLogger('export'))
+  // Meetings are drawn off screen and recorded by the app itself; everything else by the platform engine.
+  const offscreenMeeting = new OffscreenMeetingCapture(ffmpeg, createLogger('meet'))
+  const engine = new RoutingCaptureEngine(createCaptureEngine({
     helperPath: helperPath(),
     // Electron names displays in the user's language, by the same id the system uses.
     displayName: (displayId) => screen.getAllDisplays().find((display) => display.id === displayId)?.label || null
-  })
+  }), offscreenMeeting)
   const sessions = new SessionStore(recordingsRoot(), createLogger('sessions'))
   const projects = new ProjectStore(sessions, createLogger('autozoom'))
+  // The audio of a meeting is captured inside its window and added to the session when it ends.
+  const meetAudio = new MeetAudioCapture(path.join(app.getPath('userData'), 'meet-audio'), ffmpeg, createLogger('meet'))
   const controller = new RecordingController({
     engine,
     sessions,
@@ -151,7 +163,8 @@ async function bootstrap(): Promise<void> {
     logger: createLogger('recording'),
     monotonicNow: () => performance.now(),
     wallClock: () => new Date(),
-    ownPids
+    ownPids,
+    externalSystemAudio: (track) => meetAudio.finish(track)
   })
 
   let previous = controller.getState()
@@ -168,7 +181,6 @@ async function bootstrap(): Promise<void> {
   })
   controller.onLibraryChanged(() => windows.broadcast('library:changed', null))
 
-  const ffmpeg = new FfmpegService(bundledFfmpegBinaries(), createLogger('export'))
   const thumbnails = new ThumbnailService(path.join(app.getPath('userData'), 'thumbnails'), ffmpeg, sessions)
   serveMedia(sessions, thumbnails, createLogger('media'))
   const exports = new ExportService({
@@ -200,6 +212,18 @@ async function bootstrap(): Promise<void> {
     onProgress: (progress) => windows.broadcast('dub:progress', progress)
   })
 
+  // Meetings of the meeting app (Screen Live): listed and recorded from the library.
+  const meetSettings = new MeetSettingsStore(app.getPath('userData'), createLogger('meet'))
+  const meet = new MeetRecorder({
+    api: new MeetApi(),
+    settings: meetSettings,
+    audio: meetAudio,
+    capture: offscreenMeeting,
+    controller,
+    windows,
+    logger: createLogger('meet')
+  })
+
   registerIpc({
     engine,
     controller,
@@ -213,6 +237,8 @@ async function bootstrap(): Promise<void> {
     aiSetup,
     waveforms: new WaveformService(ffmpeg, sessions),
     thumbnails,
+    meet,
+    meetSettings,
     windows,
     logger: createLogger('ipc'),
     ownPids

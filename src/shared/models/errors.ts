@@ -34,6 +34,11 @@ export type AppErrorCode =
   | 'dub-busy'
   | 'ai-login-failed'
   | 'platform-unsupported'
+  | 'meet-not-configured'
+  | 'meet-unreachable'
+  | 'meet-unauthorized'
+  | 'meet-failed'
+  | 'meet-join-failed'
   | 'invalid-state'
   | 'unknown'
 
@@ -92,6 +97,11 @@ const MESSAGES: Record<AppErrorCode, string> = {
   'ai-login-failed': 'O login não foi concluído.',
   'ai-no-transcript': 'A IA lê a transcrição da fala. Gere as legendas desta gravação primeiro.',
   'platform-unsupported': 'A gravação ainda não é suportada neste sistema operacional.',
+  'meet-not-configured': 'Informe o endereço do Screen Live e o token de gravação em Configurações.',
+  'meet-unreachable': 'Não foi possível falar com o Screen Live. Confira o endereço e a conexão.',
+  'meet-unauthorized': 'O Screen Live recusou o token de gravação. Confira-o em Configurações.',
+  'meet-failed': 'O Screen Live respondeu de forma inesperada.',
+  'meet-join-failed': 'Não foi possível entrar na reunião para gravar.',
   'invalid-state': 'Essa ação não está disponível no momento.',
   unknown: 'Ocorreu um erro inesperado.'
 }

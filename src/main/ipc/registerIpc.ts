@@ -30,6 +30,9 @@ import { ExportError } from '../export/ExportService'
 import type { ExportService } from '../export/ExportService'
 import type { Logger } from '../logging/logger'
 import type { ThumbnailService } from '../media/ThumbnailService'
+import { toMeetAppError } from '../meet/MeetRecorder'
+import type { MeetRecorder } from '../meet/MeetRecorder'
+import type { MeetSettingsStore } from '../meet/MeetSettingsStore'
 import type { WaveformService } from '../media/WaveformService'
 import { isAudioTrackName } from '../media/WaveformService'
 import type { RecordingController } from '../recording/RecordingController'
@@ -52,6 +55,8 @@ export interface IpcDependencies {
   aiSetup: AiSetupService
   waveforms: WaveformService
   thumbnails: ThumbnailService
+  meet: MeetRecorder
+  meetSettings: MeetSettingsStore
   windows: WindowManager
   logger: Logger
   ownPids: () => number[]
@@ -84,6 +89,8 @@ export function registerIpc(deps: IpcDependencies): void {
     aiSetup,
     waveforms,
     thumbnails,
+    meet,
+    meetSettings,
     windows,
     logger,
     ownPids
@@ -513,6 +520,39 @@ export function registerIpc(deps: IpcDependencies): void {
   handle('hud:minimize', () => {
     // The HUD must stay on screen for as long as a recording is running.
     if (controller.getState().phase === 'idle') windows.dismissRecorder()
+  })
+
+  handle('meet:get-settings', () => meetSettings.get())
+
+  handle('meet:save-settings', async ([value]) => {
+    try {
+      return { ok: true, value: await meetSettings.save(value) }
+    } catch (error) {
+      logger.error('could not save meet settings', { error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('meet:list-rooms', async () => {
+    try {
+      return { ok: true, value: await meet.listRooms() }
+    } catch (error) {
+      return { ok: false, error: toMeetAppError(error) }
+    }
+  })
+
+  handle('meet:record', async ([code]) => {
+    if (typeof code !== 'string' || !/^[A-Z0-9]{6,12}$/.test(code)) {
+      return { ok: false, error: appError('invalid-state', 'invalid room code') }
+    }
+    try {
+      await meet.record(code)
+      return { ok: true, value: null }
+    } catch (error) {
+      const failure = toMeetAppError(error)
+      logger.warn('meeting recording failed', { code, error: failure.code, detail: failure.detail })
+      return { ok: false, error: failure }
+    }
   })
 
   handle('recorder:open', () => {

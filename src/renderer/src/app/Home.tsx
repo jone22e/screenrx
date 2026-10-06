@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { formatBytes, formatClock } from '@shared/format'
 import type { RecordingStateSnapshot } from '@shared/models/recording'
 import type { RecordingSummary } from '@shared/models/session'
+import { MeetRooms } from './MeetRooms'
 import { PermissionNotice } from './PermissionNotice'
+import { RecordingBanner } from './RecordingBanner'
 import { RecordingCard } from './RecordingCard'
 import { RecordingRow } from './RecordingRow'
 import { usePermissions } from './hooks'
@@ -106,13 +108,14 @@ export function Home({ state, recordings, onEdit }: Props) {
         <button className="bar-icon" aria-label="Configurações" title="Configurações" onClick={openSettings}>
           <GearIcon />
         </button>
-        <button className="new-recording" onClick={() => void window.screenrx.recorder.open()}>
+        <button className="new-recording" disabled={state.phase !== 'idle'} onClick={() => void window.screenrx.recorder.open()}>
           <span className="new-recording-dot" aria-hidden="true" />
           Nova gravação
         </button>
       </header>
 
       <main className="home-content">
+        <RecordingBanner state={state} />
         {state.lastError && (
           <div className="notice notice-error" role="alert">
             <p>{state.lastError.message}</p>
@@ -130,6 +133,8 @@ export function Home({ state, recordings, onEdit }: Props) {
           <PermissionNotice report={permissions.report} onRequest={permissions.request} />
         )}
 
+        <MeetRooms idle={state.phase === 'idle'} />
+
         {recordings !== null && total === 0 && (
           <div className="empty-state">
             <span className="empty-art">
@@ -140,7 +145,7 @@ export function Home({ state, recordings, onEdit }: Props) {
               Clique em Nova gravação para abrir a barra de gravação e escolher o que gravar. Quando terminar,
               a gravação abre no editor e aparece aqui.
             </p>
-            <button className="new-recording" onClick={() => void window.screenrx.recorder.open()}>
+            <button className="new-recording" disabled={state.phase !== 'idle'} onClick={() => void window.screenrx.recorder.open()}>
               <span className="new-recording-dot" aria-hidden="true" />
               Nova gravação
             </button>

@@ -493,6 +493,63 @@ biblioteca e sair.
   espelho: como toda janela do app, fica fora da captura, e a trilha da câmera é
   gravada à parte pelo helper.
 
+### Reuniões (Screen Live)
+
+O app grava reuniões do Screen Live (`src/main/meet/`). Em Configurações o usuário
+informa o endereço do Meet e o `API_RECORDER_TOKEN` do servidor, guardados pelo
+main em `meet-settings.json` nos dados do app (`MeetSettingsStore`); o renderer
+nunca recebe o token, só pede ao main que liste ou grave (`meet:*`). Com isso
+configurado, a biblioteca mostra as **reuniões em andamento** (`GET /api/rooms`,
+atualizado a cada 10 s e ao focar a janela) com um botão Gravar.
+
+Gravar (`MeetRecorder.record`): o main emite um token de gravador
+(`POST /api/rooms/{code}/join-tokens` com `recorder: true`), abre a `url` numa
+**janela de reunião** (`WindowManager.openMeet`) e espera o Meet confirmar a entrada
+(`GET /api/rooms/{code}` com `recording: true`, até 20 s). Essa janela não é uma
+página do app: sem preload, sem confiança no IPC, navegação presa à origem do Meet,
+`autoplayPolicy` liberado (o áudio da reunião precisa tocar para ser gravado) e sem
+`backgroundThrottling`. Ela fica **fora do escudo de captura** de propósito: é a
+única janela do app que deve aparecer numa gravação. Como as listagens de fontes
+excluem o próprio app, o main monta a `WindowSource` a partir de
+`getMediaSourceId()` e a entrega ao controller por `useSource`, junto com o título
+"Reunião · nome". O vídeo vem do helper com `SCContentFilter(desktopIndependentWindow:)`, que
+captura o conteúdo da janela mesmo coberta por outros apps (verificado: com uma janela
+de outro app vermelha por cima, confirmada por screenshot do sistema, o vídeo gravado
+continuou mostrando a reunião). A janela precisa continuar aberta e não minimizada. Medido em
+2026-10-06: oculta (`hide`), minimizada ou com opacidade 0 fazem o vídeo parar de ser
+entregue; posicionada quase toda fora dos monitores continua sendo capturada (o macOS
+mantém uma faixa de cerca de 40×32 px visível num canto). Por isso a janela da
+reunião **abre estacionada** além do canto inferior direito de todos os monitores
+(`WindowManager.parkingBounds`), é mostrada sem tomar o foco (`showInactive`) e o
+foco volta à biblioteca; só aquela faixa fica na tela, atrás dos outros apps. O
+vídeo sai na resolução do monitor onde ela caiu (2560×1440 num monitor 2×). Em
+desenvolvimento, `SCREENRX_MEET_WINDOW_VISIBLE=1` a abre num lugar visível.
+
+**O áudio não vem do ScreenCaptureKit.** Medido com uma sonda: o macOS não entrega
+o áudio dessa janela a nenhum filtro ligado à janela ou ao app (o áudio sai de um
+processo auxiliar do Electron que ele não associa à janela); só um filtro de display
+inteiro o recebe, e este misturaria os sons de outros apps. Por isso o áudio é
+capturado **dentro da página**: no modo gravador o Meet mixa o áudio de todos os
+participantes (Web Audio) e o grava com `MediaRecorder`, entregando os pedaços pela
+ponte `window.screenrxMeetAudio`, exposta só à janela da reunião por um preload
+próprio (`src/preload/meet.ts`: escrita apenas, nenhum outro canal). O
+`MeetAudioCapture` ouve só a janela preparada para a reunião atual, só o frame
+principal e só a origem do Meet, e grava os pedaços num arquivo temporário. Ao
+terminar a gravação, o controller chama o gancho `externalSystemAudio` ainda dentro de
+`complete()`, antes de anunciar a sessão (o editor abre assim que ela é anunciada e
+não pode ficar sem a trilha). O gancho alinha o áudio ao relógio da gravação com o
+FFmpeg (`buildAudioFilter`): corta o início de um áudio que começou antes do relógio
+ou completa com silêncio o que começou depois, remove os trechos em pausa e fixa a
+duração exatamente na do relógio; o resultado é o `system.m4a` da sessão (AAC
+estéreo 48 kHz). O ponto zero do relógio é o `Date.now()` em que ele começou; o do
+áudio, o do evento `start` do `MediaRecorder`, então o alinhamento tem a precisão de
+algumas dezenas de milissegundos. Se a trilha falhar, a gravação é mantida com um
+aviso `track-missing`. Gravação de reunião **não tem barra de gravação**: a biblioteca fica na tela
+(`WindowManager.holdLibrary`, que impede o escudo de escondê-la) e mostra o aviso
+`RecordingBanner` com o tempo, Pausar/Retomar e Finalizar. Terminar a gravação fecha
+a janela da reunião; fechar a janela termina a gravação. No Meet, quem está na sala vê o aviso "Gravando" enquanto o
+gravador estiver dentro, e o gravador não conta como pessoa.
+
 ## 7. Cortes, tempo e exportação
 
 ### Os três tempos

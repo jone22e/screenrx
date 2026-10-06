@@ -192,6 +192,79 @@ describe('RecordingController', () => {
     expect((await readManifest('recording-20261003-201530-123')).status).toBe('recording')
   })
 
+  it('names the session after a source chosen with a title, and only for that recording', async () => {
+    await controller.useSource(display, 'Reunião · Daily')
+    await controller.start()
+    const first = controller.getState().sessionId as string
+    expect((await readManifest(first)).title).toBe('Reunião · Daily')
+
+    now += 1000
+    await controller.stop()
+    await controller.start()
+    const second = controller.getState().sessionId as string
+    expect((await readManifest(second)).title).toBeUndefined()
+  })
+
+  it('adds audio gathered elsewhere as the system-audio track before announcing the recording', async () => {
+    const requests: unknown[] = []
+    const withExternal = new RecordingController({
+      engine,
+      sessions,
+      shield,
+      logger: silentLogger,
+      monotonicNow: () => now,
+      wallClock: () => new Date(2026, 9, 3, 20, 15, 30, 123),
+      ownPids: () => [OWN_PID],
+      externalSystemAudio: async (request) => {
+        requests.push(request)
+        await writeFile(request.outputPath, 'audio')
+        return { sizeBytes: 5, durationMs: 1234 }
+      }
+    })
+    await withExternal.setSystemAudio(false)
+    await withExternal.start()
+    const id = withExternal.getState().sessionId as string
+    now += 2000
+    await withExternal.stop()
+
+    const manifest = await readManifest(id)
+    expect(manifest.assets.systemAudio).toEqual({ file: 'system.m4a', sizeBytes: 5, durationMs: 1234 })
+    expect(requests).toEqual([
+      {
+        outputPath: path.join(root, id, 'system.m4a'),
+        startedAtWallMs: new Date(2026, 9, 3, 20, 15, 30, 123).getTime(),
+        durationMs: expect.any(Number),
+        pauses: []
+      }
+    ])
+    expect(withExternal.getState().lastCompletedSessionId).toBe(id)
+  })
+
+  it('keeps the recording when the external audio fails, with a warning', async () => {
+    const withExternal = new RecordingController({
+      engine,
+      sessions,
+      shield,
+      logger: silentLogger,
+      monotonicNow: () => now,
+      wallClock: () => new Date(2026, 9, 3, 20, 15, 30, 123),
+      ownPids: () => [OWN_PID],
+      externalSystemAudio: async () => {
+        throw new Error('ffmpeg exploded')
+      }
+    })
+    await withExternal.setSystemAudio(false)
+    await withExternal.start()
+    const id = withExternal.getState().sessionId as string
+    now += 2000
+    await withExternal.stop()
+
+    const manifest = await readManifest(id)
+    expect(manifest.status).toBe('completed')
+    expect(manifest.assets.systemAudio).toBeUndefined()
+    expect(manifest.diagnostics.some((d) => d.code === 'track-missing')).toBe(true)
+  })
+
   it('refuses to start without the screen recording permission and leaves nothing behind', async () => {
     engine.screenRecording = 'not-granted'
     await controller.start()

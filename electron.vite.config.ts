@@ -48,7 +48,16 @@ export default defineConfig({
     resolve: { alias }
   },
   preload: {
-    resolve: { alias }
+    resolve: { alias },
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve(__dirname, 'src/preload/index.ts'),
+          // Only the meeting window loads this one.
+          meet: resolve(__dirname, 'src/preload/meet.ts')
+        }
+      }
+    }
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
