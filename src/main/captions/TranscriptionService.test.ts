@@ -26,7 +26,8 @@ function createService(binaryPath: string | null, tracks: string[] = ['microphon
   const sessions = {
     read: () => Promise.resolve({ assets: Object.fromEntries(tracks.map((track) => [track, {}])) }),
     trackPathOf: (_id: string, track: string) => path.join(directory, `${track}.m4a`),
-    directoryOf: () => directory
+    directoryOf: () => directory,
+    setTranscriptPreview: async () => undefined
   } as unknown as SessionStore
   const service = new TranscriptionService({
     binaryPath,
@@ -121,7 +122,8 @@ describe('TranscriptionService', () => {
     const request = { locale: 'pt-BR', track: 'microphone' } as const
 
     const first = errorCodeOf(service.generate(SESSION_ID, request))
-    await vi.waitFor(() => expect(progress.length).toBeGreaterThan(0))
+    // The stand-in is a shell script: with the whole suite running, it can take more than a second to speak.
+    await vi.waitFor(() => expect(progress.length).toBeGreaterThan(0), { timeout: 10_000 })
     expect(await errorCodeOf(service.generate(SESSION_ID, request))).toBe('transcription-busy')
 
     service.cancel()

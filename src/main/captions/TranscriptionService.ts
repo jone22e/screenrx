@@ -16,6 +16,7 @@ import { appError } from '@shared/models/errors'
 import { JsonLineDecoder } from '../capture/macos/JsonLineDecoder'
 import { writeJsonAtomic } from '../filesystem/atomicWrite'
 import type { Logger } from '../logging/logger'
+import { transcriptPreview } from '@engine/captions/transcriptPreview'
 import type { SessionStore } from '../recording/SessionStore'
 
 export class TranscriptionError extends Error {
@@ -79,6 +80,12 @@ export class TranscriptionService {
       words
     }
     await writeJsonAtomic(path.join(sessions.directoryOf(sessionId), SESSION_FILES.transcript), transcript)
+    // The library shows and searches the start of what was said, and suggests a name from it.
+    try {
+      await sessions.setTranscriptPreview(sessionId, transcriptPreview(words))
+    } catch (error) {
+      logger.warn('could not keep the transcript preview', { sessionId, error: String(error) })
+    }
     logger.info('transcribed', {
       sessionId,
       track: request.track,
