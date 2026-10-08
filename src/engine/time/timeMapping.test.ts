@@ -3,6 +3,7 @@ import type { TimelineEffect } from '@shared/models/project'
 import {
   buildTimeMap,
   isSourceTimeKept,
+  keptSourceTime,
   nextKeptSourceTime,
   outputDurationMs,
   outputTimeToSourceTime,
@@ -105,5 +106,26 @@ describe('global export speed', () => {
     expect(outputDurationMs(map, 2)).toBe(20_000)
     // Output 5 s → timeline 10 s → source 30 s (the first 20 s were cut).
     expect(outputTimeToSourceTime(map, 5_000, 2)).toBe(30_000)
+  })
+})
+
+describe('keptSourceTime', () => {
+  const map = buildTimeMap(10_000, [
+    { id: 'a', type: 'trim', startMs: 0, endMs: 2000 },
+    { id: 'b', type: 'trim', startMs: 8000, endMs: 10_000 }
+  ])
+
+  it('keeps a kept instant, and moves a cut one to where the edit resumes', () => {
+    expect(keptSourceTime(map, 5000)).toBe(5000)
+    expect(keptSourceTime(map, 0)).toBe(2000)
+    expect(keptSourceTime(map, 1500)).toBe(2000)
+  })
+
+  it('stops at the last kept instant when nothing is kept after', () => {
+    expect(keptSourceTime(map, 9000)).toBe(7999)
+  })
+
+  it('has nowhere to go when everything is cut', () => {
+    expect(keptSourceTime(buildTimeMap(1000, [{ id: 'all', type: 'trim', startMs: 0, endMs: 1000 }]), 500)).toBe(null)
   })
 })

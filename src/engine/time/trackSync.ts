@@ -1,36 +1,24 @@
 /**
  * Keeping a separately recorded track (audio, webcam) in step with the master
- * track during playback. Seeking a media element is audible — the decoder is
- * flushed and the sound cuts out for a moment — so a small slip is corrected
- * by bending the track's playback rate a little, and only a large one by a seek.
+ * track during playback. Audio that is being heard must never be bent to catch
+ * up: changing the playback rate is audible as a warble (the browser stretches
+ * the sound), and a track that sits a constant distance behind — the time audio
+ * takes to come out after a seek — would be chased forever. So a small slip is
+ * left alone, and only a large one is repaired, by a seek.
  */
 export const TRACK_SYNC = {
   /** A slip up to this (seconds of recording, at speed 1) is left alone. */
-  deadbandS: 0.04,
-  /** A slip beyond this is too far to catch up by rate: the track is seeked. */
-  seekThresholdS: 0.5,
-  /** How much the rate is bent to catch up or fall back; small enough to go unnoticed. */
-  nudge: 0.04
+  toleranceS: 0.3
 } as const
 
-export type TrackCorrection = { kind: 'rate'; rate: number } | { kind: 'seek' }
+export type TrackCorrection = 'none' | 'seek'
 
 /**
  * What to do with a track that is `driftS` seconds off the master (positive:
- * the track is ahead), while both play at `speed`. The thresholds are in time
- * as heard, so they widen with the speed, as the same slip then covers more of
- * the recording.
+ * the track is ahead), while both play at `speed`. The tolerance is in time as
+ * heard, so it widens with the speed, as the same slip then covers more of the
+ * recording.
  */
 export function correctTrack(driftS: number, speed: number): TrackCorrection {
-  const scale = Math.max(1, speed)
-  const slip = Math.abs(driftS)
-  if (slip > TRACK_SYNC.seekThresholdS * scale) return { kind: 'seek' }
-  if (slip <= TRACK_SYNC.deadbandS * scale) return { kind: 'rate', rate: speed }
-  const direction = driftS > 0 ? -1 : 1
-  return { kind: 'rate', rate: round(speed * (1 + direction * TRACK_SYNC.nudge)) }
-}
-
-/** Keeps rates to a resolution media elements can honour, so equal corrections compare equal. */
-function round(rate: number): number {
-  return Math.round(rate * 10_000) / 10_000
+  return Math.abs(driftS) > TRACK_SYNC.toleranceS * Math.max(1, speed) ? 'seek' : 'none'
 }

@@ -97,6 +97,18 @@ export function nextKeptSourceTime(map: TimeMap, sourceMs: number): number | nul
   return null
 }
 
+/**
+ * Where the playhead belongs for `sourceMs`: the instant itself when it is
+ * kept, otherwise where the edit resumes after it — or, past the last kept
+ * stretch, the last kept instant. `null` only when nothing at all is kept.
+ */
+export function keptSourceTime(map: TimeMap, sourceMs: number): number | null {
+  const next = nextKeptSourceTime(map, sourceMs)
+  if (next !== null) return next
+  const last = map.segments[map.segments.length - 1]
+  return last ? Math.max(last.sourceStartMs, last.sourceEndMs - 1) : null
+}
+
 /** A cut instant maps to where the edit resumes. */
 export function sourceTimeToTimelineTime(map: TimeMap, sourceMs: number): number {
   for (const segment of map.segments) {
