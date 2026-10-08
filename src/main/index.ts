@@ -202,7 +202,8 @@ async function bootstrap(): Promise<void> {
     binaryPath: transcriberPath(),
     sessions,
     logger: createLogger('captions'),
-    onProgress: (progress) => windows.broadcast('captions:progress', progress)
+    onProgress: (progress) => windows.broadcast('captions:progress', progress),
+    clip: (inputPath, outputPath, endMs) => ffmpeg.extractAudioClip(inputPath, outputPath, 0, endMs, 16_000)
   })
 
   const aiTools = { logger: createLogger('ai'), searchDirs: aiSearchDirs(), env: process.env }

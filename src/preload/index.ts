@@ -72,6 +72,7 @@ const api: ScreenRxApi = {
   captions: {
     generate: (sessionId, request) => invoke('captions:generate', sessionId, request),
     cancel: () => invoke('captions:cancel'),
+    detectLocale: (sessionId, track) => invoke('captions:detect-locale', sessionId, track),
     onProgress: (listener) => subscribe('captions:progress', listener),
     translate: (request, choice) => invoke('captions:translate', request, choice)
   },

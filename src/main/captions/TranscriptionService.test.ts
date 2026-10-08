@@ -116,6 +116,31 @@ describe('TranscriptionService', () => {
     )
   })
 
+  it('tells the language from what the helper judged, with every candidate it tried', async () => {
+    const binary = await fakeTranscriber([
+      '{"type":"status","state":"preparing"}',
+      '{"type":"candidate","locale":"pt-BR","installed":true,"confidence":0.31,"count":40}',
+      '{"type":"candidate","locale":"en-US","installed":true,"confidence":0.97,"count":44}',
+      '{"type":"candidate","locale":"es-ES","installed":false}',
+      '{"type":"detected","locale":"en-US"}',
+      '{"type":"done"}'
+    ])
+    const { service } = createService(binary)
+    const detection = await service.detectLocale(SESSION_ID, 'microphone', ['pt-BR', 'en-US', 'es-ES'])
+    expect(detection.locale).toBe('en-US')
+    expect(detection.candidates).toEqual([
+      { locale: 'pt-BR', installed: true, confidence: 0.31, words: 40 },
+      { locale: 'en-US', installed: true, confidence: 0.97, words: 44 },
+      { locale: 'es-ES', installed: false, confidence: 0, words: 0 }
+    ])
+  })
+
+  it('admits not knowing the language', async () => {
+    const binary = await fakeTranscriber(['{"type":"detected","locale":null}', '{"type":"done"}'])
+    const { service } = createService(binary)
+    expect((await service.detectLocale(SESSION_ID, 'microphone', ['pt-BR'])).locale).toBe(null)
+  })
+
   it('can be cancelled, and runs one transcription at a time', async () => {
     const binary = await fakeTranscriber(['{"type":"status","state":"transcribing"}'], 'exec sleep 30')
     const { service, progress } = createService(binary)

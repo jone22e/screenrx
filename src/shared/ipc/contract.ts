@@ -4,7 +4,9 @@ import type {
   CaptionTranslationRequest,
   Transcript,
   TranscriptionProgress,
-  TranscriptionRequest
+  TranscriptionRequest,
+  LocaleDetection,
+  TranscriptTrack
 } from '../models/captions'
 import type { CaptureDevices } from '../models/devices'
 import type { DubProgress, DubRequest, DubStatus, DubTrack } from '../models/dub'
@@ -64,6 +66,7 @@ export interface IpcInvokeContract {
     result: IpcResult<Transcript>
   }
   'captions:cancel': { args: []; result: void }
+  'captions:detect-locale': { args: [sessionId: string, track: TranscriptTrack]; result: IpcResult<LocaleDetection> }
   'captions:translate': {
     args: [request: CaptionTranslationRequest, choice: AiChoice]
     result: IpcResult<Record<string, string>>
@@ -189,6 +192,8 @@ export interface ScreenRxApi {
      */
     generate(sessionId: string, request: TranscriptionRequest): Promise<IpcResult<Transcript>>
     cancel(): Promise<void>
+    /** Judges from the first seconds which language the track is spoken in, among the app's languages. */
+    detectLocale(sessionId: string, track: TranscriptTrack): Promise<IpcResult<LocaleDetection>>
     onProgress(listener: (progress: TranscriptionProgress) => void): Unsubscribe
     /**
      * Translates captions with the chosen AI tool and returns the translated

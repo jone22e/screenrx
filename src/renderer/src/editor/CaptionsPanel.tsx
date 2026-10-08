@@ -113,6 +113,9 @@ export function CaptionsPanel({ session, store, player }: Props) {
     transcript && isCaptionLocale(transcript.locale) ? transcript.locale : DEFAULT_CAPTION_LOCALE
   )
   const [track, setTrack] = useState<TranscriptTrack>(transcript?.track ?? tracks[0] ?? 'microphone')
+  // Tells the language from the first seconds, among the languages whose models are on this Mac.
+  const [detecting, setDetecting] = useState(false)
+  const [detectionNote, setDetectionNote] = useState<string | null>(null)
   const [activeCueId, setActiveCueId] = useState<string | null>(null)
   // Translating is done by the AI tool chosen in the settings.
   const ai = useSyncExternalStore(aiSettings.subscribe, aiSettings.getState)
@@ -141,6 +144,24 @@ export function CaptionsPanel({ session, store, player }: Props) {
     if (first && player) player.seek(first.startMs)
   }
 
+  const detectLocale = async (): Promise<void> => {
+    setDetecting(true)
+    setDetectionNote(null)
+    const result = await window.screenrx.captions.detectLocale(session.sessionId, track).catch(() => null)
+    setDetecting(false)
+    if (!result?.ok) {
+      setDetectionNote(result?.error.message ?? 'Não foi possível descobrir o idioma.')
+      return
+    }
+    if (result.value.locale) {
+      setLocale(result.value.locale)
+      const tried = result.value.candidates.filter((candidate) => candidate.installed).length
+      setDetectionNote(`${CAPTION_LOCALES.find((option) => option.id === result.value.locale)?.label ?? result.value.locale}, entre ${tried} ${tried === 1 ? 'idioma baixado' : 'idiomas baixados'} neste Mac.`)
+    } else {
+      setDetectionNote('Nenhum idioma baixado reconheceu a fala. Escolha o idioma na lista.')
+    }
+  }
+
   const generate = async (force: boolean): Promise<void> => {
     const reusable =
       !force && transcript !== null && transcript.locale === locale && transcript.track === track && transcript.words.length > 0
@@ -158,7 +179,18 @@ export function CaptionsPanel({ session, store, player }: Props) {
   const source = (
     <>
       <label className="field">
-        <span className="field-label">Idioma em que você falou</span>
+        <span className="field-label field-label-row">
+          Idioma em que você falou
+          <button
+            type="button"
+            className="field-link"
+            disabled={transcription !== null || detecting}
+            title="Ouve os primeiros segundos e escolhe o idioma entre os já baixados neste Mac"
+            onClick={() => void detectLocale()}
+          >
+            {detecting ? 'Descobrindo…' : 'Detectar'}
+          </button>
+        </span>
         <select
           className="select"
           value={locale}
@@ -172,6 +204,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
           ))}
         </select>
       </label>
+      {detectionNote && <p className="panel-hint">{detectionNote}</p>}
       {tracks.length > 1 && (
         <Segmented
           label="Áudio"

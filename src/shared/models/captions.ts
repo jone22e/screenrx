@@ -58,6 +58,20 @@ export interface TranscriptionRequest {
   track: TranscriptTrack
 }
 
+/** Which language a recording is spoken in, as the transcriber judged it from a short clip. */
+export interface LocaleDetection {
+  /** The best candidate, or `null` when none could be tried or scored. */
+  locale: CaptionLocaleId | null
+  candidates: Array<{
+    locale: CaptionLocaleId
+    /** Whether this language's model is on this Mac; without it the language cannot be tried. */
+    installed: boolean
+    /** How much the clip's transcription reads as this language, 0…1. */
+    confidence: number
+    words: number
+  }>
+}
+
 export function parseTranscriptionRequest(value: unknown): TranscriptionRequest | null {
   if (typeof value !== 'object' || value === null) return null
   const { locale, track } = value as Record<string, unknown>

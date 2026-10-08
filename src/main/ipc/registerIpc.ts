@@ -4,7 +4,7 @@ import type { IpcInvokeChannel, IpcInvokeContract } from '@shared/ipc/contract'
 import type { AiProvider } from '@shared/models/ai'
 import { isAiProviderId, parseAiChoice } from '@shared/models/ai'
 import { parseAssistantRequest } from '@shared/models/assistant'
-import { parseCaptionTranslationRequest, parseTranscriptionRequest } from '@shared/models/captions'
+import { CAPTION_LOCALES, parseCaptionTranslationRequest, parseTranscriptionRequest } from '@shared/models/captions'
 import type { CaptureSourceCatalog } from '@shared/models/capture'
 import { isDeviceId } from '@shared/models/devices'
 import { parseDubRequest } from '@shared/models/dub'
@@ -364,6 +364,19 @@ export function registerIpc(deps: IpcDependencies): void {
       if (failure.code !== 'transcription-cancelled') {
         logger.error('transcription failed', { sessionId, code: failure.code, detail: failure.detail })
       }
+      return { ok: false, error: failure }
+    }
+  })
+
+  handle('captions:detect-locale', async ([sessionId, track]) => {
+    if (!isSessionId(sessionId) || (track !== 'microphone' && track !== 'systemAudio')) {
+      return { ok: false, error: appError('transcription-failed', 'invalid detection request') }
+    }
+    try {
+      return { ok: true, value: await transcriptions.detectLocale(sessionId, track, CAPTION_LOCALES.map((locale) => locale.id)) }
+    } catch (error) {
+      const failure = error instanceof TranscriptionError ? error.appError : appError('transcription-failed', String(error))
+      if (failure.code !== 'transcription-cancelled') logger.warn('language detection failed', { sessionId, code: failure.code, detail: failure.detail })
       return { ok: false, error: failure }
     }
   })
