@@ -5,7 +5,7 @@ import { ZOOM_LIMITS } from '@engine/zoom/zoomConfig'
 import { formatTimecode } from '@shared/format'
 import type { EditorSession } from '@shared/models/editor'
 import type { WebcamCorner, WebcamShape } from '@shared/models/project'
-import { BACKGROUND_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
+import { BACKGROUND_LIMITS, FRAME_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
 import { AssistantPanel } from './AssistantPanel'
 import { CaptionsPanel } from './CaptionsPanel'
 import { DubbingPanel } from './DubbingSection'
@@ -13,8 +13,10 @@ import type { EditorStore } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
 import { SuggestionsPanel } from './SuggestionsPanel'
 import { TextPanel } from './TextPanel'
-import { FRAME_ASPECT_ICONS } from './frameAspectIcons'
-import { FRAME_ASPECT_OPTIONS, FRAME_FIT_OPTIONS } from './frameAspects'
+import { AspectShapeIcon, FRAME_ASPECT_RATIOS, FRAME_FIT_ICONS } from './frameAspectIcons'
+import { FRAME_ALIGN_OPTIONS, FRAME_ASPECT_OPTIONS, FRAME_FIT_HINTS, FRAME_FIT_OPTIONS, FRAME_FOLLOW_OPTIONS, aspectLabel, fitChoiceOf } from './frameAspects'
+import { createExportPlan } from '@engine/export/exportPlan'
+import { safeAreas, useSafeAreas } from '../common/safeAreas'
 import { Section, Segmented, Slider } from './panelControls'
 import {
   BackdropIcon,
@@ -27,6 +29,7 @@ import {
   SparklesIcon,
   TextIcon,
   TrashIcon,
+  UndoIcon,
   ZoomIcon
 } from './icons'
 
@@ -97,7 +100,7 @@ export function Sidebar({ session, store, player }: Props) {
         {tab === 'captions' && <CaptionsPanel session={session} store={store} player={player} />}
         {tab === 'text' && <TextPanel store={store} player={player} />}
         {tab === 'dub' && <DubbingPanel store={store} onOpenCaptions={() => choose('captions')} />}
-        {tab === 'format' && <FormatPanel store={store} />}
+        {tab === 'format' && <FormatPanel session={session} store={store} onOpenBackground={() => choose('background')} />}
         {tab === 'background' && <BackgroundPanel store={store} />}
         {tab === 'webcam' && <WebcamPanel store={store} />}
         </div>
@@ -110,72 +113,80 @@ function CutsPanel({ session, store, player }: Props) {
   const state = useSyncExternalStore(store.subscribe, store.getState)
   const { selection, trims, timeMap } = state
   const removedMs = session.durationMs - timeMap.timelineDurationMs
+  const selectedMs = selection ? selection.endMs - selection.startMs : 0
 
   return (
     <>
-      <Section title="Selecionar e cortar">
-        {selection ? (
-          <>
-            <p className="panel-meta">
-              {formatTimecode(selection.startMs)} – {formatTimecode(selection.endMs)}
-              <span className="badge">{seconds(selection.endMs - selection.startMs)}</span>
-            </p>
-            <button className="panel-button panel-button-primary" onClick={() => store.cutSelection()}>
-              <ScissorsIcon /> Cortar seleção
-            </button>
-            <button className="panel-button" onClick={() => store.setSelection(null)}>
-              Limpar seleção
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="panel-hint">
-              Arraste sobre o vídeo, ou use <kbd>I</kbd> e <kbd>O</kbd>.
-            </p>
-            <button
-              className="panel-button"
-              disabled={!player}
-              onClick={() => player && store.addTrim(player.currentTimeMs)}
-            >
-              <ScissorsIcon /> Cortar a partir daqui
-            </button>
-          </>
-        )}
+      <Section title="Seleção">
+        <div className="inout">
+          <span className="inout-point" data-set={selection !== null}>
+            <kbd>I</kbd>
+            <span>{selection ? formatTimecode(selection.startMs) : '—'}</span>
+          </span>
+          <span className="inout-point" data-set={selection !== null}>
+            <kbd>O</kbd>
+            <span>{selection ? formatTimecode(selection.endMs) : '—'}</span>
+          </span>
+        </div>
+        <div className="cut-actions">
+          <button className="panel-button panel-button-primary" disabled={!selection} onClick={() => store.cutSelection()}>
+            <ScissorsIcon /> Cortar{selection && ` ${seconds(selectedMs)}`}
+            <kbd className="button-key">⌫</kbd>
+          </button>
+          <button
+            className="panel-button"
+            disabled={!player}
+            title="Abre um corte de alguns segundos a partir da posição do play"
+            onClick={() => player && store.addTrim(player.currentTimeMs)}
+          >
+            <ScissorsIcon /> Daqui
+          </button>
+        </div>
+        <p className="panel-hint">Arraste na timeline ou marque com <kbd>I</kbd> e <kbd>O</kbd>.</p>
       </Section>
 
       <SuggestionsPanel store={store} player={player} />
 
-      <Section title={`Cortes${trims.length > 0 ? ` (${trims.length})` : ''}`}>
+      <Section title={`Cortes${trims.length > 0 ? ` (${trims.length})` : ''}`} aside={trims.length > 0 ? 'Clique para ir até o corte' : undefined}>
         {trims.length === 0 ? (
           <p className="panel-hint">Nenhum corte.</p>
         ) : (
-          <>
-            <ul className="region-list">
-              {trims.map((trim) => (
-                <li key={trim.id} className="region-row" data-selected={trim.id === state.selectedTrimId}>
-                  <button className="region-row-main" onClick={() => store.selectTrim(trim.id)}>
-                    <span>
-                      {formatTimecode(trim.startMs)} – {formatTimecode(trim.endMs)}
-                    </span>
-                    <span className="region-row-meta">{seconds(trim.endMs - trim.startMs)}</span>
-                  </button>
-                  <button
-                    className="region-row-remove"
-                    aria-label="Desfazer este corte"
-                    title="Desfazer este corte"
-                    onClick={() => store.removeTrim(trim.id)}
-                  >
-                    <TrashIcon />
-                  </button>
-                </li>
-              ))}
-            </ul>
-            <p className="panel-hint">
-              {seconds(removedMs)} removidos · resultado com {formatTimecode(timeMap.timelineDurationMs)}
-            </p>
-          </>
+          <ul className="cut-list">
+            {trims.map((trim) => (
+              <li key={trim.id} className="cut-row" data-selected={trim.id === state.selectedTrimId}>
+                <button
+                  className="cut-row-main"
+                  onClick={() => {
+                    store.selectTrim(trim.id)
+                    player?.seek(trim.startMs)
+                  }}
+                >
+                  <span className="cut-row-span">
+                    {formatTimecode(trim.startMs)} – {formatTimecode(trim.endMs)}
+                  </span>
+                  <span className="cut-row-length">{seconds(trim.endMs - trim.startMs)}</span>
+                </button>
+                <button
+                  className="region-row-remove"
+                  aria-label="Desfazer este corte"
+                  title="Desfazer este corte"
+                  onClick={() => store.removeTrim(trim.id)}
+                >
+                  <UndoIcon />
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
       </Section>
+
+      <div className="cut-total">
+        <span className="cut-total-text">
+          <span>Duração final</span>
+          <strong>{formatTimecode(timeMap.timelineDurationMs)}</strong>
+        </span>
+        {removedMs > 0 && <span className="cut-total-removed">−{seconds(removedMs)}</span>}
+      </div>
     </>
   )
 }
@@ -241,44 +252,149 @@ function ZoomPanel({ session, store, player }: Props) {
 }
 
 /** The shape of the finished video, and how the recording goes into a vertical one. */
-function FormatPanel({ store }: { store: EditorStore }) {
-  const { background } = useSyncExternalStore(store.subscribe, store.getState)
+/** The shape of the finished video, how the recording goes into it, and where the apps' interface will cover it. */
+function FormatPanel({ session, store, onOpenBackground }: { session: EditorSession; store: EditorStore; onOpenBackground: () => void }) {
+  const { background, timeMap, exportSettings, objectTrack, tracking, trackNotice, markingObject } = useSyncExternalStore(store.subscribe, store.getState)
+  const safe = useSafeAreas()
+  const source = { width: session.video.widthPx, height: session.video.heightPx }
+  const plan = createExportPlan(source, timeMap, exportSettings, background.aspect)
+  const vertical = background.aspect !== 'native'
+  const filling = vertical && background.fit !== 'fit'
+  const preset = BACKGROUND_PRESETS.find((candidate) => candidate.id === background.presetId)
 
   return (
-    <Section title="Formato">
-      <div className="field">
-        <div className="format-tiles" role="radiogroup" aria-label="Formato">
+    <>
+      <Section title="Formato">
+        <div className="format-grid" role="radiogroup" aria-label="Formato">
           {FRAME_ASPECT_OPTIONS.map((option) => (
             <button
               key={option.value}
-              className="format-tile"
+              className="format-card"
               role="radio"
               aria-checked={option.value === background.aspect}
-              title={option.hint}
               onClick={() => store.setBackground({ aspect: option.value })}
             >
-              {FRAME_ASPECT_ICONS[option.value]}
-              <span>{option.label}</span>
+              <AspectShapeIcon ratio={option.value === 'native' ? source.width / source.height : FRAME_ASPECT_RATIOS[option.value]} />
+              <span className="format-card-text">
+                <strong>
+                  {option.label} <span className="format-card-ratio">{option.ratio ?? aspectLabel(source.width, source.height)}</span>
+                </strong>
+                {option.value !== 'native' && <span>{option.hint}</span>}
+              </span>
             </button>
           ))}
         </div>
-      </div>
+      </Section>
 
-      {background.aspect !== 'native' && (
-        <>
-          <Segmented
-            label="Enquadramento"
-            value={background.fit}
-            options={FRAME_FIT_OPTIONS.map(({ value, label }) => ({ value, label }))}
-            onChange={(fit) => store.setBackground({ fit })}
+      {vertical && (
+        <Section title="Enquadramento">
+          <div className="fit-options" role="radiogroup" aria-label="Enquadramento">
+            {FRAME_FIT_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                className="fit-option"
+                role="radio"
+                aria-checked={option.value === fitChoiceOf(background.fit)}
+                onClick={() => store.setBackground({ fit: option.value === 'follow' ? (session.cursor.length > 0 ? 'follow-mouse' : 'follow-zoom') : option.value })}
+              >
+                {FRAME_FIT_ICONS[option.value]}
+                <span>{option.label}</span>
+              </button>
+            ))}
+          </div>
+          {fitChoiceOf(background.fit) === 'follow' && (
+            <Segmented
+              label="Seguir o"
+              value={background.fit === 'follow-mouse' || background.fit === 'follow-object' ? background.fit : 'follow-zoom'}
+              options={FRAME_FOLLOW_OPTIONS}
+              onChange={(fit) => store.setBackground({ fit })}
+            />
+          )}
+          {background.fit === 'follow-object' && (
+            <div className="track-card">
+              {tracking ? (
+                <div className="progress" role="status">
+                  <span className="progress-label">
+                    Rastreando o objeto <strong>{percent(tracking.fraction)}</strong>
+                  </span>
+                  <span className="progress-track">
+                    <span className="progress-fill" style={{ width: percent(tracking.fraction) }} />
+                  </span>
+                  <button className="panel-button" onClick={() => void window.screenrx.track.cancel()}>
+                    Cancelar
+                  </button>
+                </div>
+              ) : markingObject ? (
+                <>
+                  <p className="panel-hint">
+                    Arraste um retângulo em volta do objeto no preview, no instante em que ele aparece. O rastreamento
+                    começa daí.
+                  </p>
+                  <button className="panel-button" onClick={() => store.setMarkingObject(false)}>
+                    Cancelar
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p className="panel-hint">
+                    {objectTrack
+                      ? `Objeto rastreado de ${formatTimecode(objectTrack.startMs)} a ${formatTimecode(objectTrack.endMs)}.`
+                      : 'Nenhum objeto marcado ainda.'}
+                  </p>
+                  <button className="panel-button panel-button-primary" onClick={() => store.setMarkingObject(true)}>
+                    {objectTrack ? 'Marcar de novo' : 'Marcar objeto'}
+                  </button>
+                </>
+              )}
+              {trackNotice && <p className="panel-notice">{trackNotice}</p>}
+            </div>
+          )}
+          <p className="panel-hint">
+            {FRAME_FIT_HINTS[background.fit]}
+            {background.fit === 'follow-mouse' && session.cursor.length === 0 && ' Esta gravação não tem o rastro do mouse (foi importada ou é uma reunião), então a parte usada fica no centro.'}
+          </p>
+
+          <Slider
+            label={filling ? 'Zoom' : 'Tamanho'}
+            value={percent(filling ? background.scale : Math.min(background.scale, 1))}
+            min={filling ? 1 : FRAME_LIMITS.minFitScale}
+            max={filling ? FRAME_LIMITS.maxFillZoom : 1}
+            step={0.01}
+            current={filling ? Math.max(background.scale, 1) : Math.min(background.scale, 1)}
+            onChange={(scale) => store.setBackground({ scale }, 'frame-scale')}
+            onCommit={() => store.endGesture()}
           />
-          <p className="panel-hint">{FRAME_FIT_OPTIONS.find((option) => option.value === background.fit)?.hint}</p>
-        </>
+          {!filling && (
+            <Segmented label="Posição" value={background.align} options={FRAME_ALIGN_OPTIONS} onChange={(align) => store.setBackground({ align })} />
+          )}
+          <div className="format-background">
+            <span className="panel-hint">Fundo: {preset ? preset.name : 'Preto'}</span>
+            <button className="field-link" onClick={onOpenBackground}>
+              Alterar em Fundo
+            </button>
+          </div>
+        </Section>
       )}
-      {background.aspect === 'native' && (
-        <p className="panel-hint">{FRAME_ASPECT_OPTIONS.find((option) => option.value === 'native')?.hint}</p>
+
+      {background.aspect === '9:16' && (
+        <Section title="Áreas seguras">
+          <label className="switch-row">
+            <span className="switch-row-text">
+              <strong>Mostrar áreas seguras</strong>
+              <span>Marca no preview onde os botões do app cobrem o vídeo. Não sai na exportação.</span>
+            </span>
+            <input type="checkbox" role="switch" checked={safe} onChange={(event) => safeAreas.set(event.target.checked)} />
+          </label>
+        </Section>
       )}
-    </Section>
+
+      <div className="format-output">
+        <span>Saída</span>
+        <strong>
+          {plan.width} × {plan.height} · {plan.fps} fps
+        </strong>
+      </div>
+    </>
   )
 }
 
