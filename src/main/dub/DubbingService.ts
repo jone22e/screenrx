@@ -6,6 +6,7 @@ import path from 'node:path'
 import { DUB_CONFIG } from '@engine/dub/dubConfig'
 import { layoutDubClips } from '@engine/dub/dubUnits'
 import { VERIFICATION_LOCALES, speechSimilarity } from '@engine/dub/dubVerification'
+import { spellNumbers } from '@engine/dub/spellNumbers'
 import type { DubProgress, DubRequest, DubStage, DubStatus, DubTrack, DubUnitRequest } from '@shared/models/dub'
 import { VOICE_MODEL_DOWNLOAD_BYTES } from '@shared/models/dub'
 import type { AppError } from '@shared/models/errors'
@@ -209,7 +210,8 @@ export class DubbingService {
       JSON.stringify(
         job.units.map((unit) => ({
           id: unit.id,
-          text: unit.text,
+          // Digits would be read in the language the voice was learned from.
+          text: spellNumbers(unit.text, job.language),
           output: outputOf(unit),
           maxDurationS: (unit.slotEndMs - unit.startMs) / 1000
         }))
@@ -257,7 +259,11 @@ export class DubbingService {
         const take = takes.get(unit.id) as Take
         try {
           const heard = await transcribeFile(transcriber, take.path, VERIFICATION_LOCALES[language], signal)
-          take.score = speechSimilarity(unit.text, heard.map((word) => word.text).join(' '))
+          // The recognizer writes numbers in digits: both sides are compared in words.
+          take.score = speechSimilarity(
+            spellNumbers(unit.text, language),
+            spellNumbers(heard.map((word) => word.text).join(' '), language)
+          )
         } catch (error) {
           if (signal.aborted) throw new DubError(appError('dub-cancelled'))
           // A recognizer that cannot run says nothing about the clip: it is kept as it is.
