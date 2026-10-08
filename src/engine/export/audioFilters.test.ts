@@ -70,7 +70,7 @@ describe('buildAudioGraph', () => {
     expect(filter).toContain('[t0s1]atrim=start=20.000:end=30.000,asetpts=PTS-STARTPTS,atempo=1.5,')
     expect(filter).toContain('[t0p0][t0p1]concat=n=2:v=0:a=1[t0]')
     expect(filter).toContain('[2:a]asplit=2[t1s0][t1s1]')
-    expect(filter).toContain('[t0][t1]amix=inputs=2:normalize=0[aout]')
+    expect(filter).toContain('[t0][t1]amerge=inputs=2,pan=stereo|c0=c0+c2|c1=c1+c3[aout]')
   })
 
   it('multiplies a speed region by the global export speed', () => {

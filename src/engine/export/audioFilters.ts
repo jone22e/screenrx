@@ -81,6 +81,14 @@ export function buildAudioGraph(
   if (trackLabels.length === 1) {
     return { filter: chains.join(';'), output: trackLabels[0] as string }
   }
-  chains.push(`${trackLabels.join('')}amix=inputs=${trackLabels.length}:normalize=0[aout]`)
+  // The tracks are summed as `amerge` + `pan`, not `amix`: the `amix` of the
+  // FFmpeg 6.0 shipped with the app sometimes never signals the end of the
+  // stream when its inputs end (seen with two tracks at 1.5x), and FFmpeg then
+  // waits forever after the last frame. `amerge` stacks the channels of every
+  // track and `pan` adds them back into stereo, with no normalisation — the
+  // same sum `amix` with `normalize=0` produced.
+  const left = trackLabels.map((_, track) => `c${track * 2}`).join('+')
+  const right = trackLabels.map((_, track) => `c${track * 2 + 1}`).join('+')
+  chains.push(`${trackLabels.join('')}amerge=inputs=${trackLabels.length},pan=stereo|c0=${left}|c1=${right}[aout]`)
   return { filter: chains.join(';'), output: '[aout]' }
 }
