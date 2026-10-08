@@ -1,14 +1,14 @@
-import { useEffect, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { CAPTION_LANGUAGE_NAMES, translationTargets } from '@engine/captions/captionTranslation'
-import { formatBytes } from '@shared/format'
-import { CAPTION_LOCALES } from '@shared/models/captions'
+import { formatBytes, formatClock } from '@shared/format'
+import { CAPTION_LOCALES, DEFAULT_CAPTION_LOCALE } from '@shared/models/captions'
 import type { DubStage } from '@shared/models/dub'
 import type { CaptionLanguage } from '@shared/models/project'
 import { aiSettings, currentAiChoice } from '../common/aiSettings'
 import { openSettings } from '../common/settingsScreen'
 import { voiceModel } from '../common/voiceModel'
 import type { EditorStore } from './EditorStore'
-import { GearIcon, RefreshIcon, VoiceIcon } from './icons'
+import { CaptionsIcon, GearIcon, PlusIcon, RefreshIcon, VoiceIcon } from './icons'
 import { Section } from './panelControls'
 
 interface Props {
@@ -42,18 +42,40 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
   const model = useSyncExternalStore(voiceModel.subscribe, voiceModel.getState)
   const ai = useSyncExternalStore(aiSettings.subscribe, aiSettings.getState)
   const aiChoice = currentAiChoice(ai)
-  const { dubbing, dubNotice, translating, transcript, captions } = state
+  const { dubbing, dubNotice, translating, transcript, captions, transcription, captionNotice } = state
   const targets = translationTargets(transcript?.locale ?? null)
   const spoken = CAPTION_LOCALES.find((option) => option.id === transcript?.locale)?.label ?? null
-  const busy = dubbing !== null || translating !== null
+  const [detecting, setDetecting] = useState(false)
+  // Whether "+ Adicionar idioma" is open.
+  const [adding, setAdding] = useState(false)
+  const busy = dubbing !== null || translating !== null || transcription !== null || detecting
+  const hasCaptions = captions.cues.length > 0
 
   useEffect(() => {
     void voiceModel.refresh()
     void aiSettings.load()
   }, [])
 
-  const dub = (language: CaptionLanguage): void => {
-    void store.dubInto(
+  /**
+   * Dubs into `language`. A recording not yet transcribed is transcribed
+   * first: the language spoken is judged from its first seconds (among the
+   * languages whose models are on this Mac; the default otherwise), then the
+   * whole track is transcribed in it, as the Legendas tab would do. The
+   * dubbing starts from what was said.
+   */
+  const dub = async (language: CaptionLanguage): Promise<void> => {
+    if (store.getState().captions.cues.length === 0) {
+      const track = store.session.audio.some((candidate) => candidate.kind === 'microphone') ? 'microphone' : 'systemAudio'
+      setDetecting(true)
+      const detected = await window.screenrx.captions.detectLocale(store.session.sessionId, track).catch(() => null)
+      setDetecting(false)
+      const locale = detected?.ok && detected.value.locale ? detected.value.locale : DEFAULT_CAPTION_LOCALE
+      await store.generateCaptions({ locale, track }, (sessionId, request) =>
+        window.screenrx.captions.generate(sessionId, request)
+      )
+      if (store.getState().captions.cues.length === 0) return
+    }
+    await store.dubInto(
       language,
       aiChoice
         ? (target, cues, sourceLocale) =>
@@ -63,11 +85,8 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
     )
   }
 
-  const intro = (
-    <p className="panel-hint">
-      O vídeo falado em outro idioma, com a sua própria voz.
-    </p>
-  )
+  const introText = 'O vídeo falado em outro idioma, com a sua própria voz.'
+  const intro = <p className="panel-hint">{introText}</p>
 
   const status = model.status
   if (status === null) {
@@ -81,13 +100,11 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
       </Section>
     )
   }
-  if (captions.cues.length === 0) {
+  if (store.session.audio.length === 0) {
     return (
       <Section title="Dublagem">
         {intro}
-        <p className="panel-hint">
-          Gere as legendas primeiro, na aba Legendas. Depois você pode ocultá-las.
-        </p>
+        <p className="panel-hint">Esta gravação não tem áudio para dublar.</p>
       </Section>
     )
   }
@@ -125,102 +142,165 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
   }
 
   const working = dubbing?.language ?? translating
-  const counted = dubbing !== null && (dubbing.stage === 'synthesizing' || dubbing.stage === 'verifying')
 
-  const progress = (
-    <div className="progress" role="status">
-      <span className="progress-label">
-        {dubbing ? STAGE_LABELS[dubbing.stage] : 'Traduzindo o texto…'}
-        {counted && dubbing && <strong>{percent(dubbing.fraction)}</strong>}
-      </span>
-      <span className="progress-track">
-        <span
-          className="progress-fill"
-          data-indeterminate={!counted}
-          style={{ width: percent(counted && dubbing ? dubbing.fraction : 1) }}
-        />
-      </span>
-      <button
-        className="panel-button"
-        onClick={() => void (dubbing ? window.screenrx.dub.cancel() : window.screenrx.ai.cancel())}
-      >
-        Cancelar
-      </button>
-    </div>
-  )
+  const generated = targets.filter((language) => state.dubs.some((track) => track.language === language))
+  const missing = targets.filter((language) => !generated.includes(language) && working !== language)
+  const inUse = state.dub.language
+  const captionsBehind =
+    inUse !== null && captions.visible && hasCaptions && captions.language !== inUse
+  const captionsLanguageLabel = captions.language ? CAPTION_LANGUAGE_NAMES[captions.language].label : (spoken ?? 'original')
+  const useDubLanguageForCaptions = (): void => {
+    if (inUse === null) return
+    if (!store.setCaptionLanguage(inUse) && aiChoice) {
+      void store.translateCaptions(inUse, (target, cues, sourceLocale) =>
+        window.screenrx.captions.translate({ language: target, cues, sourceLocale }, aiChoice.choice)
+      )
+    }
+  }
+
+  /** The three steps of a dubbing being made, for the card of the language in progress. */
+  const steps = (language: CaptionLanguage) => {
+    const transcribing = detecting || transcription !== null
+    const translated = captions.translations[language] !== undefined
+    return [
+      { label: 'Transcrever', state: hasCaptions ? 'done' : transcribing ? 'active' : 'todo' },
+      { label: 'Traduzir', state: translated ? 'done' : translating === language ? 'active' : 'todo' },
+      { label: 'Gerar voz', state: dubbing?.language === language ? 'active' : 'todo' }
+    ] as const
+  }
+  const cancelWork = (): void => {
+    if (dubbing) void window.screenrx.dub.cancel()
+    else if (translating) void window.screenrx.ai.cancel()
+    else void window.screenrx.captions.cancel()
+  }
 
   return (
     <>
       <Section title="Dublagem">
-        {intro}
-        <label className="check">
-          <input
-            type="radio"
-            name="dub-voice"
-            checked={state.dub.language === null}
-            disabled={busy}
-            onChange={() => store.setDubLanguage(null)}
-          />
-          <span>Voz original da gravação</span>
-        </label>
+        <div className="dub-head">
+          <span className="panel-hint">{introText}</span>
+          <span className="dub-in-use">Em uso: {inUse ? CAPTION_LANGUAGE_NAMES[inUse].label : 'Original'}</span>
+        </div>
 
-        {spoken && (
-          <div className="dub-spoken">
-            <p className="panel-hint">
-              Idioma falado: <strong>{spoken}</strong>. Se estiver errado, corrija antes de dublar.
-            </p>
-            <button className="panel-button" disabled={busy} onClick={onOpenCaptions}>
-              Corrigir o idioma falado
-            </button>
-          </div>
+        <div className="dub-spoken-row">
+          <VoiceIcon />
+          <span>
+            Falado em <strong>{spoken ?? 'idioma a descobrir'}</strong>
+          </span>
+          <button className="field-link" disabled={busy} onClick={onOpenCaptions}>
+            Alterar
+          </button>
+        </div>
+        {!hasCaptions && !transcription && !detecting && (
+          <p className="panel-hint">
+            A primeira dublagem descobre o idioma falado e transcreve nele. Só os idiomas já baixados no Mac são
+            reconhecidos; os outros, pela aba Legendas.
+          </p>
         )}
+        {captionNotice && !transcription && <p className="panel-notice">{captionNotice}</p>}
 
-        <ul className="dub-list">
-          {targets.map((language) => {
+        <ul className="dub-cards" role="radiogroup" aria-label="Voz do vídeo">
+          <li className="dub-card" data-in-use={inUse === null}>
+            <label className="dub-card-main">
+              <input type="radio" name="dub-voice" checked={inUse === null} disabled={busy} onChange={() => store.setDubLanguage(null)} />
+              <span className="dub-card-text">
+                <strong>Original</strong>
+                <span>{spoken ?? 'Idioma falado'} · sua voz gravada</span>
+              </span>
+            </label>
+          </li>
+
+          {generated.map((language) => {
             const name = CAPTION_LANGUAGE_NAMES[language].label
-            const lower = name.toLowerCase()
-            const exists = state.dubs.some((track) => track.language === language)
-            const inUse = state.dub.language === language
+            const selected = inUse === language
             return (
-              <li key={language} className="dub-row" data-in-use={inUse} data-language={language}>
-                <div className="dub-row-head">
-                  <strong>{name}</strong>
-                  <span>
-                    {working === language ? 'gerando…' : exists ? (inUse ? 'em uso' : 'pronta') : 'ainda não gerada'}
+              <li key={language} className="dub-card" data-in-use={selected}>
+                <label className="dub-card-main">
+                  <input type="radio" name="dub-voice" checked={selected} disabled={busy} onChange={() => store.setDubLanguage(language)} />
+                  <span className="dub-card-text">
+                    <strong>{name}</strong>
+                    <span>Gerada · {formatClock(store.session.durationMs)}</span>
                   </span>
-                </div>
-                {working === language ? (
-                  progress
-                ) : exists ? (
-                  <div className="dub-row-actions">
-                    <label className="check">
-                      <input
-                        type="checkbox"
-                        checked={inUse}
-                        disabled={busy}
-                        onChange={(event) => store.setDubLanguage(event.target.checked ? language : null)}
-                      />
-                      <span>Usar a dublagem em {lower} no vídeo</span>
-                    </label>
-                    <button
-                      className="dub-again"
-                      disabled={busy}
-                      aria-label={`Gerar de novo a dublagem em ${lower}`}
-                      title="Gerar de novo"
-                      onClick={() => dub(language)}
-                    >
-                      <RefreshIcon />
-                    </button>
-                  </div>
-                ) : (
-                  <button className="panel-button" disabled={busy} onClick={() => dub(language)}>
-                    <VoiceIcon /> Dublar em {lower}
-                  </button>
-                )}
+                </label>
+                <button
+                  className="dub-again"
+                  disabled={busy}
+                  aria-label={`Gerar de novo a dublagem em ${name.toLowerCase()}`}
+                  title="Gerar de novo"
+                  onClick={() => void dub(language)}
+                >
+                  <RefreshIcon />
+                </button>
               </li>
             )
           })}
+
+          {working && (
+            <li className="dub-card dub-card-working">
+              <div className="dub-card-main">
+                <span className="dub-card-radio" aria-hidden="true" />
+                <span className="dub-card-text">
+                  <strong>{CAPTION_LANGUAGE_NAMES[working].label}</strong>
+                  <span>
+                    Gerando
+                    {dubbing && (dubbing.stage === 'synthesizing' || dubbing.stage === 'verifying') && ` · ${percent(dubbing.fraction)}`}
+                    {dubbing && dubbing.stage !== 'synthesizing' && dubbing.stage !== 'verifying' && ` · ${STAGE_LABELS[dubbing.stage].toLowerCase()}`}
+                    {!dubbing && (transcription || detecting) && (transcription?.stage === 'transcribing' ? ` · transcrevendo ${percent(transcription.fraction)}` : ' · ouvindo a fala')}
+                    {!dubbing && !transcription && !detecting && translating && ' · traduzindo'}
+                  </span>
+                </span>
+                <button className="field-link" onClick={cancelWork}>
+                  Cancelar
+                </button>
+              </div>
+              <ol className="dub-steps">
+                {steps(working).map((step) => (
+                  <li key={step.label} data-state={step.state}>
+                    <span className="dub-step-bar" aria-hidden="true" />
+                    <span className="dub-step-label">
+                      {step.state === 'done' && '✓ '}
+                      {step.label}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </li>
+          )}
         </ul>
+
+        {missing.length > 0 && (
+          <div className="dub-add">
+            <button className="dub-add-button" disabled={busy} aria-expanded={adding} onClick={() => setAdding((value) => !value)}>
+              <PlusIcon /> Adicionar idioma
+            </button>
+            {adding && (
+              <div className="dub-add-menu" role="menu">
+                {missing.map((language) => (
+                  <button
+                    key={language}
+                    role="menuitem"
+                    onClick={() => {
+                      setAdding(false)
+                      void dub(language)
+                    }}
+                  >
+                    <VoiceIcon /> {CAPTION_LANGUAGE_NAMES[language].label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {captionsBehind && inUse && (
+          <div className="dub-captions-notice">
+            <CaptionsIcon />
+            <span>As legendas ainda estão em {captionsLanguageLabel.toLowerCase()}.</span>
+            <button className="field-link" disabled={busy} onClick={useDubLanguageForCaptions}>
+              Usar {CAPTION_LANGUAGE_NAMES[inUse].label.toLowerCase()}
+            </button>
+          </div>
+        )}
 
         {dubNotice && <p className="panel-notice">{dubNotice}</p>}
         {!aiChoice && (

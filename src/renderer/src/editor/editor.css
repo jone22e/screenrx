@@ -2555,3 +2555,256 @@ kbd {
   font-size: 10.5px;
   color: var(--text-muted);
 }
+
+/* A small action beside a field's label, e.g. "Detectar" the spoken language. */
+.field-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.field-link {
+  padding: 0;
+  font-size: 11.5px;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+}
+
+.field-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.field-link:disabled {
+  color: var(--text-muted);
+}
+
+/* --- dubbing: one card per voice ------------------------------------------ */
+
+.dub-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dub-in-use {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.dub-spoken-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  background: var(--panel-raised);
+  border-radius: 9px;
+}
+
+.dub-spoken-row svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.dub-spoken-row span {
+  flex: 1;
+}
+
+.dub-spoken-row strong {
+  color: var(--text);
+}
+
+.dub-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dub-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+}
+
+.dub-card[data-in-use='true'] {
+  background: rgba(165, 124, 255, 0.12);
+  border-color: var(--suggestion);
+}
+
+.dub-card-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.dub-card-main input {
+  flex: none;
+  accent-color: var(--suggestion);
+}
+
+.dub-card-radio {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  border: 1.5px dashed var(--text-muted);
+  border-radius: 50%;
+}
+
+.dub-card-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.dub-card-text span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dub-card .dub-again {
+  margin-left: auto;
+}
+
+.dub-card-working {
+  border-style: dashed;
+}
+
+.dub-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dub-steps li {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.dub-step-bar {
+  height: 3px;
+  background: var(--hairline);
+  border-radius: 2px;
+}
+
+.dub-steps li[data-state='done'] .dub-step-bar,
+.dub-steps li[data-state='active'] .dub-step-bar {
+  background: var(--suggestion);
+}
+
+.dub-steps li[data-state='active'] .dub-step-bar {
+  animation: progress-pulse 1.2s ease-in-out infinite;
+}
+
+.dub-steps li[data-state='done'] .dub-step-label {
+  color: var(--zoom-manual);
+}
+
+.dub-steps li[data-state='active'] .dub-step-label {
+  color: var(--text);
+}
+
+.dub-add {
+  position: relative;
+}
+
+.dub-add-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+}
+
+.dub-add-button:hover:not(:disabled) {
+  border-color: var(--suggestion);
+}
+
+.dub-add-button:disabled {
+  opacity: 0.5;
+}
+
+.dub-add-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+}
+
+.dub-add-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+}
+
+.dub-add-menu button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dub-captions-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: #ffd27a;
+  background: rgba(255, 190, 80, 0.1);
+  border: 1px solid rgba(255, 190, 80, 0.25);
+  border-radius: 10px;
+}
+
+.dub-captions-notice svg {
+  flex: none;
+}
+
+.dub-captions-notice span {
+  flex: 1;
+}
+
+.dub-captions-notice .field-link {
+  font-weight: 600;
+  color: #ffd27a;
+}
