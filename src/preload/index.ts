@@ -118,6 +118,11 @@ const api: ScreenRxApi = {
     listRooms: () => invoke('meet:list-rooms'),
     record: (code) => invoke('meet:record', code)
   },
+  track: {
+    start: (sessionId, request) => invoke('track:start', sessionId, request),
+    cancel: () => invoke('track:cancel'),
+    onProgress: (listener) => subscribe('track:progress', listener)
+  },
   dictation: {
     requestMicrophone: () => invoke('dictation:request-microphone'),
     transcribe: (wav) => invoke('dictation:transcribe', wav)
