@@ -1,4 +1,5 @@
 import { captionAt } from '@engine/captions/captionCues'
+import { textsAt } from '@engine/captions/textOverlays'
 import { frameSourceTimeMs } from '@engine/export/exportPlan'
 import { buildTimeMap } from '@engine/time/timeMapping'
 import { cameraAt } from '@engine/zoom/zoomCamera'
@@ -84,7 +85,8 @@ export async function renderExport(
           : null,
         camera: cameraAt(zooms, sourceMs),
         background: project.background,
-        caption: caption === null ? null : { text: caption, style: captions.style }
+        caption: caption === null ? null : { text: caption, style: captions.style },
+        texts: textsAt(project.texts, sourceMs)
       })
 
       const rendered = new VideoFrame(canvas, { timestamp: 0 })

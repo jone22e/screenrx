@@ -1,4 +1,4 @@
-import type { BackgroundSettings, NormalizedPoint, WebcamCorner, WebcamSettings } from '@shared/models/project'
+import type { BackgroundSettings, FrameAspect, NormalizedPoint, WebcamCorner, WebcamSettings } from '@shared/models/project'
 
 export interface Size {
   width: number
@@ -31,21 +31,75 @@ export interface WebcamLayout extends Rect {
   cornerRadius: number
 }
 
+/** Width ÷ height of each format; `null` keeps the recording's own. */
+const ASPECT_RATIOS: Record<FrameAspect, number | null> = {
+  native: null,
+  reels: 9 / 16,
+  tiktok: 9 / 16
+}
+
 /**
- * Places the recording on the output. With a backdrop it is inset by the
- * padding on every side — scaled uniformly, so its aspect ratio is kept —
- * and gets rounded corners; without one it fills the output edge to edge.
+ * The size of the output for a recording in a format: the recording's own
+ * size, or a box of the format's shape whose shorter side is the recording's
+ * shorter side (a 1920×1080 recording gives a 1080×1920 vertical video).
  */
-export function layoutFrame(output: Size, background: BackgroundSettings, framed: boolean): FrameLayout {
-  if (!framed) {
-    return { frame: { x: 0, y: 0, width: output.width, height: output.height }, cornerRadius: 0 }
-  }
-  const scale = 1 - 2 * background.paddingRatio
-  const width = output.width * scale
-  const height = output.height * scale
+export function outputSizeFor(source: Size, aspect: FrameAspect): Size {
+  const ratio = ASPECT_RATIOS[aspect]
+  if (ratio === null) return { width: source.width, height: source.height }
+  const shorter = Math.min(source.width, source.height)
+  return ratio >= 1
+    ? { width: Math.round(shorter * ratio), height: shorter }
+    : { width: shorter, height: Math.round(shorter / ratio) }
+}
+
+/** Whether the recording is enlarged to fill a frame of another shape, showing only a part of it. */
+const fills = (background: BackgroundSettings): boolean => background.aspect !== 'native' && background.fit === 'fill'
+
+/**
+ * Places the recording on the output: as large as fits, keeping its aspect
+ * ratio, centred — or, when it fills, the whole room, a part of the
+ * recording being shown (`sourceCrop`). With a backdrop it is inset by the
+ * padding on every side and gets rounded corners; without one it goes edge
+ * to edge, which fills the output when the two have the same shape.
+ */
+export function layoutFrame(output: Size, source: Size, background: BackgroundSettings, framed: boolean): FrameLayout {
+  const padding = framed ? background.paddingRatio : 0
+  const room = { width: output.width * (1 - 2 * padding), height: output.height * (1 - 2 * padding) }
+  const scale = fills(background)
+    ? Math.max(room.width / source.width, room.height / source.height)
+    : Math.min(room.width / source.width, room.height / source.height)
+  const width = fills(background) ? room.width : source.width * scale
+  const height = fills(background) ? room.height : source.height * scale
   return {
     frame: { x: (output.width - width) / 2, y: (output.height - height) / 2, width, height },
-    cornerRadius: background.cornerRadiusRatio * Math.min(output.width, output.height)
+    cornerRadius: framed ? background.cornerRadiusRatio * Math.min(output.width, output.height) : 0
+  }
+}
+
+/** A region of the recording, normalized to it. */
+export interface NormalizedRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * The part of the recording shown: all of it, or, when it fills a frame of
+ * another shape, the largest region of the frame's shape, centred on
+ * `background.crop` and kept inside the recording.
+ */
+export function sourceCrop(output: Size, source: Size, background: BackgroundSettings): NormalizedRect {
+  if (!fills(background)) return { x: 0, y: 0, width: 1, height: 1 }
+  const sourceRatio = source.width / source.height
+  const frameRatio = output.width / output.height
+  const width = sourceRatio > frameRatio ? frameRatio / sourceRatio : 1
+  const height = sourceRatio > frameRatio ? 1 : sourceRatio / frameRatio
+  return {
+    x: clamp(background.crop.x - width / 2, 0, 1 - width),
+    y: clamp(background.crop.y - height / 2, 0, 1 - height),
+    width,
+    height
   }
 }
 

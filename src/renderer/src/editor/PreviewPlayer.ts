@@ -1,7 +1,9 @@
 import { captionAt } from '@engine/captions/captionCues'
+import { textsAt } from '@engine/captions/textOverlays'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
+import { outputSizeFor } from '@engine/rendering/frameLayout'
 import type { TimeMap } from '@engine/time/timeMapping'
-import { nextKeptSourceTime } from '@engine/time/timeMapping'
+import { keptSourceTime, nextKeptSourceTime } from '@engine/time/timeMapping'
 import { correctTrack } from '@engine/time/trackSync'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { cameraAt } from '@engine/zoom/zoomCamera'
@@ -10,6 +12,7 @@ import type {
   AudioSettings,
   BackgroundSettings,
   CaptionSettings,
+  TextOverlay,
   WebcamSettings,
   ZoomEffect
 } from '@shared/models/project'
@@ -28,6 +31,7 @@ export interface PreviewSettings {
   background: BackgroundSettings
   webcam: WebcamSettings
   captions: CaptionSettings
+  texts: readonly TextOverlay[]
   /** Which audio tracks are heard. */
   audio: AudioSettings
   /** The dubbing heard instead of the recorded voice, when one is in use. */
@@ -46,9 +50,10 @@ export interface PreviewSettings {
  * from `cueAt` — the same code the export uses.
  *
  * The screen track is the master clock; the webcam and the audio tracks are
- * separate files that follow it. A track that slips a little is bent back by
- * its playback rate (`correctTrack`), never by a seek: seeking an audio element
- * is heard as a cut in the sound, and a seek on every frame made playback stutter.
+ * separate files that follow it. A track is left alone unless it slips far
+ * (`correctTrack`), and then it is seeked: bending its playback rate to catch up
+ * is audible as a warble in the sound, and audio always sits a little behind the
+ * picture after a start or a seek, so a rate correction would chase that forever.
  */
 export class PreviewPlayer {
   private readonly video: HTMLVideoElement
@@ -58,11 +63,12 @@ export class PreviewPlayer {
   private dub: { url: string; element: HTMLAudioElement } | null = null
   private readonly audioTracks: Array<{ kind: 'microphone' | 'systemAudio'; element: HTMLAudioElement }>
   private readonly context: CanvasRenderingContext2D
-  private readonly output: Size
+  private output: Size
   private settings: PreviewSettings
   private frameRequest = 0
   private destroyed = false
   private drawnCaption: Rect | null = null
+  private drawnTexts: Array<{ id: string; box: Rect }> = []
   private readonly timeListeners = new Set<(timeMs: number) => void>()
   private readonly playingListeners = new Set<(playing: boolean) => void>()
   private readonly errorListeners = new Set<() => void>()
@@ -73,11 +79,7 @@ export class PreviewPlayer {
     settings: PreviewSettings
   ) {
     this.settings = settings
-    const scale = Math.min(1, MAX_PREVIEW_WIDTH_PX / session.video.widthPx)
-    this.output = {
-      width: Math.round(session.video.widthPx * scale),
-      height: Math.round(session.video.heightPx * scale)
-    }
+    this.output = this.outputFor(settings)
     canvas.width = this.output.width
     canvas.height = this.output.height
     const context = canvas.getContext('2d', { alpha: false })
@@ -87,6 +89,7 @@ export class PreviewPlayer {
 
     this.video = this.createVideo(session.video.url)
     this.video.addEventListener('loadeddata', this.render)
+    this.video.addEventListener('loadeddata', () => this.leaveCuts(), { once: true })
     this.video.addEventListener('seeked', this.render)
     this.video.addEventListener('play', this.handlePlaybackChange)
     this.video.addEventListener('pause', this.handlePlaybackChange)
@@ -126,13 +129,29 @@ export class PreviewPlayer {
     return this.drawnCaption
   }
 
+  /** The blocks of the texts currently on screen, in output pixels, in drawing order. */
+  get textBoxes(): ReadonlyArray<{ id: string; box: Rect }> {
+    return this.drawnTexts
+  }
+
   /** Size of the rendered output, for mapping pointer positions. */
   get outputSize(): Size {
     return this.output
   }
 
   update(settings: PreviewSettings): void {
+    const cutsChanged = settings.timeMap !== this.settings.timeMap
     this.settings = settings
+    // A paused playhead never stays on a cut stretch: a cut made around it moves it to what is kept.
+    if (cutsChanged && !this.playing) this.leaveCuts()
+    const output = this.outputFor(settings)
+    if (output.width !== this.output.width || output.height !== this.output.height) {
+      // A new shape: the canvas is resized, which also clears it, and the next render fills it.
+      this.output = output
+      this.canvas.width = output.width
+      this.canvas.height = output.height
+      this.context.imageSmoothingQuality = 'high'
+    }
     this.applyDub()
     this.applyMutes()
     this.applySpeed()
@@ -154,8 +173,10 @@ export class PreviewPlayer {
     this.video.pause()
   }
 
+  /** Moves to `timeMs` — or, when that instant is cut, to where the edit resumes. */
   seek(timeMs: number): void {
-    const clamped = Math.min(Math.max(timeMs, 0), this.session.durationMs)
+    const wanted = Math.min(Math.max(timeMs, 0), this.session.durationMs)
+    const clamped = keptSourceTime(this.settings.timeMap, wanted) ?? wanted
     this.video.currentTime = clamped / 1000
     for (const companion of this.companions) companion.currentTime = clamped / 1000
     // Move the playhead at once; the frame follows when the seek completes.
@@ -245,6 +266,23 @@ export class PreviewPlayer {
     if (this.playing) void element.play().catch(() => undefined)
   }
 
+  /** The output in the chosen format, no larger than the preview needs. */
+  private outputFor(settings: PreviewSettings): Size {
+    const full = outputSizeFor(
+      { width: this.session.video.widthPx, height: this.session.video.heightPx },
+      settings.background.aspect
+    )
+    const scale = Math.min(1, MAX_PREVIEW_WIDTH_PX / Math.max(full.width, full.height))
+    return { width: Math.round(full.width * scale), height: Math.round(full.height * scale) }
+  }
+
+  /** Puts a paused playhead that sits on a cut stretch onto the kept part. */
+  private leaveCuts(): void {
+    const timeMs = this.currentTimeMs
+    const kept = keptSourceTime(this.settings.timeMap, timeMs)
+    if (kept !== null && Math.abs(kept - timeMs) > 1) this.seek(kept)
+  }
+
   private createVideo(url: string): HTMLVideoElement {
     const video = document.createElement('video')
     video.muted = true
@@ -278,9 +316,11 @@ export class PreviewPlayer {
         : null,
       camera: cameraAt(this.settings.zooms, timeMs),
       background: this.settings.background,
-      caption: caption === null ? null : { text: caption, style: captions.style }
+      caption: caption === null ? null : { text: caption, style: captions.style },
+      texts: textsAt(this.settings.texts, timeMs)
     })
     this.drawnCaption = regions.caption
+    this.drawnTexts = regions.texts
     for (const listener of this.timeListeners) listener(timeMs)
   }
 
@@ -313,13 +353,7 @@ export class PreviewPlayer {
       if (companion.seeking || companion.paused || companion.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
         continue
       }
-      const correction = correctTrack(companion.currentTime - time, speed)
-      if (correction.kind === 'seek') {
-        companion.currentTime = time
-        if (companion.playbackRate !== speed) companion.playbackRate = speed
-      } else if (companion.playbackRate !== correction.rate) {
-        companion.playbackRate = correction.rate
-      }
+      if (correctTrack(companion.currentTime - time, speed) === 'seek') companion.currentTime = time
     }
   }
 
