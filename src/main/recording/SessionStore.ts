@@ -1,13 +1,16 @@
 import { mkdir, readFile, readdir, rm, rmdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { SESSION_FILES } from '@shared/config/recording'
+import { suggestTitle, transcriptPreview } from '@engine/captions/transcriptPreview'
+import type { TranscriptWord } from '@shared/models/captions'
 import type { AppError } from '@shared/models/errors'
 import type { MediaTrack } from '@shared/models/media'
 import { thumbnailUrl } from '@shared/models/media'
 import type {
   RecordingSessionManifest,
   RecordingSummary,
-  SessionSource
+  SessionSource,
+  RecordingProgress
 } from '@shared/models/session'
 import {
   SESSION_SCHEMA_VERSION,
@@ -57,6 +60,8 @@ const MAX_ID_ATTEMPTS = 5
  * a renderer sends can address a path outside the root.
  */
 export class SessionStore {
+  /** Transcripts already read for searching, by session, with the file time they were read at. */
+  private readonly transcripts = new Map<string, { mtimeMs: number; text: string }>()
   constructor(
     private readonly root: string,
     private readonly logger: Logger
@@ -132,6 +137,18 @@ export class SessionStore {
     return true
   }
 
+  /** Notes that the recording was exported now. */
+  async recordExport(sessionId: string): Promise<void> {
+    const manifest = await this.read(sessionId)
+    if (manifest) await this.write({ ...manifest, lastExportAt: new Date().toISOString() })
+  }
+
+  /** Keeps the start of what was said with the session, once transcribed. */
+  async setTranscriptPreview(sessionId: string, preview: string): Promise<void> {
+    const manifest = await this.read(sessionId)
+    if (manifest) await this.write({ ...manifest, transcriptPreview: preview })
+  }
+
   /** Newest first. Directories without a valid manifest are skipped. */
   async list(): Promise<RecordingSummary[]> {
     let entries: string[]
@@ -140,11 +157,95 @@ export class SessionStore {
     } catch {
       return []
     }
-    const manifests = await Promise.all(entries.filter(isSessionId).map((id) => this.read(id)))
-    return manifests
-      .filter((manifest) => manifest !== null)
-      .map(toSummary)
+    const summaries = await Promise.all(
+      entries.filter(isSessionId).map(async (id) => {
+        const manifest = await this.read(id)
+        if (!manifest) return null
+        return toSummary(await this.withPreview(manifest), await this.editState(id))
+      })
+    )
+    return summaries
+      .filter((summary): summary is RecordingSummary => summary !== null)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  }
+
+  /**
+   * The recordings whose transcript contains `query`. Transcripts are read in
+   * full, so this is for a search the user typed, not for every listing.
+   */
+  async searchTranscripts(query: string): Promise<string[]> {
+    const needle = query.trim().toLocaleLowerCase()
+    if (needle === '') return []
+    let entries: string[]
+    try {
+      entries = await readdir(this.root)
+    } catch {
+      return []
+    }
+    const hits = await Promise.all(
+      entries.filter(isSessionId).map(async (id) => {
+        const text = await this.transcriptText(id)
+        return text !== null && text.includes(needle) ? id : null
+      })
+    )
+    return hits.filter((id): id is string => id !== null)
+  }
+
+  /** A session transcribed before previews existed gets its preview the first time it is listed. */
+  private async withPreview(manifest: RecordingSessionManifest): Promise<RecordingSessionManifest> {
+    if (manifest.transcriptPreview !== undefined) return manifest
+    const words = await this.transcriptWords(manifest.id)
+    if (words === null) return manifest
+    const next = { ...manifest, transcriptPreview: transcriptPreview(words) }
+    await this.write(next).catch(() => undefined)
+    return next
+  }
+
+  /** What the project says was done to the recording: captions, cuts, zooms, texts. */
+  private async editState(sessionId: string): Promise<{ captioned: boolean; edited: boolean }> {
+    try {
+      const raw = JSON.parse(await readFile(path.join(this.directoryOf(sessionId), SESSION_FILES.project), 'utf8')) as {
+        effects?: unknown[]
+        texts?: unknown[]
+        captions?: { cues?: unknown[] }
+      }
+      const cues = raw.captions?.cues?.length ?? 0
+      const edited = (raw.effects?.length ?? 0) > 0 || (raw.texts?.length ?? 0) > 0
+      return { captioned: cues > 0, edited }
+    } catch {
+      return { captioned: false, edited: false }
+    }
+  }
+
+  private async transcriptWords(sessionId: string): Promise<TranscriptWord[] | null> {
+    try {
+      const raw = JSON.parse(await readFile(path.join(this.directoryOf(sessionId), SESSION_FILES.transcript), 'utf8')) as {
+        words?: unknown[]
+      }
+      return (raw.words ?? []).filter(
+        (word): word is TranscriptWord => typeof word === 'object' && word !== null && typeof (word as TranscriptWord).text === 'string'
+      )
+    } catch {
+      return null
+    }
+  }
+
+  /** The whole transcript as one lower-case string, kept while the file does not change. */
+  private async transcriptText(sessionId: string): Promise<string | null> {
+    const file = path.join(this.directoryOf(sessionId), SESSION_FILES.transcript)
+    let mtimeMs: number
+    try {
+      mtimeMs = (await stat(file)).mtimeMs
+    } catch {
+      return null
+    }
+    const cached = this.transcripts.get(sessionId)
+    if (cached && cached.mtimeMs === mtimeMs) return cached.text
+    const words = await this.transcriptWords(sessionId)
+    if (words === null) return null
+    const text = words.map((word) => word.text).join(' ').toLocaleLowerCase()
+    this.transcripts.set(sessionId, { mtimeMs, text })
+    return text
   }
 
   /**
@@ -235,12 +336,28 @@ function withTitle(manifest: RecordingSessionManifest, title: string | null): Re
   return next
 }
 
-function toSummary(manifest: RecordingSessionManifest): RecordingSummary {
+function toSummary(
+  manifest: RecordingSessionManifest,
+  edit: { captioned: boolean; edited: boolean }
+): RecordingSummary {
   const { screen, microphone, systemAudio, webcam } = manifest.assets
+  const preview = manifest.transcriptPreview ?? null
+  const progress: RecordingProgress = manifest.lastExportAt
+    ? 'exported'
+    : edit.captioned
+      ? 'captioned'
+      : edit.edited
+        ? 'edited'
+        : manifest.source.kind === 'file'
+          ? 'imported'
+          : 'new'
   return {
     id: manifest.id,
     createdAt: manifest.createdAt,
     status: manifest.status,
+    progress,
+    suggestedTitle: manifest.title === undefined && preview ? suggestTitle(preview) : null,
+    transcriptPreview: preview,
     title: manifest.title ?? manifest.source.label,
     sourceLabel: manifest.source.label,
     durationMs: manifest.clock.durationMs,

@@ -1,5 +1,5 @@
 import type { IpcRendererEvent } from 'electron'
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   IpcEventChannel,
   IpcEventContract,
@@ -60,6 +60,8 @@ const api: ScreenRxApi = {
     delete: (sessionId) => invoke('library:delete', sessionId),
     rename: (sessionId, title) => invoke('library:rename', sessionId, title),
     import: () => invoke('library:import'),
+    importFiles: (files) => invoke('library:import-paths', files.map((file) => webUtils.getPathForFile(file))),
+    search: (query) => invoke('library:search', query),
     onChanged: (listener) => subscribe('library:changed', () => listener())
   },
   editor: {
@@ -87,6 +89,7 @@ const api: ScreenRxApi = {
     login: (provider) => invoke('ai:login', provider),
     cancelSetup: () => invoke('ai:cancel-setup'),
     suggestCuts: (sessionId, choice) => invoke('ai:suggest-cuts', sessionId, choice),
+    assist: (sessionId, request, choice) => invoke('ai:assist', sessionId, request, choice),
     cancel: () => invoke('ai:cancel')
   },
   export: {
@@ -113,6 +116,10 @@ const api: ScreenRxApi = {
     saveSettings: (settings) => invoke('meet:save-settings', settings),
     listRooms: () => invoke('meet:list-rooms'),
     record: (code) => invoke('meet:record', code)
+  },
+  dictation: {
+    requestMicrophone: () => invoke('dictation:request-microphone'),
+    transcribe: (wav) => invoke('dictation:transcribe', wav)
   },
   update: {
     getState: () => invoke('update:get-state'),

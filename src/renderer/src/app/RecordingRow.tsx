@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { formatBytes, formatClock } from '@shared/format'
 import type { RecordingSummary } from '@shared/models/session'
-import { RecordingActions, RecordingBadges } from './RecordingCard'
+import { ProgressBadge, RecordingActions, RecordingBadges, SuggestedTitle } from './RecordingCard'
 import { RecordingTitle } from './RecordingTitle'
-import { CameraIcon, FilmIcon, MicIcon, SpeakerIcon } from './icons'
+import { FilmIcon } from './icons'
 
 interface Props {
   recording: RecordingSummary
@@ -12,8 +12,19 @@ interface Props {
 }
 
 const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' })
+const dayFormat = new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'short' })
 
-/** One recording as a row of the list view: a small poster, the name and the figures in columns. */
+/** "Hoje, 07:49" / "Ontem, 16:20" / "3 de out., 10:05". */
+function when(createdAt: string): string {
+  const date = new Date(createdAt)
+  const now = new Date()
+  const startOfDay = (value: Date): number => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime()
+  const days = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000)
+  const day = days === 0 ? 'Hoje' : days === 1 ? 'Ontem' : dayFormat.format(date)
+  return `${day}, ${timeFormat.format(date)}`
+}
+
+/** One recording as a row of the list view: a small poster, the name, how far it has come, and the figures. */
 export function RecordingRow({ recording, highlighted, onEdit }: Props) {
   const [renaming, setRenaming] = useState(false)
   const editable = recording.status === 'completed'
@@ -40,21 +51,19 @@ export function RecordingRow({ recording, highlighted, onEdit }: Props) {
           </span>
         )}
       </button>
-      <span className="row-title" title={renaming ? undefined : recording.title}>
-        <RecordingTitle recording={recording} editing={renaming} onDone={() => setRenaming(false)} />
-        {!renaming && <RecordingBadges recording={recording} />}
+      <span className="row-name">
+        <span className="row-title" title={renaming ? undefined : recording.title}>
+          <RecordingTitle recording={recording} editing={renaming} onDone={() => setRenaming(false)} />
+          {!renaming && <RecordingBadges recording={recording} />}
+        </span>
+        {!renaming && <SuggestedTitle recording={recording} />}
+        <span className="row-when">{when(recording.createdAt)}</span>
       </span>
-      <span className="row-tracks">
-        {recording.hasWebcam && <CameraIcon />}
-        {recording.hasMicrophone && <MicIcon />}
-        {recording.hasSystemAudio && <SpeakerIcon />}
+      <span className="row-cell row-status">
+        <ProgressBadge recording={recording} />
       </span>
-      <span className="row-cell">{timeFormat.format(new Date(recording.createdAt))}</span>
-      <span className="row-cell">{formatClock(recording.durationMs)}</span>
-      <span className="row-cell">{formatBytes(recording.sizeBytes)}</span>
-      <span className="row-cell">
-        {recording.resolution ? `${recording.resolution.widthPx}×${recording.resolution.heightPx}` : '—'}
-      </span>
+      <span className="row-cell row-figure">{formatClock(recording.durationMs)}</span>
+      <span className="row-cell row-figure">{formatBytes(recording.sizeBytes)}</span>
       <span className="row-actions">
         <RecordingActions recording={recording} onRename={() => setRenaming(true)} />
       </span>
