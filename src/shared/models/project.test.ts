@@ -8,8 +8,8 @@ import {
   WEBCAM_LIMITS,
   createProject,
   parseProject,
-  zoomsOf
-} from './project'
+  zoomsOf,
+  DEFAULT_EXPORT_SETTINGS } from './project'
 
 const sessionId = 'recording-20261003-201530-123'
 const zoom = {
@@ -53,7 +53,12 @@ describe('parseProject', () => {
 
   it('repairs export settings rather than rejecting the project', () => {
     const parsed = parseProject({ ...createProject(sessionId), export: { speed: -3 } }, sessionId)
-    expect(parsed?.export).toEqual({ format: 'mp4', quality: 'high', fps: 30, speed: 1 })
+    expect(parsed?.export).toEqual({ format: 'mp4', quality: 'high', compression: 0, fps: 30, speed: 1 })
+    const level = (compression: unknown) =>
+      parseProject({ ...createProject(sessionId), export: { ...DEFAULT_EXPORT_SETTINGS, compression } }, sessionId)?.export.compression
+    expect(level(3)).toBe(3)
+    expect(level('compact')).toBe(2)
+    expect(level(9)).toBe(0)
   })
 
   it('keeps a supported export frame rate and repairs any other', () => {
@@ -90,11 +95,43 @@ describe('parseProject framing', () => {
     )
     expect(parsed?.background).toEqual({
       presetId: null,
+      aspect: 'native',
+      fit: 'fit',
+      crop: { x: 0.5, y: 0.5 },
       paddingRatio: BACKGROUND_LIMITS.maxPaddingRatio,
       cornerRadiusRatio: 0,
       shadow: false
     })
     expect(parsed?.webcam).toEqual({ ...DEFAULT_WEBCAM, visible: false })
+    expect(
+      parseProject({ ...createProject(sessionId), background: { presetId: null, aspect: 'reels' } }, sessionId)?.background.aspect
+    ).toBe('reels')
+    const filled = parseProject(
+      { ...createProject(sessionId), background: { presetId: null, aspect: 'tiktok', fit: 'fill', crop: { x: 1.4, y: 0.2 } } },
+      sessionId
+    )?.background
+    expect(filled).toMatchObject({ aspect: 'tiktok', fit: 'fill', crop: { x: 1, y: 0.2 } })
+    expect(
+      parseProject({ ...createProject(sessionId), background: { presetId: null, aspect: '3:7' } }, sessionId)?.background.aspect
+    ).toBe('native')
+  })
+
+  it('reads the texts over the video, sorted, and gives old projects none', () => {
+    expect(parseProject(createProject(sessionId), sessionId)?.texts).toEqual([])
+    const parsed = parseProject(
+      {
+        ...createProject(sessionId),
+        texts: [
+          { id: 'b', startMs: 5000, endMs: 8000, text: 'Depois', style: { sizeRatio: 9, color: 'red' } },
+          { id: 'a', startMs: 1000, endMs: 3000, text: 'Antes' },
+          { id: 'x', startMs: 3000, endMs: 1000, text: 'Inválido' },
+          { id: 'y', startMs: 0, endMs: 1000 }
+        ]
+      },
+      sessionId
+    )
+    expect(parsed?.texts.map((text) => text.id)).toEqual(['a', 'b'])
+    expect(parsed?.texts[1]?.style).toMatchObject({ sizeRatio: 0.1, color: '#ffffff' })
   })
 
   it('accepts a freely placed square webcam and repairs nonsense', () => {

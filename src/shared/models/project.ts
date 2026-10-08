@@ -60,9 +60,18 @@ export function isExportFps(value: unknown): value is ExportFps {
   return (EXPORT_FRAME_RATES as readonly unknown[]).includes(value)
 }
 
+/**
+ * How hard the file is squeezed, from 0 (none: H.264 at full bitrate, which
+ * plays anywhere) to 4 (the most that keeps the picture sharp: HEVC at a
+ * low bitrate). The levels themselves are in the export config.
+ */
+export type ExportCompression = 0 | 1 | 2 | 3 | 4
+export const EXPORT_COMPRESSION_LEVELS: readonly ExportCompression[] = [0, 1, 2, 3, 4]
+
 export interface ExportSettings {
   format: 'mp4'
   quality: 'standard' | 'high'
+  compression: ExportCompression
   /** Frames per second of the exported file. */
   fps: ExportFps
   /**
@@ -77,9 +86,29 @@ export interface ExportSettings {
  * rounded corners and a shadow. Sizes are ratios of the output's shorter
  * side, so the look is the same at any resolution.
  */
+/**
+ * The shape of the finished video: the recording's own, or the vertical
+ * 9:16 of Reels and TikTok (two names for the same shape, kept apart so the
+ * user sees the one they picked).
+ */
+export type FrameAspect = 'native' | 'reels' | 'tiktok'
+export const FRAME_ASPECTS: readonly FrameAspect[] = ['native', 'reels', 'tiktok']
+
+/**
+ * How the recording goes into a format of another shape: shrunk so all of it
+ * shows (`fit`), or enlarged so it fills the frame and a part of it is used
+ * (`fill`), the part being chosen with `crop`.
+ */
+export type FrameFit = 'fit' | 'fill'
+export const FRAME_FITS: readonly FrameFit[] = ['fit', 'fill']
+
 export interface BackgroundSettings {
   /** A preset from the engine's catalogue, or `null` for the bare recording. */
   presetId: string | null
+  aspect: FrameAspect
+  fit: FrameFit
+  /** Centre of the part of the recording used when it fills the frame, normalized to the recording. */
+  crop: NormalizedPoint
   paddingRatio: number
   cornerRadiusRatio: number
   shadow: boolean
@@ -148,6 +177,25 @@ export interface CaptionStyle {
 }
 
 /**
+ * A text the user writes over the video — a title, a call-out — shown during
+ * its span, in a look of its own. Texts may overlap in time.
+ */
+export interface TextOverlay {
+  id: string
+  startMs: number
+  endMs: number
+  text: string
+  style: CaptionStyle
+}
+
+export const TEXT_LIMITS = {
+  maxTexts: 500,
+  maxTextLength: 300,
+  defaultDurationMs: 3000,
+  minDurationMs: 300
+} as const
+
+/**
  * Captions are drawn at preview/export time, like every other effect; the
  * cues are the user's to edit once generated from the transcript.
  */
@@ -172,6 +220,8 @@ export interface Project {
   background: BackgroundSettings
   webcam: WebcamSettings
   captions: CaptionSettings
+  /** Texts written over the video. Empty in projects saved before they existed. */
+  texts: TextOverlay[]
   audio: AudioSettings
   dub: DubSettings
   export: ExportSettings
@@ -191,7 +241,7 @@ export const createAudioSettings = (): AudioSettings => ({
   systemAudio: { muted: false }
 })
 
-export const DEFAULT_EXPORT_SETTINGS: ExportSettings = { format: 'mp4', quality: 'high', fps: 30, speed: 1 }
+export const DEFAULT_EXPORT_SETTINGS: ExportSettings = { format: 'mp4', quality: 'high', compression: 0, fps: 30, speed: 1 }
 
 export const BACKGROUND_LIMITS = { maxPaddingRatio: 0.16, maxCornerRadiusRatio: 0.05 } as const
 
@@ -225,6 +275,14 @@ export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
   position: { x: 0.5, y: 0.88 }
 }
 
+/** A new text: big, in the middle of the frame, with a shadow so it reads over anything. */
+export const DEFAULT_TEXT_STYLE: CaptionStyle = {
+  ...DEFAULT_CAPTION_STYLE,
+  sizeRatio: 0.07,
+  backdrop: 'shadow',
+  position: { x: 0.5, y: 0.5 }
+}
+
 export function createCaptionSettings(): CaptionSettings {
   return {
     visible: true,
@@ -238,6 +296,9 @@ export function createCaptionSettings(): CaptionSettings {
 
 export const DEFAULT_BACKGROUND: BackgroundSettings = {
   presetId: 'aurora',
+  aspect: 'native',
+  fit: 'fit',
+  crop: { x: 0.5, y: 0.5 },
   paddingRatio: 0.06,
   cornerRadiusRatio: 0.014,
   shadow: true
@@ -251,6 +312,7 @@ export function createProject(sessionId: string, effects: TimelineEffect[] = [])
     background: { ...DEFAULT_BACKGROUND },
     webcam: { ...DEFAULT_WEBCAM, position: { ...DEFAULT_WEBCAM.position } },
     captions: createCaptionSettings(),
+    texts: [],
     audio: createAudioSettings(),
     dub: { language: null },
     export: { ...DEFAULT_EXPORT_SETTINGS }
@@ -323,6 +385,11 @@ const MAX_ID_LENGTH = 64
 const clampRatio = (value: unknown, fallback: number, max: number): number =>
   isFiniteNumber(value) ? Math.min(Math.max(value, 0), max) : fallback
 
+function parseNormalizedPoint(value: unknown, fallback: NormalizedPoint): NormalizedPoint {
+  if (!isRecord(value) || !isFiniteNumber(value.x) || !isFiniteNumber(value.y)) return { ...fallback }
+  return { x: Math.min(Math.max(value.x, 0), 1), y: Math.min(Math.max(value.y, 0), 1) }
+}
+
 /** Projects saved before framing existed simply get the defaults. */
 function parseBackground(value: unknown): BackgroundSettings {
   if (!isRecord(value)) return { ...DEFAULT_BACKGROUND }
@@ -334,6 +401,9 @@ function parseBackground(value: unknown): BackgroundSettings {
         : typeof presetId === 'string' && presetId.length <= MAX_ID_LENGTH
           ? presetId
           : DEFAULT_BACKGROUND.presetId,
+    aspect: includes(FRAME_ASPECTS, value.aspect) ? value.aspect : DEFAULT_BACKGROUND.aspect,
+    fit: includes(FRAME_FITS, value.fit) ? value.fit : DEFAULT_BACKGROUND.fit,
+    crop: parseNormalizedPoint(value.crop, DEFAULT_BACKGROUND.crop),
     paddingRatio: clampRatio(value.paddingRatio, DEFAULT_BACKGROUND.paddingRatio, BACKGROUND_LIMITS.maxPaddingRatio),
     cornerRadiusRatio: clampRatio(
       value.cornerRadiusRatio,
@@ -350,8 +420,6 @@ function parseBackground(value: unknown): BackgroundSettings {
  */
 function parseCaptions(value: unknown): CaptionSettings {
   const settings = isRecord(value) ? value : {}
-  const style = isRecord(settings.style) ? settings.style : {}
-  const position = isRecord(style.position) ? style.position : {}
   const fallback = DEFAULT_CAPTION_STYLE
 
   const cues: CaptionCue[] = []
@@ -386,23 +454,42 @@ function parseCaptions(value: unknown): CaptionSettings {
     length: includes(CAPTION_LENGTHS, settings.length) ? settings.length : 'medium',
     language,
     translations,
-    style: {
-      font: includes(CAPTION_FONT_IDS, style.font) ? style.font : fallback.font,
-      sizeRatio: isFiniteNumber(style.sizeRatio)
-        ? Math.min(Math.max(style.sizeRatio, CAPTION_LIMITS.minSizeRatio), CAPTION_LIMITS.maxSizeRatio)
-        : fallback.sizeRatio,
-      bold: typeof style.bold === 'boolean' ? style.bold : fallback.bold,
-      uppercase: style.uppercase === true,
-      color: isHexColor(style.color) ? style.color : fallback.color,
-      backdrop: includes(CAPTION_BACKDROPS, style.backdrop) ? style.backdrop : fallback.backdrop,
-      backdropColor: isHexColor(style.backdropColor) ? style.backdropColor : fallback.backdropColor,
-      position: {
-        x: clampRatio(position.x, fallback.position.x, 1),
-        y: clampRatio(position.y, fallback.position.y, 1)
-      }
-    },
+    style: parseStyle(settings.style, fallback),
     cues
   }
+}
+
+/** A text look as saved; whatever is not well-formed takes the fallback's value. */
+function parseStyle(value: unknown, fallback: CaptionStyle): CaptionStyle {
+  const style = isRecord(value) ? value : {}
+  const position = isRecord(style.position) ? style.position : {}
+  return {
+    font: includes(CAPTION_FONT_IDS, style.font) ? style.font : fallback.font,
+    sizeRatio: isFiniteNumber(style.sizeRatio)
+      ? Math.min(Math.max(style.sizeRatio, CAPTION_LIMITS.minSizeRatio), CAPTION_LIMITS.maxSizeRatio)
+      : fallback.sizeRatio,
+    bold: typeof style.bold === 'boolean' ? style.bold : fallback.bold,
+    uppercase: style.uppercase === true,
+    color: isHexColor(style.color) ? style.color : fallback.color,
+    backdrop: includes(CAPTION_BACKDROPS, style.backdrop) ? style.backdrop : fallback.backdrop,
+    backdropColor: isHexColor(style.backdropColor) ? style.backdropColor : fallback.backdropColor,
+    position: {
+      x: clampRatio(position.x, fallback.position.x, 1),
+      y: clampRatio(position.y, fallback.position.y, 1)
+    }
+  }
+}
+
+/** Texts over the video, sorted by start; they may overlap. Projects saved before them have none. */
+function parseTexts(value: unknown): TextOverlay[] {
+  const texts: TextOverlay[] = []
+  for (const entry of Array.isArray(value) ? value.slice(0, TEXT_LIMITS.maxTexts) : []) {
+    if (!isRecord(entry) || typeof entry.text !== 'string') continue
+    const base = parseBase(entry)
+    if (!base) continue
+    texts.push({ ...base, text: entry.text.slice(0, TEXT_LIMITS.maxTextLength), style: parseStyle(entry.style, DEFAULT_TEXT_STYLE) })
+  }
+  return texts.sort((a, b) => a.startMs - b.startMs)
 }
 
 /** Projects saved before tracks could be muted play every track. */
@@ -475,6 +562,7 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
     background: parseBackground(value.background),
     webcam: parseWebcam(value.webcam),
     captions: parseCaptions(value.captions),
+    texts: parseTexts(value.texts),
     audio: parseAudio(value.audio),
     dub: {
       language:
@@ -483,6 +571,12 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
     export: {
       format: 'mp4',
       quality: settings.quality === 'standard' ? 'standard' : 'high',
+      // The first version of this was 'normal' | 'compact'.
+      compression: includes(EXPORT_COMPRESSION_LEVELS, settings.compression)
+        ? settings.compression
+        : settings.compression === 'compact'
+          ? 2
+          : DEFAULT_EXPORT_SETTINGS.compression,
       // Projects saved before the frame rate could be chosen were exported at the default.
       fps: isExportFps(settings.fps) ? settings.fps : DEFAULT_EXPORT_SETTINGS.fps,
       speed: isFiniteNumber(settings.speed) && settings.speed > 0 ? settings.speed : 1
