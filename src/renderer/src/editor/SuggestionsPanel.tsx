@@ -1,13 +1,11 @@
 import { useEffect, useSyncExternalStore } from 'react'
 import { formatTimecode } from '@shared/format'
-import { AI_EFFORT_LABELS } from '@shared/models/ai'
 import type { CutSuggestion, CutSuggestionKind } from '@shared/models/suggestions'
-import { AiLogo } from '../common/AiLogo'
 import { aiSettings, currentAiChoice } from '../common/aiSettings'
 import { openSettings } from '../common/settingsScreen'
 import type { EditorStore } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
-import { CheckIcon, CloseIcon, GearIcon, SparklesIcon } from './icons'
+import { CheckIcon, CloseIcon, GearIcon, LockIcon, SparklesIcon } from './icons'
 import { Section } from './panelControls'
 
 interface Props {
@@ -40,7 +38,6 @@ export function SuggestionsPanel({ store, player }: Props) {
   // Which tool, model and effort to ask is the user's choice, made in the settings screen.
   const ai = useSyncExternalStore(aiSettings.subscribe, aiSettings.getState)
   const current = currentAiChoice(ai)
-  const model = current?.provider.models.find((candidate) => candidate.id === current.choice.model)
   const hasSpeech = transcript !== null && transcript.words.length > 0
 
   useEffect(() => {
@@ -52,8 +49,17 @@ export function SuggestionsPanel({ store, player }: Props) {
     void store.suggestCuts(current.choice, (sessionId, choice) => window.screenrx.ai.suggestCuts(sessionId, choice))
   }
 
+  const aside = current ? (
+    <span className="suggestions-source">
+      <LockIcon /> {current.provider.label} · só texto
+      <button className="field-link" aria-label="Trocar a ferramenta de IA" title="Trocar a ferramenta, o modelo ou o esforço" onClick={openSettings}>
+        <GearIcon />
+      </button>
+    </span>
+  ) : undefined
+
   return (
-    <Section title="Limpeza com IA">
+    <Section title="Sugestões da IA" aside={aside}>
       {!hasSpeech ? (
         <p className="panel-hint">Gere as legendas primeiro, na aba Legendas.</p>
       ) : ai.providers === null ? (
@@ -67,24 +73,40 @@ export function SuggestionsPanel({ store, player }: Props) {
         </>
       ) : (
         <>
-          {suggestions.length === 0 && (
-            <p className="panel-hint">A IA propõe cortes a partir da fala. Você decide um por um.</p>
+          {suggestions.length > 0 && (
+            <ul className="suggestion-list">
+              {suggestions.map((suggestion) => (
+                <li key={suggestion.id} className="suggestion" data-kind={suggestion.kind}>
+                  <button className="suggestion-main" title="Ver este trecho na linha do tempo" onClick={() => previewSuggestion(store, player, suggestion)}>
+                    <span className="suggestion-head">
+                      <span className="suggestion-kind">{SUGGESTION_KIND_LABELS[suggestion.kind]}</span>
+                      <span className="suggestion-time">{formatTimecode(suggestion.startMs)}</span>
+                      <span className="suggestion-length">{seconds(suggestion.endMs - suggestion.startMs)}</span>
+                    </span>
+                    <span className="suggestion-text">“{suggestion.text}”</span>
+                  </button>
+                  <span className="suggestion-actions">
+                    <button className="suggestion-reject" aria-label={`Manter: ${suggestion.text}`} title="Manter" onClick={() => store.rejectSuggestion(suggestion.id)}>
+                      <CloseIcon />
+                    </button>
+                    <button className="suggestion-accept" aria-label={`Cortar: ${suggestion.text}`} title="Cortar" onClick={() => store.acceptSuggestion(suggestion.id)}>
+                      <CheckIcon />
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
-          <button
-            className="ai-choice"
-            title="Trocar a ferramenta, o modelo ou o esforço"
-            disabled={suggesting}
-            onClick={openSettings}
-          >
-            <AiLogo provider={current.provider.id} size={16} />
-            <span className="ai-choice-text">
-              <strong>{current.provider.label}</strong>
-              <span>
-                {model?.label ?? current.choice.model} · esforço {AI_EFFORT_LABELS[current.choice.effort].toLowerCase()}
+          {suggestions.length > 0 && (
+            <div className="suggestion-all">
+              <span className="panel-hint">
+                {suggestions.length} para revisar
               </span>
-            </span>
-            <GearIcon />
-          </button>
+              <button className="field-link" onClick={() => store.acceptAllSuggestions()}>
+                Aceitar todas
+              </button>
+            </div>
+          )}
           {suggesting ? (
             <div className="progress" role="status">
               <span className="progress-label">Analisando a transcrição…</span>
@@ -96,61 +118,14 @@ export function SuggestionsPanel({ store, player }: Props) {
               </button>
             </div>
           ) : (
-            <button className="panel-button panel-button-ai" onClick={ask}>
+            <button className="panel-button" onClick={ask}>
               <SparklesIcon /> {suggestions.length > 0 ? 'Analisar de novo' : 'Sugerir cortes'}
             </button>
           )}
-          {suggestionNotice && <p className="panel-notice">{suggestionNotice}</p>}
-
-          {suggestions.length > 0 && (
-            <>
-              <ul className="suggestion-list">
-                {suggestions.map((suggestion) => (
-                  <li key={suggestion.id} className="suggestion" data-kind={suggestion.kind}>
-                    <button
-                      className="suggestion-main"
-                      title="Ver este trecho na linha do tempo"
-                      onClick={() => previewSuggestion(store, player, suggestion)}
-                    >
-                      <span className="suggestion-head">
-                        <span className="suggestion-kind">{SUGGESTION_KIND_LABELS[suggestion.kind]}</span>
-                        <span className="suggestion-time">
-                          {formatTimecode(suggestion.startMs)} · {seconds(suggestion.endMs - suggestion.startMs)}
-                        </span>
-                      </span>
-                      <span className="suggestion-text">“{suggestion.text}”</span>
-                      {suggestion.reason && <span className="suggestion-reason">{suggestion.reason}</span>}
-                    </button>
-                    <span className="suggestion-actions">
-                      <button
-                        className="suggestion-accept"
-                        aria-label={`Cortar: ${suggestion.text}`}
-                        onClick={() => store.acceptSuggestion(suggestion.id)}
-                      >
-                        <CheckIcon /> Cortar
-                      </button>
-                      <button
-                        className="suggestion-reject"
-                        aria-label={`Manter: ${suggestion.text}`}
-                        onClick={() => store.rejectSuggestion(suggestion.id)}
-                      >
-                        <CloseIcon /> Manter
-                      </button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-              <div className="suggestion-all">
-                <button className="panel-button" onClick={() => store.acceptAllSuggestions()}>
-                  Cortar todas ({suggestions.length})
-                </button>
-                <button className="panel-button" onClick={() => store.clearSuggestions()}>
-                  Dispensar
-                </button>
-              </div>
-            </>
+          {suggestions.length === 0 && !suggesting && (
+            <p className="panel-hint">Repetições, vícios de fala e trechos fora do assunto, a partir da fala. Você decide um por um.</p>
           )}
-          <p className="panel-hint">Só o texto é enviado ao {current.provider.label}.</p>
+          {suggestionNotice && <p className="panel-notice">{suggestionNotice}</p>}
         </>
       )}
     </Section>
