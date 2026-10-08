@@ -13,6 +13,7 @@ import type { TimeSpan } from '@engine/zoom/zoomEditing'
 import { clampScale, spanForNewZoom } from '@engine/zoom/zoomEditing'
 import type { Transcript, TranscriptionRequest, TranscriptionStage } from '@shared/models/captions'
 import type { DubProgress, DubRequest, DubTrack } from '@shared/models/dub'
+import type { ObjectTrack, ObjectTrackRequest } from '@shared/models/telemetry'
 import type { EditorSession } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
 import type {
@@ -69,6 +70,13 @@ export interface EditorState {
   dub: DubSettings
   /** The dubbing tracks that exist for this recording; not part of the project. */
   dubs: readonly DubTrack[]
+  /** Where an object marked in the video goes, when one was tracked; not part of the project. */
+  objectTrack: ObjectTrack | null
+  /** UI state: the tracking in progress, if any, 0…1. */
+  tracking: { fraction: number } | null
+  trackNotice: string | null
+  /** UI state: the user is drawing the object to track on the preview. */
+  markingObject: boolean
   /** UI state: the dubbing being generated, if any. */
   dubbing: (DubProgress & { language: CaptionLanguage }) | null
   dubNotice: string | null
@@ -145,6 +153,10 @@ export class EditorStore {
   private captionNotice: string | null = null
   private translating: CaptionLanguage | null = null
   private dubs: DubTrack[]
+  private objectTrack: ObjectTrack | null
+  private tracking: { fraction: number } | null = null
+  private trackNotice: string | null = null
+  private markingObject = false
   private dubbing: (DubProgress & { language: CaptionLanguage }) | null = null
   private dubNotice: string | null = null
   /** Every suggestion received and not rejected; the pending ones are those no cut covers yet. */
@@ -169,6 +181,7 @@ export class EditorStore {
     this.project = session.project
     this.transcript = session.transcript
     this.dubs = [...session.dubs]
+    this.objectTrack = session.track
     this.state = this.derive(NOTHING_SELECTED, 'saved')
   }
 
@@ -805,6 +818,64 @@ export class EditorStore {
   }
 
   /** Progress reported while a dubbing is being generated. */
+  // --- object tracking ------------------------------------------------------------
+
+  /** Whether the preview is in marking mode, where a drag draws the object to follow. */
+  setMarkingObject(marking: boolean): void {
+    if (this.markingObject === marking) return
+    this.markingObject = marking
+    this.refreshTracking()
+  }
+
+  /**
+   * Follows the marked object from `request.startMs` on. The work is done
+   * elsewhere (the native tracker, through the main process); the track it
+   * returns is kept with the session and drives the frame that follows it.
+   */
+  async startObjectTracking(
+    request: ObjectTrackRequest,
+    track: (sessionId: string, request: ObjectTrackRequest) => Promise<IpcResult<ObjectTrack>>
+  ): Promise<void> {
+    if (this.tracking) return
+    this.markingObject = false
+    this.tracking = { fraction: 0 }
+    this.trackNotice = null
+    this.refreshTracking()
+    const result = await track(this.session.sessionId, request).catch(() => null)
+    this.tracking = null
+    if (result?.ok) {
+      this.objectTrack = result.value
+    } else if (result?.error.detail?.includes('cancelled')) {
+      this.trackNotice = null
+    } else {
+      this.trackNotice = result?.error.detail?.includes('not seen')
+        ? 'O objeto não foi reconhecido. Marque um retângulo mais justo em volta dele.'
+        : (result?.error.message ?? 'Não foi possível rastrear o objeto.')
+    }
+    this.refreshTracking()
+  }
+
+  setTrackProgress(fraction: number): void {
+    if (!this.tracking) return
+    this.tracking = { fraction }
+    this.refreshTracking()
+  }
+
+  get trackingObject(): boolean {
+    return this.tracking !== null
+  }
+
+  private refreshTracking(): void {
+    this.state = {
+      ...this.state,
+      objectTrack: this.objectTrack,
+      tracking: this.tracking,
+      trackNotice: this.trackNotice,
+      markingObject: this.markingObject
+    }
+    this.emit()
+  }
+
   setDubProgress(progress: DubProgress): void {
     if (!this.dubbing) return
     this.dubbing = { ...this.dubbing, ...progress }
@@ -1057,6 +1128,10 @@ export class EditorStore {
       audio: this.project.audio,
       dub: this.project.dub,
       dubs: this.dubs,
+      objectTrack: this.objectTrack,
+      tracking: this.tracking,
+      trackNotice: this.trackNotice,
+      markingObject: this.markingObject,
       dubbing: this.dubbing,
       dubNotice: this.dubNotice,
       exportSettings: this.project.export,

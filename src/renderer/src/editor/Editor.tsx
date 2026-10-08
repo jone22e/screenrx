@@ -149,6 +149,17 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
     }
   }, [session, store])
 
+  // Object tracking too: the native tracker reports how far it got.
+  useEffect(() => {
+    const unsubscribe = window.screenrx.track.onProgress((progress) => {
+      if (progress.sessionId === session.sessionId) store.setTrackProgress(progress.fraction)
+    })
+    return () => {
+      unsubscribe()
+      if (store.trackingObject) void window.screenrx.track.cancel()
+    }
+  }, [session, store])
+
   // So does dubbing: it runs in the main process and its helper.
   useEffect(() => {
     const unsubscribe = window.screenrx.dub.onProgress((progress) => store.setDubProgress(progress))

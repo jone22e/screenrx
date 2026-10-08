@@ -77,6 +77,7 @@ export function ExportDialog({ store, onClose }: Props) {
         job,
         session,
         project,
+        store.getState().objectTrack,
         (framesDone) =>
           setPhase({ kind: 'rendering', exportId: job.exportId, framesDone, frameCount: job.plan.frameCount }),
         controller.signal
