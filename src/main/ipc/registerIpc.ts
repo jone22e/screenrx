@@ -4,6 +4,7 @@ import type { IpcInvokeChannel, IpcInvokeContract } from '@shared/ipc/contract'
 import type { AiProvider } from '@shared/models/ai'
 import { isAiProviderId, parseAiChoice } from '@shared/models/ai'
 import { parseAssistantRequest } from '@shared/models/assistant'
+import { parseObjectTrackRequest } from '@shared/models/telemetry'
 import { CAPTION_LOCALES, parseCaptionTranslationRequest, parseTranscriptionRequest } from '@shared/models/captions'
 import type { CaptureSourceCatalog } from '@shared/models/capture'
 import { isDeviceId } from '@shared/models/devices'
@@ -23,6 +24,8 @@ import type { AssistantService } from '../ai/AssistantService'
 import type { CaptionTranslationService } from '../ai/CaptionTranslationService'
 import type { CutSuggestionService } from '../ai/CutSuggestionService'
 import { DictationError } from '../captions/DictationService'
+import { ObjectTrackingError } from '../tracking/ObjectTrackingService'
+import type { ObjectTrackingService } from '../tracking/ObjectTrackingService'
 import type { DictationService } from '../captions/DictationService'
 import { TranscriptionError } from '../captions/TranscriptionService'
 import { DubError } from '../dub/DubbingService'
@@ -57,6 +60,7 @@ export interface IpcDependencies {
   exports: ExportService
   transcriptions: TranscriptionService
   dictation: DictationService
+  tracking: ObjectTrackingService
   suggestions: CutSuggestionService
   assistant: AssistantService
   translations: CaptionTranslationService
@@ -98,6 +102,7 @@ export function registerIpc(deps: IpcDependencies): void {
     exports,
     transcriptions,
     dictation,
+    tracking,
     suggestions,
     assistant,
     translations,
@@ -645,6 +650,20 @@ export function registerIpc(deps: IpcDependencies): void {
       return { ok: false, error: failure }
     }
   })
+
+  handle('track:start', async ([sessionId, value]) => {
+    const request = parseObjectTrackRequest(value)
+    if (!isSessionId(sessionId) || !request) return { ok: false, error: appError('invalid-state', 'invalid tracking request') }
+    try {
+      return { ok: true, value: await tracking.track(sessionId, request) }
+    } catch (error) {
+      const failure = error instanceof ObjectTrackingError ? error.appError : appError('unknown', String(error))
+      logger.warn('object tracking failed', { sessionId, code: failure.code, detail: failure.detail })
+      return { ok: false, error: failure }
+    }
+  })
+
+  handle('track:cancel', () => tracking.cancel())
 
   handle('dictation:request-microphone', async () => {
     if (process.platform !== 'darwin') return true

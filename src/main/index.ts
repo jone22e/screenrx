@@ -14,6 +14,7 @@ import { CutSuggestionService } from './ai/CutSuggestionService'
 import { createCaptureEngine } from './capture/createCaptureEngine'
 import { RoutingCaptureEngine } from './capture/RoutingCaptureEngine'
 import { DictationService } from './captions/DictationService'
+import { ObjectTrackingService } from './tracking/ObjectTrackingService'
 import { TranscriptionService } from './captions/TranscriptionService'
 import { ExportService } from './export/ExportService'
 import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
@@ -40,6 +41,7 @@ import { createTray } from './windows/tray'
 const HELPER_BINARY = 'screenrx-capture'
 const TRANSCRIBER_BINARY = 'screenrx-transcribe'
 const VOICE_BINARY = 'screenrx-dub'
+const TRACKER_BINARY = 'screenrx-track'
 
 const logger = createLogger('app')
 
@@ -75,6 +77,14 @@ function transcriberPath(): string | null {
  * separately (`npm run build:voice`), so a development checkout may not have
  * it. Development builds may point at a stand-in (the end-to-end test does).
  */
+/** The object tracker ships beside the other helpers; it exists for macOS only. */
+function trackerPath(): string | null {
+  if (process.platform !== 'darwin') return null
+  if (app.isPackaged) return path.join(process.resourcesPath, 'native', TRACKER_BINARY)
+  const candidate = path.join(app.getAppPath(), 'dist-native', process.platform, TRACKER_BINARY)
+  return existsSync(candidate) ? candidate : null
+}
+
 function voiceHelperPath(): string | null {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') return null
   if (app.isPackaged) return path.join(process.resourcesPath, 'native', VOICE_BINARY)
@@ -255,6 +265,12 @@ async function bootstrap(): Promise<void> {
     exports,
     transcriptions,
     dictation: new DictationService({ binaryPath: transcriberPath(), locale: DEFAULT_CAPTION_LOCALE, logger: createLogger('dictation') }),
+    tracking: new ObjectTrackingService({
+      binaryPath: trackerPath(),
+      sessions,
+      logger: createLogger('tracking'),
+      onProgress: (progress) => windows.broadcast('track:progress', progress)
+    }),
     dubbing,
     suggestions: new CutSuggestionService(ai, sessions, createLogger('ai')),
     assistant: new AssistantService(ai, sessions, createLogger('ai')),
@@ -334,7 +350,14 @@ if (app.requestSingleInstanceLock()) {
     .whenReady()
     .then(bootstrap)
     .catch((error: unknown) => {
-      process.stderr.write(`ScreenRx failed to start: ${String(error)}\n`)
+      // Quitting in silence leaves the user with the Finder's "cannot be opened": say what happened, and keep it.
+      const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
+      logger.error('failed to start', { error: detail })
+      process.stderr.write(`ScreenRx failed to start: ${detail}\n`)
+      dialog.showErrorBox(
+        'O ScreenRx não conseguiu abrir',
+        `${detail}\n\nO registro completo está em ${path.join(app.getPath('logs'), 'main.log')}.`
+      )
       app.exit(1)
     })
 } else {

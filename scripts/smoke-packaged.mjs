@@ -56,7 +56,8 @@ const architectures = runs('file', [
   ffprobePath,
   join(resources, 'native', 'screenrx-capture'),
   join(resources, 'native', 'screenrx-transcribe'),
-  join(resources, 'native', 'screenrx-dub')
+  join(resources, 'native', 'screenrx-dub'),
+  join(resources, 'native', 'screenrx-track')
 ])
 check(
   'every bundled executable is native to Apple Silicon',
@@ -74,6 +75,8 @@ check(
   /"bad-arguments"|"model-missing"/.test(voice.text) && existsSync(join(resources, 'native', 'mlx.metallib')),
   voice.text.split('\n').pop()
 )
+const tracker = runs(join(resources, 'native', 'screenrx-track'), ['--input', '/nonexistent.mp4', '--start-ms', '0', '--rect', '0.4,0.4,0.2,0.2'])
+check('the bundled object tracker starts and answers', /"unreadable-video"|"bad-arguments"/.test(tracker.text), tracker.text.split('\n').pop())
 check('the bundled transcriber starts and answers', /"unreadable-audio"|"unsupported-os"/.test(transcriber.text), transcriber.text.split('\n').pop())
 
 const profile = mkdtempSync(join(tmpdir(), 'screenrx-smoke-'))

@@ -8,7 +8,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const HELPER_NAMES = ['screenrx-capture', 'screenrx-transcribe']
+const HELPER_NAMES = ['screenrx-capture', 'screenrx-transcribe', 'screenrx-track']
 
 function run(command, args, cwd) {
   const result = spawnSync(command, args, { cwd, stdio: 'inherit' })

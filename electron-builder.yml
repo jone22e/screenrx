@@ -50,6 +50,7 @@ mac:
     - Contents/Resources/native/screenrx-capture
     - Contents/Resources/native/screenrx-transcribe
     - Contents/Resources/native/screenrx-dub
+    - Contents/Resources/native/screenrx-track
   extendInfo:
     NSMicrophoneUsageDescription: O ScreenRx grava o microfone junto com a tela quando você o ativa na barra de gravação.
     NSCameraUsageDescription: O ScreenRx grava a câmera junto com a tela quando você a ativa na barra de gravação.
