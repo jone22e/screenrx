@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { EXPORT_CONFIG } from '@engine/export/exportConfig'
-import { createExportPlan } from '@engine/export/exportPlan'
+import { createExportPlan, estimatedFileBytes } from '@engine/export/exportPlan'
 import { formatBytes, formatClock } from '@shared/format'
 import type { ExportResult } from '@shared/models/export'
-import type { ExportFps } from '@shared/models/project'
-import { EXPORT_FRAME_RATES } from '@shared/models/project'
+import type { ExportCompression, ExportFps } from '@shared/models/project'
+import { EXPORT_COMPRESSION_LEVELS, EXPORT_FRAME_RATES } from '@shared/models/project'
+import { FRAME_ASPECT_LABELS } from './frameAspects'
 import { ExportAbortedError, ExportFailedError, renderExport } from '../export/renderExport'
 import type { EditorStore } from './EditorStore'
 
@@ -27,9 +28,18 @@ const FPS_HINTS: Record<ExportFps, string> = {
 
 const speedLabel = (speed: number): string => `${String(speed).replace('.', ',')}×`
 
+/** Each compression level, in the user's words. */
+const COMPRESSION_LABELS: Record<ExportCompression, { label: string; hint: string }> = {
+  0: { label: 'Nenhuma', hint: 'H.264 na taxa cheia. O maior arquivo; abre em qualquer lugar.' },
+  1: { label: 'Leve', hint: 'H.264 com menos bits: cerca de 25% menor, sem diferença visível. Abre em qualquer lugar.' },
+  2: { label: 'Média', hint: 'HEVC (H.265): cerca de 45% menor com a mesma nitidez. Abre no Mac, no iPhone, no Windows 10+ e nas redes sociais.' },
+  3: { label: 'Alta', hint: 'HEVC com menos bits: cerca de 60% menor. Gravações de tela, quase paradas, continuam nítidas.' },
+  4: { label: 'Máxima', hint: 'HEVC no mínimo que mantém a imagem nítida: cerca de 70% menor. Movimento rápido pode perder detalhe.' }
+}
+
 /** Export settings, progress and result. */
 export function ExportDialog({ store, onClose }: Props) {
-  const { exportSettings, timeMap } = useSyncExternalStore(store.subscribe, store.getState)
+  const { exportSettings, timeMap, background } = useSyncExternalStore(store.subscribe, store.getState)
   const [phase, setPhase] = useState<Phase>({ kind: 'settings' })
   const abort = useRef<AbortController | null>(null)
   const { session } = store
@@ -40,7 +50,8 @@ export function ExportDialog({ store, onClose }: Props) {
   const plan = createExportPlan(
     { width: session.video.widthPx, height: session.video.heightPx },
     timeMap,
-    exportSettings
+    exportSettings,
+    background.aspect
   )
 
   const run = async (): Promise<void> => {
@@ -144,6 +155,27 @@ export function ExportDialog({ store, onClose }: Props) {
               </div>
             </div>
 
+            <div className="dialog-field">
+              <span className="dialog-label">
+                Compactação <strong className="dialog-value">{COMPRESSION_LABELS[exportSettings.compression].label}</strong>
+              </span>
+              <input
+                type="range"
+                className="dialog-slider"
+                aria-label="Compactação"
+                min={0}
+                max={EXPORT_COMPRESSION_LEVELS.length - 1}
+                step={1}
+                value={exportSettings.compression}
+                onChange={(event) => store.setExportSettings({ compression: Number(event.target.value) as ExportCompression })}
+              />
+              <div className="dialog-slider-ends" aria-hidden="true">
+                <span>Nenhuma</span>
+                <span>Máxima</span>
+              </div>
+              <p className="panel-hint">{COMPRESSION_LABELS[exportSettings.compression].hint}</p>
+            </div>
+
             <dl className="dialog-summary">
               <div>
                 <dt>Duração</dt>
@@ -153,11 +185,16 @@ export function ExportDialog({ store, onClose }: Props) {
                 <dt>Resolução</dt>
                 <dd>
                   {plan.width}×{plan.height}
+                  {background.aspect !== 'native' && ` · ${FRAME_ASPECT_LABELS[background.aspect]}`}
                 </dd>
               </div>
               <div>
                 <dt>Formato</dt>
-                <dd>MP4 · H.264 · {plan.fps} fps</dd>
+                <dd>MP4 · {plan.codec === 'hevc' ? 'HEVC' : 'H.264'} · {plan.fps} fps</dd>
+              </div>
+              <div>
+                <dt>Tamanho estimado</dt>
+                <dd>≈ {formatBytes(estimatedFileBytes(plan, session.audio.length > 0))}</dd>
               </div>
             </dl>
 

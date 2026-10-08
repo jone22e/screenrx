@@ -5,7 +5,7 @@ import { encodeArguments, suggestedFileName } from './ExportService'
 
 const map = buildTimeMap(60_000, [])
 const plan = (speed: number, fps: 24 | 30 | 60 = 30) =>
-  createExportPlan({ width: 3600, height: 2338 }, map, { format: 'mp4', quality: 'standard', fps, speed })
+  createExportPlan({ width: 3600, height: 2338 }, map, { format: 'mp4', quality: 'standard', compression: 0, fps, speed })
 
 const valueAfter = (args: string[], flag: string): string | undefined => args[args.indexOf(flag) + 1]
 
@@ -27,6 +27,19 @@ describe('encodeArguments', () => {
     const args = encodeArguments(plan(1), 'libx264', [], map, '/tmp/out.mp4.part')
     expect(valueAfter(args, '-c:v')).toBe('libx264')
     expect(args).toContain('-crf')
+  })
+
+  it('writes the compact file as HEVC tagged for QuickTime, by hardware or software', () => {
+    const compact = createExportPlan({ width: 1920, height: 1080 }, map, { format: 'mp4', quality: 'high', compression: 2, fps: 30, speed: 1 })
+    const hardware = encodeArguments(compact, 'hevc_videotoolbox', ['/s/microphone.m4a'], map, '/tmp/o.part')
+    expect(valueAfter(hardware, '-c:v')).toBe('hevc_videotoolbox')
+    expect(valueAfter(hardware, '-b:v')).toBe(String(compact.videoBitrate))
+    expect(valueAfter(hardware, '-tag:v')).toBe('hvc1')
+    expect(valueAfter(hardware, '-b:a')).toBe('128000')
+    const software = encodeArguments(compact, 'libx265', [], map, '/tmp/o.part')
+    expect(valueAfter(software, '-c:v')).toBe('libx265')
+    expect(valueAfter(software, '-crf')).toBe('24')
+    expect(valueAfter(software, '-tag:v')).toBe('hvc1')
   })
 
   it('processes and mixes the audio tracks in the same run, at the export speed', () => {

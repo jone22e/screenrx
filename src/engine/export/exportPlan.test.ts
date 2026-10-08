@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { buildTimeMap } from '../time/timeMapping'
-import { createExportPlan, frameSourceTimeMs } from './exportPlan'
+import { createExportPlan, estimatedFileBytes, frameSourceTimeMs } from './exportPlan'
 
 const source = { width: 3600, height: 2338 }
-const settings = { format: 'mp4', quality: 'standard', fps: 30, speed: 1 } as const
+const settings = { format: 'mp4', quality: 'standard', compression: 0, fps: 30, speed: 1 } as const
 
 describe('createExportPlan', () => {
   it('scales the recording down to the quality limit with even dimensions', () => {
@@ -12,6 +12,36 @@ describe('createExportPlan', () => {
     expect(plan.height % 2).toBe(0)
     expect(plan.width / plan.height).toBeCloseTo(3600 / 2338, 2)
     expect(plan.frameCount).toBe(1800)
+  })
+
+  it('shapes the file for a format, capping the longer side', () => {
+    const map = buildTimeMap(10_000, [])
+    const reels = createExportPlan({ width: 1920, height: 1080 }, map, { ...settings, quality: 'high' }, 'reels')
+    expect([reels.width, reels.height]).toEqual([1080, 1920])
+    const retina = createExportPlan({ width: 3456, height: 2234 }, map, { ...settings, quality: 'high' }, 'tiktok')
+    expect(retina.height).toBe(2560)
+    expect(retina.width % 2).toBe(0)
+    expect(retina.width / retina.height).toBeCloseTo(9 / 16, 2)
+  })
+
+  it('squeezes harder at each compression level, switching to HEVC from the middle one', () => {
+    const map = buildTimeMap(60_000, [])
+    const fullHd = { width: 1920, height: 1080 }
+    const plans = ([0, 1, 2, 3, 4] as const).map((compression) => createExportPlan(fullHd, map, { ...settings, compression }))
+    expect(plans.map((plan) => plan.codec)).toEqual(['h264', 'h264', 'hevc', 'hevc', 'hevc'])
+    for (let level = 1; level < plans.length; level++) {
+      expect(plans[level]!.videoBitrate).toBeLessThan(plans[level - 1]!.videoBitrate)
+      expect(plans[level]!.audioBitrate).toBeLessThanOrEqual(plans[level - 1]!.audioBitrate)
+      expect([plans[level]!.width, plans[level]!.height]).toEqual([plans[0]!.width, plans[0]!.height])
+    }
+    expect(plans[4]!.videoBitrate / plans[0]!.videoBitrate).toBeCloseTo(0.3, 2)
+  })
+
+  it('estimates the file from the bitrates and the duration', () => {
+    const plan = createExportPlan({ width: 1920, height: 1080 }, buildTimeMap(60_000, []), settings)
+    const bytes = estimatedFileBytes(plan, true)
+    expect(bytes).toBeCloseTo(((plan.videoBitrate + plan.audioBitrate) / 8) * 60 * 1.02, -3)
+    expect(estimatedFileBytes(plan, false)).toBeLessThan(bytes)
   })
 
   it('never upscales', () => {

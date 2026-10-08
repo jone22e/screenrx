@@ -46,6 +46,8 @@ export interface FfmpegProcess {
   cancel(): void
 }
 
+export type VideoEncoder = 'h264_videotoolbox' | 'libx264' | 'hevc_videotoolbox' | 'libx265'
+/** @deprecated The H.264 pair of `VideoEncoder`; kept for callers that only know H.264. */
 export type H264Encoder = 'h264_videotoolbox' | 'libx264'
 
 /** What FFprobe finds in a media file: its length and its first video and audio streams. */
@@ -84,7 +86,7 @@ const MAX_PROBE_OUTPUT_BYTES = 256 * 1024 * 1024
  * renderer — executes them directly.
  */
 export class FfmpegService {
-  private encoder: Promise<H264Encoder> | null = null
+  private encoders: Promise<string> | null = null
 
   constructor(
     private readonly binaries: FfmpegBinaries,
@@ -92,15 +94,18 @@ export class FfmpegService {
   ) {}
 
   /** Hardware encoding when this machine's FFmpeg offers it, software otherwise. */
+  async selectVideoEncoder(codec: 'h264' | 'hevc'): Promise<VideoEncoder> {
+    this.encoders ??= this.run(this.binaries.ffmpeg, ['-hide_banner', '-encoders'])
+    const listed = await this.encoders
+    const hardware = codec === 'hevc' ? 'hevc_videotoolbox' : 'h264_videotoolbox'
+    const software = codec === 'hevc' ? 'libx265' : 'libx264'
+    const encoder: VideoEncoder = new RegExp(`\\b${hardware}\\b`).test(listed) ? hardware : software
+    this.logger.info('selected encoder', { codec, encoder })
+    return encoder
+  }
+
   selectH264Encoder(): Promise<H264Encoder> {
-    this.encoder ??= this.run(this.binaries.ffmpeg, ['-hide_banner', '-encoders']).then(
-      (encoders): H264Encoder => {
-        const encoder = /\bh264_videotoolbox\b/.test(encoders) ? 'h264_videotoolbox' : 'libx264'
-        this.logger.info('selected encoder', { encoder })
-        return encoder
-      }
-    )
-    return this.encoder
+    return this.selectVideoEncoder('h264') as Promise<H264Encoder>
   }
 
   /** Lists every packet of the first video stream: when it is shown and where it is in the file. */

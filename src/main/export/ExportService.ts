@@ -3,7 +3,6 @@ import { once } from 'node:events'
 import type { FileHandle } from 'node:fs/promises'
 import { open, rename, rm, stat } from 'node:fs/promises'
 import { buildAudioGraph } from '@engine/export/audioFilters'
-import { EXPORT_CONFIG } from '@engine/export/exportConfig'
 import type { ExportPlan } from '@engine/export/exportPlan'
 import { createExportPlan } from '@engine/export/exportPlan'
 import { buildTimeMap } from '@engine/time/timeMapping'
@@ -14,7 +13,7 @@ import { DUB_TRACKS } from '@shared/models/media'
 import type { Logger } from '../logging/logger'
 import type { ProjectStore } from '../project/ProjectStore'
 import type { SessionStore } from '../recording/SessionStore'
-import type { FfmpegProcess, FfmpegService, H264Encoder } from './FfmpegService'
+import type { FfmpegProcess, FfmpegService, VideoEncoder } from './FfmpegService'
 import { FfmpegCancelledError, FfmpegError } from './FfmpegService'
 import { readAvcConfiguration } from './mp4'
 
@@ -37,6 +36,7 @@ export interface ExportServiceDeps {
 
 interface ActiveExport {
   id: string
+  sessionId: string
   plan: ExportPlan
   process: FfmpegProcess
   /** FFmpeg writes here; the file only takes its final name once complete. */
@@ -79,7 +79,8 @@ export class ExportService {
     const plan = createExportPlan(
       { width: session.video.widthPx, height: session.video.heightPx },
       map,
-      project.export
+      project.export,
+      project.background.aspect
     )
 
     const fileName = suggestedFileName(session.title, session.createdAt, plan.speed)
@@ -106,12 +107,12 @@ export class ExportService {
         .filter((track) => !project.audio[track.kind].muted && !(dub && track.kind === 'microphone'))
         .map((track) => sessions.trackPathOf(sessionId, track.kind))
       if (dub) audioPaths.push(sessions.trackPathOf(sessionId, DUB_TRACKS[dub.language]))
-      const encoder = await ffmpeg.selectH264Encoder()
+      const encoder = await ffmpeg.selectVideoEncoder(plan.codec)
       const partialPath = `${outputPath}.part`
       const process = ffmpeg.spawn(encodeArguments(plan, encoder, audioPaths, map, partialPath))
 
       const id = randomUUID()
-      this.active = { id, plan, process, partialPath, outputPath, files, framesWritten: 0, startedAt: Date.now() }
+      this.active = { id, sessionId, plan, process, partialPath, outputPath, files, framesWritten: 0, startedAt: Date.now() }
       logger.info('started', {
         sessionId,
         size: `${plan.width}x${plan.height}`,
@@ -173,6 +174,7 @@ export class ExportService {
       await rename(active.partialPath, active.outputPath)
       const { size } = await stat(active.outputPath)
       this.finished.set(active.id, active.outputPath)
+      await this.deps.sessions.recordExport(active.sessionId).catch(() => undefined)
       this.deps.logger.info('finished', {
         frames: active.framesWritten,
         bytes: size,
@@ -259,23 +261,35 @@ async function closeTracks(files: ActiveExport['files']): Promise<void> {
   await Promise.all(Object.values(files).map((file) => file.handle.close().catch(() => undefined)))
 }
 
+/** The codec's arguments: hardware encoders take a bitrate, the software ones a quality. */
+function videoArguments(encoder: VideoEncoder, bitrate: number): string[] {
+  switch (encoder) {
+    case 'h264_videotoolbox':
+      return ['-c:v', 'h264_videotoolbox', '-b:v', String(bitrate), '-profile:v', 'high', '-allow_sw', '1']
+    case 'libx264':
+      return ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-profile:v', 'high']
+    // `hvc1`: the tag QuickTime and the iPhone look for; without it the file is HEVC they refuse.
+    case 'hevc_videotoolbox':
+      return ['-c:v', 'hevc_videotoolbox', '-b:v', String(bitrate), '-allow_sw', '1', '-tag:v', 'hvc1']
+    case 'libx265':
+      return ['-c:v', 'libx265', '-preset', 'medium', '-crf', '24', '-tag:v', 'hvc1']
+  }
+}
+
 /**
  * One FFmpeg run for the whole file: raw frames in on stdin, the session's
- * audio tracks as further inputs, H.264 + AAC out.
+ * audio tracks as further inputs, H.264 (or HEVC, for the compact file) + AAC out.
  */
 export function encodeArguments(
   plan: ExportPlan,
-  encoder: H264Encoder,
+  encoder: VideoEncoder,
   audioPaths: readonly string[],
   map: ReturnType<typeof buildTimeMap>,
   outputPath: string
 ): string[] {
   // Input 0 is the video; audio inputs follow.
   const audio = buildAudioGraph(audioPaths.map((_, index) => index + 1), map, plan.speed)
-  const video =
-    encoder === 'h264_videotoolbox'
-      ? ['-c:v', 'h264_videotoolbox', '-b:v', String(plan.videoBitrate), '-profile:v', 'high', '-allow_sw', '1']
-      : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-profile:v', 'high']
+  const video = videoArguments(encoder, plan.videoBitrate)
 
   return [
     '-hide_banner', '-loglevel', 'error', '-y',
@@ -289,7 +303,7 @@ export function encodeArguments(
     // yuv420p plays everywhere; the conversion and the tags agree on BT.709.
     '-vf', 'scale=out_color_matrix=bt709:out_range=tv,format=yuv420p',
     '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
-    ...(audio ? ['-c:a', 'aac', '-b:a', String(EXPORT_CONFIG.audioBitrate)] : []),
+    ...(audio ? ['-c:a', 'aac', '-b:a', String(plan.audioBitrate)] : []),
     '-t', (plan.outputDurationMs / 1000).toFixed(3),
     '-movflags', '+faststart',
     '-f', 'mp4',
