@@ -2,6 +2,7 @@ import { captionAt } from '@engine/captions/captionCues'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import type { TimeMap } from '@engine/time/timeMapping'
 import { nextKeptSourceTime } from '@engine/time/timeMapping'
+import { correctTrack } from '@engine/time/trackSync'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { cameraAt } from '@engine/zoom/zoomCamera'
 import type { EditorSession } from '@shared/models/editor'
@@ -16,8 +17,6 @@ import { composeFrame } from '../rendering/composeFrame'
 
 /** The preview canvas never needs more pixels than this, whatever the recording's size. */
 const MAX_PREVIEW_WIDTH_PX = 1920
-/** A companion track further than this from the screen track is pulled back in line. */
-const MAX_TRACK_DRIFT_S = 0.12
 
 type Unsubscribe = () => void
 
@@ -47,7 +46,9 @@ export interface PreviewSettings {
  * from `cueAt` — the same code the export uses.
  *
  * The screen track is the master clock; the webcam and the audio tracks are
- * separate files that follow it.
+ * separate files that follow it. A track that slips a little is bent back by
+ * its playback rate (`correctTrack`), never by a seek: seeking an audio element
+ * is heard as a cut in the sound, and a seek on every frame made playback stutter.
  */
 export class PreviewPlayer {
   private readonly video: HTMLVideoElement
@@ -305,10 +306,20 @@ export class PreviewPlayer {
   /** Keeps the separately recorded tracks in step with the screen track. */
   private alignCompanions(): void {
     const time = this.video.currentTime
-    // The tolerance is in time as heard: played faster, the same slip covers more of the recording.
-    const tolerance = MAX_TRACK_DRIFT_S * Math.max(1, this.settings.speed)
+    const { speed } = this.settings
     for (const companion of this.companions) {
-      if (Math.abs(companion.currentTime - time) > tolerance) companion.currentTime = time
+      // A track still landing a seek, still loading, or whose `play()` has not taken yet is not
+      // measurable: its clock stands still, and correcting it would only pile up more seeks.
+      if (companion.seeking || companion.paused || companion.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+        continue
+      }
+      const correction = correctTrack(companion.currentTime - time, speed)
+      if (correction.kind === 'seek') {
+        companion.currentTime = time
+        if (companion.playbackRate !== speed) companion.playbackRate = speed
+      } else if (companion.playbackRate !== correction.rate) {
+        companion.playbackRate = correction.rate
+      }
     }
   }
 
