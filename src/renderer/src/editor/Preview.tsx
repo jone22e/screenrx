@@ -1,11 +1,13 @@
 import type { PointerEvent } from 'react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { findBackgroundPreset } from '@engine/rendering/backgrounds'
+import type { Rect } from '@engine/rendering/frameLayout'
 import { containsPoint, layoutFrame, layoutWebcam, sourceCrop } from '@engine/rendering/frameLayout'
 import type { EditorSession } from '@shared/models/editor'
 import { frameToSource, outputToFrame } from '../rendering/composeFrame'
 import type { EditorState, EditorStore } from './EditorStore'
 import type { PreviewSettings } from './PreviewPlayer'
+import { frameCorners, textSelectionFrame } from './PreviewPlayer'
 import { PreviewPlayer } from './PreviewPlayer'
 
 interface Props {
@@ -19,6 +21,8 @@ type Press =
   | { kind: 'webcam'; grabX: number; grabY: number }
   | { kind: 'caption'; grabX: number; grabY: number }
   | { kind: 'text'; id: string; grabX: number; grabY: number }
+  /** Dragging a corner handle of the selected text: the size follows the distance from the text's centre. */
+  | { kind: 'text-resize'; id: string; centerX: number; centerY: number; startDistance: number; startSize: number }
   | { kind: 'picture' }
   /** Dragging the part of the recording in use, when it fills a frame of another shape. */
   | { kind: 'crop'; startX: number; startY: number; cropX: number; cropY: number }
@@ -30,6 +34,7 @@ const settingsOf = (state: EditorState): PreviewSettings => ({
   webcam: state.webcam,
   captions: state.captions,
   texts: state.texts,
+  selectedTextId: state.selectedTextId,
   audio: state.audio,
   dubUrl: state.dubs.find((dub) => dub.language === state.dub.language)?.url ?? null,
   speed: state.exportSettings.speed
@@ -78,6 +83,16 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     const caption = instance.captionBox
     // The text drawn last is on top, so it is the one a press lands on.
     const text = [...instance.textBoxes].reverse().find((candidate) => containsPoint(candidate.box, x, y)) ?? null
+    // A corner handle of the selected text is grabbed before anything under it.
+    const { selectedTextId } = store.getState()
+    const selected = instance.textBoxes.find((candidate) => candidate.id === selectedTextId) ?? null
+    let handle: { id: string; box: Rect; corner: number } | null = null
+    if (selected) {
+      const { frame, handle: side } = textSelectionFrame(selected.box, output)
+      const reach = side
+      const corner = frameCorners(frame).findIndex((point) => Math.abs(point.x - x) <= reach && Math.abs(point.y - y) <= reach)
+      if (corner >= 0) handle = { id: selected.id, box: selected.box, corner }
+    }
     return {
       instance,
       output,
@@ -85,7 +100,8 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       y,
       picture: picture && containsPoint(picture, x, y) ? picture : null,
       caption: caption && containsPoint(caption, x, y) ? caption : null,
-      text
+      text,
+      handle
     }
   }
 
@@ -97,6 +113,20 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     const grabbed = at.text?.box ?? at.caption ?? at.picture
     const { background, selectedZoomId } = store.getState()
     const cropping = background.aspect !== 'native' && background.fit === 'fill' && selectedZoomId === null
+    if (at.handle) {
+      const centerX = at.handle.box.x + at.handle.box.width / 2
+      const centerY = at.handle.box.y + at.handle.box.height / 2
+      const text = store.getState().texts.find((candidate) => candidate.id === at.handle?.id)
+      press.current = {
+        kind: 'text-resize',
+        id: at.handle.id,
+        centerX,
+        centerY,
+        startDistance: Math.max(1, Math.hypot(at.x - centerX, at.y - centerY)),
+        startSize: text?.style.sizeRatio ?? 0.07
+      }
+      return
+    }
     if (at.text) store.selectText(at.text.id)
     press.current = at.text
       ? { kind: 'text', id: at.text.id, grabX: at.x - (at.text.box.x + at.text.box.width / 2), grabY: at.y - (at.text.box.y + at.text.box.height / 2) }
@@ -148,6 +178,12 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       )
       return
     }
+    if (current?.kind === 'text-resize') {
+      // Pulling a corner away from the centre enlarges the text in proportion; towards it, shrinks.
+      const distance = Math.hypot(at.x - current.centerX, at.y - current.centerY)
+      store.setTextStyle(current.id, { sizeRatio: current.startSize * (distance / current.startDistance) }, 'text-resize')
+      return
+    }
     if (current?.kind === 'text') {
       store.setTextStyle(
         current.id,
@@ -169,7 +205,11 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       return
     }
     const { background, selectedZoomId } = store.getState()
-    event.currentTarget.style.cursor = at.text || at.caption || at.picture
+    event.currentTarget.style.cursor = at.handle
+      ? at.handle.corner === 0 || at.handle.corner === 3
+        ? 'nwse-resize'
+        : 'nesw-resize'
+      : at.text || at.caption || at.picture
       ? 'grab'
       : selectedZoomId !== null
         ? 'crosshair'
@@ -181,7 +221,13 @@ export function Preview({ session, store, onPlayerReady }: Props) {
   const onPointerUp = (event: PointerEvent<HTMLCanvasElement>): void => {
     const current = press.current
     press.current = null
-    if (current?.kind === 'webcam' || current?.kind === 'caption' || current?.kind === 'text' || current?.kind === 'crop') {
+    if (
+      current?.kind === 'webcam' ||
+      current?.kind === 'caption' ||
+      current?.kind === 'text' ||
+      current?.kind === 'text-resize' ||
+      current?.kind === 'crop'
+    ) {
       store.endGesture()
       return
     }

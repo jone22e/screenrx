@@ -21,6 +21,34 @@ import { composeFrame } from '../rendering/composeFrame'
 /** The preview canvas never needs more pixels than this, whatever the recording's size. */
 const MAX_PREVIEW_WIDTH_PX = 1920
 
+/** The frame around the selected text: dashed, with a square handle at each corner to resize it. */
+export const TEXT_SELECTION = {
+  /** Side of a corner handle, as a share of the output width (never under the minimum). */
+  handleRatio: 0.012,
+  minHandlePx: 9,
+  /** Room left around the text's block. */
+  paddingRatio: 0.012
+} as const
+
+/** The handle size and the padded box of the selection, in output pixels. */
+export function textSelectionFrame(box: Rect, output: Size): { frame: Rect; handle: number } {
+  const padding = output.width * TEXT_SELECTION.paddingRatio
+  return {
+    frame: { x: box.x - padding, y: box.y - padding, width: box.width + 2 * padding, height: box.height + 2 * padding },
+    handle: Math.max(TEXT_SELECTION.minHandlePx, output.width * TEXT_SELECTION.handleRatio)
+  }
+}
+
+/** The four corners of a frame, where the handles sit. */
+export function frameCorners(frame: Rect): Array<{ x: number; y: number }> {
+  return [
+    { x: frame.x, y: frame.y },
+    { x: frame.x + frame.width, y: frame.y },
+    { x: frame.x, y: frame.y + frame.height },
+    { x: frame.x + frame.width, y: frame.y + frame.height }
+  ]
+}
+
 type Unsubscribe = () => void
 
 /** What the player needs from the project to draw a frame. */
@@ -32,6 +60,8 @@ export interface PreviewSettings {
   webcam: WebcamSettings
   captions: CaptionSettings
   texts: readonly TextOverlay[]
+  /** The text picked in the editor: it gets a frame with handles, drawn only here, never exported. */
+  selectedTextId: string | null
   /** Which audio tracks are heard. */
   audio: AudioSettings
   /** The dubbing heard instead of the recorded voice, when one is in use. */
@@ -321,7 +351,31 @@ export class PreviewPlayer {
     })
     this.drawnCaption = regions.caption
     this.drawnTexts = regions.texts
+    const selected = regions.texts.find((text) => text.id === this.settings.selectedTextId)
+    if (selected) this.drawTextSelection(selected.box)
     for (const listener of this.timeListeners) listener(timeMs)
+  }
+
+  /** The dashed frame and corner handles around the selected text — on the preview only. */
+  private drawTextSelection(box: Rect): void {
+    const context = this.context
+    const { frame, handle } = textSelectionFrame(box, this.output)
+    const line = Math.max(1, this.output.width / 960)
+    context.save()
+    context.lineWidth = line
+    context.setLineDash([4 * line, 4 * line])
+    context.strokeStyle = 'rgba(255, 255, 255, 0.9)'
+    context.shadowColor = 'rgba(0, 0, 0, 0.6)'
+    context.shadowBlur = 2 * line
+    context.strokeRect(frame.x, frame.y, frame.width, frame.height)
+    context.setLineDash([])
+    context.fillStyle = '#fff'
+    context.strokeStyle = 'rgba(0, 0, 0, 0.6)'
+    for (const corner of frameCorners(frame)) {
+      context.fillRect(corner.x - handle / 2, corner.y - handle / 2, handle, handle)
+      context.strokeRect(corner.x - handle / 2, corner.y - handle / 2, handle, handle)
+    }
+    context.restore()
   }
 
   private readonly loop = (): void => {
