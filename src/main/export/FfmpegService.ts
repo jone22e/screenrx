@@ -48,6 +48,20 @@ export interface FfmpegProcess {
 
 export type H264Encoder = 'h264_videotoolbox' | 'libx264'
 
+/** What FFprobe finds in a media file: its length and its first video and audio streams. */
+export interface MediaProbe {
+  durationMs: number
+  video: {
+    codec: string
+    pixelFormat: string | null
+    widthPx: number
+    heightPx: number
+    /** Average frame rate; 0 when the file does not say. */
+    fps: number
+  } | null
+  audio: { codec: string } | null
+}
+
 /** One encoded frame of a video stream, as located by FFprobe. */
 export interface VideoPacket {
   timestampUs: number
@@ -195,6 +209,64 @@ export class FfmpegService {
     ])
   }
 
+  /** Streams and length of any media file FFprobe can open; throws when it cannot. */
+  async probeMedia(filePath: string): Promise<MediaProbe> {
+    const output = await this.run(this.binaries.ffprobe, [
+      '-v', 'error',
+      '-show_entries', 'stream=codec_type,codec_name,pix_fmt,width,height,avg_frame_rate:format=duration',
+      '-of', 'json',
+      filePath
+    ])
+    const probe = parseMediaProbe(output)
+    if (!probe) throw new FfmpegError('FFprobe reported no usable media', output)
+    return probe
+  }
+
+  /**
+   * Writes the first video stream of `inputPath` alone (no audio) as H.264 in an MP4, the form the
+   * editor and the export read. The stream is copied untouched when `copy` is set, re-encoded at
+   * `bitrate` bits per second otherwise.
+   */
+  async writeVideoTrack(
+    inputPath: string,
+    outputPath: string,
+    options: { copy: boolean; bitrate: number }
+  ): Promise<void> {
+    // 4:2:0 needs even dimensions; an odd edge loses one pixel rather than failing the whole import.
+    const evenSize = ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-pix_fmt', 'yuv420p']
+    const codec = options.copy
+      ? ['-c:v', 'copy']
+      : (await this.selectH264Encoder()) === 'h264_videotoolbox'
+        ? ['-c:v', 'h264_videotoolbox', '-b:v', String(options.bitrate), '-profile:v', 'high', '-allow_sw', '1', ...evenSize]
+        : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-profile:v', 'high', ...evenSize]
+    await this.run(this.binaries.ffmpeg, [
+      '-v', 'error', '-y',
+      '-i', inputPath,
+      '-map', '0:v:0', '-an', '-sn', '-dn',
+      ...codec,
+      '-movflags', '+faststart',
+      '-f', 'mp4',
+      outputPath
+    ])
+  }
+
+  /**
+   * Writes the first audio stream of `inputPath` alone as AAC in an MP4 container, like the recorded
+   * audio tracks. The stream is copied untouched when `copy` is set, re-encoded otherwise.
+   */
+  async writeAudioTrack(inputPath: string, outputPath: string, copy: boolean): Promise<void> {
+    const codec = copy ? ['-c:a', 'copy'] : ['-ar', '48000', '-ac', '2', '-c:a', 'aac', '-b:a', '192k']
+    await this.run(this.binaries.ffmpeg, [
+      '-v', 'error', '-y',
+      '-i', inputPath,
+      '-map', '0:a:0', '-vn', '-sn', '-dn',
+      ...codec,
+      '-movflags', '+faststart',
+      '-f', 'mp4',
+      outputPath
+    ])
+  }
+
   /** The duration of a media file, in milliseconds. */
   async durationOf(filePath: string): Promise<number> {
     const output = await this.run(this.binaries.ffprobe, [
@@ -334,4 +406,51 @@ export function parseVideoPackets(csv: string): VideoPacket[] {
     })
   }
   return packets
+}
+
+/** Reads FFprobe's JSON for `probeMedia`; `null` when it describes no media at all. */
+export function parseMediaProbe(json: string): MediaProbe | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(json)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null
+  const { streams, format } = parsed as { streams?: unknown; format?: { duration?: unknown } }
+  if (!Array.isArray(streams)) return null
+  const seconds = Number(format?.duration)
+  const durationMs = Number.isFinite(seconds) && seconds > 0 ? Math.round(seconds * 1000) : 0
+
+  const video = (streams as Array<Record<string, unknown>>).find((stream) => stream['codec_type'] === 'video')
+  const audio = (streams as Array<Record<string, unknown>>).find((stream) => stream['codec_type'] === 'audio')
+  const text = (value: unknown): string | null => (typeof value === 'string' && value.length > 0 ? value : null)
+  const size = (value: unknown): number => (typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 0)
+  const videoCodec = text(video?.['codec_name'])
+  const widthPx = size(video?.['width'])
+  const heightPx = size(video?.['height'])
+  const audioCodec = text(audio?.['codec_name'])
+  if (!video && !audio) return null
+  return {
+    durationMs,
+    video:
+      videoCodec && widthPx > 0 && heightPx > 0
+        ? {
+            codec: videoCodec,
+            pixelFormat: text(video?.['pix_fmt']),
+            widthPx,
+            heightPx,
+            fps: parseFrameRate(video?.['avg_frame_rate'])
+          }
+        : null,
+    audio: audioCodec ? { codec: audioCodec } : null
+  }
+}
+
+/** FFprobe writes frame rates as a fraction, e.g. `30000/1001`; `0/0` means unknown. */
+function parseFrameRate(value: unknown): number {
+  if (typeof value !== 'string') return 0
+  const [numerator, denominator = '1'] = value.split('/')
+  const fps = Number(numerator) / Number(denominator)
+  return Number.isFinite(fps) && fps > 0 ? Math.round(fps * 1000) / 1000 : 0
 }

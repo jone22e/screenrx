@@ -3,7 +3,7 @@ import { mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { FfmpegService, bundledFfmpegBinaries, parseVideoPackets } from './FfmpegService'
+import { FfmpegService, bundledFfmpegBinaries, parseMediaProbe, parseVideoPackets } from './FfmpegService'
 
 describe('parseVideoPackets', () => {
   it('reads timestamps, positions and keyframes', () => {
@@ -93,5 +93,46 @@ describe('FfmpegService audio clips', () => {
     await service.mixClips([], 2000, track)
     expect(await service.durationOf(track)).toBeCloseTo(2000, -2)
     expect(volume(track, 0, 2)).toBeLessThan(-60)
+  })
+})
+
+describe('parseMediaProbe', () => {
+  it('reads the first video and audio streams and the length', () => {
+    const json = JSON.stringify({
+      streams: [
+        { codec_type: 'audio', codec_name: 'aac' },
+        { codec_type: 'video', codec_name: 'h264', pix_fmt: 'yuv420p', width: 1920, height: 1080, avg_frame_rate: '30000/1001' },
+        { codec_type: 'video', codec_name: 'mjpeg', width: 100, height: 100, avg_frame_rate: '0/0' }
+      ],
+      format: { duration: '12.345' }
+    })
+    expect(parseMediaProbe(json)).toEqual({
+      durationMs: 12_345,
+      video: { codec: 'h264', pixelFormat: 'yuv420p', widthPx: 1920, heightPx: 1080, fps: 29.97 },
+      audio: { codec: 'aac' }
+    })
+  })
+
+  it('reports a file without video, an unknown frame rate and a missing duration', () => {
+    const json = JSON.stringify({
+      streams: [{ codec_type: 'video', codec_name: 'vp9', width: 640, height: 360, avg_frame_rate: '0/0' }],
+      format: {}
+    })
+    expect(parseMediaProbe(json)).toEqual({
+      durationMs: 0,
+      video: { codec: 'vp9', pixelFormat: null, widthPx: 640, heightPx: 360, fps: 0 },
+      audio: null
+    })
+    expect(parseMediaProbe(JSON.stringify({ streams: [{ codec_type: 'audio', codec_name: 'mp3' }], format: {} }))).toEqual({
+      durationMs: 0,
+      video: null,
+      audio: { codec: 'mp3' }
+    })
+  })
+
+  it('is null for output that describes no media', () => {
+    expect(parseMediaProbe('')).toBeNull()
+    expect(parseMediaProbe('{}')).toBeNull()
+    expect(parseMediaProbe(JSON.stringify({ streams: [], format: { duration: '1' } }))).toBeNull()
   })
 })

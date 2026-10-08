@@ -64,6 +64,11 @@ export class ExportService {
 
   constructor(private readonly deps: ExportServiceDeps) {}
 
+  /** Whether an export is running right now. */
+  isRunning(): boolean {
+    return this.active !== null
+  }
+
   async start(sessionId: string): Promise<ExportJob> {
     if (this.active) throw new ExportError(appError('export-busy'))
     const { ffmpeg, sessions, projects, logger } = this.deps
