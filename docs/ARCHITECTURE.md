@@ -48,6 +48,7 @@ native/macos/CaptureHelper/        Pacote Swift
                                    SessionClock, SourceCatalog, CommandServer…
   Sources/screenrx-transcribe/     executável separado: fala → palavras com tempo
                                    (SpeechAnalyzer, no próprio Mac)
+  Sources/screenrx-track/          executável separado: segue um objeto marcado pelo vídeo (Vision)
 native/macos/VoiceHelper/          Pacote Swift à parte: dublagem com voz clonada
   Sources/VoiceCore/               lógica pura e testável: formato compacto dos pesos,
                                    regra de encaixe no tempo
@@ -86,6 +87,7 @@ src/
   library/VideoImporter.ts       traz um vídeo gravado fora do app para a biblioteca
   update/UpdateService.ts        atualização automática: consulta, baixa e instala (electron-updater)
     captions/DictationService      ditado do assistente: WAV → texto pelo transcritor nativo
+  tracking/ObjectTrackingService segue um objeto marcado pelo vídeo (helper screenrx-track, Vision) → track.json
   captions/TranscriptionService  executa o transcritor, grava transcript.json
     dub/DubbingService             executa o helper de voz, confere os trechos e monta a trilha
     ai/                            AiCliService (único lugar que pergunta algo a uma IA: CLI
@@ -310,47 +312,58 @@ arredondada / quadrada, tamanho, canto ou posição livre, borda, espelhada). A
 posição da webcam é calculada por `layoutWebcam`, usada pelo preview, pelo arrasto
 no vídeo e pela exportação.
 
-**Formato do vídeo** (`background.aspect`, ferramenta Formato da trilha, com os logotipos):
-nativo, Reels ou TikTok (os dois são 9:16; o nome escolhido fica guardado).
-`outputSizeFor` dá o tamanho da saída: o da gravação no nativo; na vertical, uma
-caixa 9:16 cujo lado menor é o lado menor da gravação (1920×1080 → 1080×1920).
-Na vertical há dois enquadramentos (`background.fit`): **reduzir** (`fit`): a
-gravação inteira, menor, centrada sobre o fundo (barras pretas sem fundo); **zoom**
-(`fill`): a gravação ampliada até preencher o quadro, mostrando só uma parte dela
-— a maior região da forma do quadro, centrada em `background.crop` (`sourceCrop`),
-que o usuário escolhe arrastando o vídeo no preview (sem zoom selecionado). O zoom
-da câmera continua em coordenadas da gravação inteira (os zooms automáticos
-valem): `cameraWithin` leva a câmera para dentro da parte usada e a mantém contida;
-`frameToSource` faz o caminho inverso no clique de foco. O preview redimensiona o
-canvas ao trocar o formato; a exportação limita o lado maior (não a largura) à
-qualidade escolhida, e o diálogo mostra a resolução final. Projetos antigos sem os
-campos abrem como nativo. O assistente troca o formato ("format") e o
-enquadramento ("framing"). **Não verificado:** nenhuma exportação real fora do
-nativo; o arrasto da parte usada só por leitura do código.
+**Formato do vídeo** (ferramenta Formato da trilha): `background.aspect` é
+`native` (o da gravação), `9:16` (Vertical: Reels, TikTok, Shorts), `1:1`
+(Quadrado) ou `4:5` (Retrato); os antigos `reels`/`tiktok` leem como `9:16`. Os
+cartões mostram a proporção (a da gravação, "16:10", é calculada por
+`aspectLabel`). `outputSizeFor` dá o tamanho da saída: o da gravação no nativo;
+nos outros, uma caixa do formato cujo lado menor é o lado menor da gravação
+(1920×1080 → 1080×1920). Três enquadramentos (`background.fit`): **ajustar**
+(`fit`): a gravação inteira, menor, sobre o fundo, com **Tamanho**
+(`background.scale` ≤ 1, até 40%) e **Posição** (`background.align`: topo, centro
+ou base de um quadro mais alto que ela); **preencher** (`fill`): a gravação ampliada
+até preencher o quadro, mostrando a maior região da forma do quadro, centrada em
+`background.crop` (`sourceCrop`), que o usuário arrasta no preview, com **Zoom**
+extra (`scale` ≥ 1, até 2×); **seguir**, em dois modos: `follow-mouse`, a região
+usada acompanha o ponteiro — o `cursor.json` da sessão entra no `EditorSession`
+(`cursor`), vira um caminho suavizado uma vez por gravação (`engine/zoom/cursorPath.ts`:
+um ponto a cada 50 ms, média das posições dos 600 ms anteriores, contido na
+gravação; preview e exportação leem o mesmo caminho) e `pointerAt` dá o centro no
+instante; sem telemetria (importado, reunião) fica no centro; e `follow-zoom`, a
+região fica centrada na câmera de zoom (`cameraAt`), acompanhando os zooms e
+voltando ao meio sem eles (`composeFrame.followPoint`); e `follow-object`, a
+região acompanha um objeto que o usuário marca na imagem. O `follow` da primeira
+versão lê como `follow-zoom`.
 
-O editor se organiza como os editores de vídeo, numa grade (`.editor`): uma
-trilha de ícones na borda esquerda, da barra de ferramentas até o fim da janela
-(`Sidebar`: Assistente, Cortes, Zoom, Legendas, Texto, Dublagem, Formato, Fundo e,
-quando há, Câmera), o painel da ferramenta escolhida ao lado, também na altura toda, e à
-direita o preview com a linha do tempo embaixo dele. Selecionar uma região na linha do tempo abre a
-ferramenta dela.
-
-A linha do tempo (`Timeline`) tem uma barra de ferramentas: **Remover** (a região
-selecionada), **Encaixar** (ao arrastar ou redimensionar, uma borda a até 8 px de
-um corte, de outra região, do cursor ou das pontas gruda nela; lembrado em
-`localStorage`), o relógio "atual / total" e o zoom horizontal (1× a 8×: as pistas
-se esticam dentro de um contêiner com rolagem, e durante a reprodução a rolagem
-segue o cursor; o botão de ajustar volta a 1×). Os rótulos mostram "N trilhas", e
-Cortes, Zoom e Texto têm um cadeado que trava a pista (estado só de interface: as
-regiões dela param de reagir). O vídeo mostra, em cada trecho mantido, o nome da
-gravação e a duração; as pistas de áudio, o nome da trilha (e "· mudo"); cada corte
-é uma coluna escura hachurada com bordas vermelhas em todas as pistas e um selo
-"✂ 1,6 s" no bloco; os zooms são trapézios. Além disso traz: um balão com o tempo em cima
-do cursor; um "+" ao passar o mouse nos rótulos Cortes, Zoom e Texto, que cria a
-região na posição do play; os rótulos Legendas e Câmera são interruptores de
-visibilidade (olho); a pista Texto existe sempre (duplo clique adiciona); blocos de
-legenda e de texto têm um ícone antes do texto; e a região selecionada ganha
-alças brancas mais fortes e uma lixeira, quando é larga o bastante (64 px).
+**Seguir objeto.** Na ferramenta Formato, "Marcar objeto" põe o preview em modo de
+marcação (`markingObject` na `EditorStore`): o usuário arrasta um retângulo em
+volta do objeto no instante em que ele aparece; os cantos passam pelo quadro e pelo
+recorte (`outputToFrame` + `frameToSource`) para virarem coordenadas da gravação
+inteira, e `track:start` (`ObjectTrackingService`) roda o helper nativo
+`screenrx-track` (`native/macos/CaptureHelper/Sources/screenrx-track`): lê
+`screen.mp4` com `AVAssetReader` a partir do instante marcado e segue o objeto com
+o Vision (`VNTrackObjectRequest`, nível preciso), emitindo uma amostra por quadro
+(centro normalizado, origem no canto superior esquerdo), progresso, e "lost" quando
+a confiança fica abaixo de 0,3 por 20 quadros seguidos. O resultado vai para
+`track.json` da sessão (`ObjectTrack`: retângulo, início, fim, amostras), entra no
+`EditorSession` (`track`) e na `EditorStore` (`objectTrack`), e vira um caminho
+suavizado como o do mouse (`smoothCursorPath`; antes da primeira amostra fica onde
+o objeto começou). Cancelar mata o helper; sair do editor também. **Verificado uma
+vez** com o helper direto num `screen.mp4` do Jone (8 s, retângulo no meio: 240
+amostras a 30 fps, confiança caindo a 0,54 no 2º quadro por ser uma região sem
+objeto nítido); a marcação pelo preview e a exportação seguindo o objeto não foram
+exercitadas. O zoom da câmera continua em coordenadas da
+gravação inteira: `cameraWithin` o leva para dentro da parte usada; `frameToSource`
+faz o inverso no clique de foco. "Fundo: Aurora · Alterar em Fundo" leva à
+ferramenta Fundo. **Áreas seguras** (só no 9:16): um interruptor, preferência do
+Mac (`common/safeAreas.ts`, localStorage), faz o `PreviewPlayer` sombrear no
+preview as faixas que a interface dos apps cobre (10% no topo, 20% embaixo, coluna
+de botões à direita); nunca sai na exportação. O rodapé mostra a saída
+("1080 × 1920 · 30 fps", pelo plano de exportação). O preview redimensiona o canvas
+ao trocar o formato; a exportação limita o lado maior à qualidade escolhida. O
+assistente troca o formato ("format") e o enquadramento ("framing"). **Não
+verificado:** nenhuma exportação real fora do nativo; arrasto e áreas seguras só
+por leitura do código.
 
 A linha do tempo mostra o próprio material: miniaturas do vídeo e da câmera
 (`Filmstrip`, desenhadas buscando quadros em um elemento de vídeo descartável) e a
