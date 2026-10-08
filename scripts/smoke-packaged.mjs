@@ -6,7 +6,7 @@
 // It reads the real library but changes nothing in it, and uses a throwaway
 // profile, so it can run next to a development app.
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -34,6 +34,14 @@ if (!existsSync(appPath)) {
 
 const signature = runs('codesign', ['--verify', '--deep', '--strict', appPath])
 check('the bundle and everything in it is signed consistently', signature.ok, signature.text)
+
+// What the installed app reads to know where to look for updates.
+const updateConfig = join(resources, 'app-update.yml')
+check(
+  'the app knows where to look for updates',
+  existsSync(updateConfig) && /repo: screenrx/.test(readFileSync(updateConfig, 'utf8')),
+  existsSync(updateConfig) ? 'app-update.yml' : 'app-update.yml is missing'
+)
 
 const unpacked = join(resources, 'app.asar.unpacked', 'node_modules')
 const ffmpeg = runs(join(unpacked, 'ffmpeg-static', 'ffmpeg'), ['-version'])
