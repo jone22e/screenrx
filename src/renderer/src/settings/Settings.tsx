@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { AiProvider } from '@shared/models/ai'
 import { AI_EFFORT_LABELS, choiceFor, effortsOf, readyProvider } from '@shared/models/ai'
 import { formatBytes } from '@shared/format'
+import { AiLogo } from '../common/AiLogo'
 import { aiSettings } from '../common/aiSettings'
 import { meetSettings, useMeetSettings } from '../common/meetSettings'
 import { updateStatus, useUpdateStatus } from '../common/updateStatus'
@@ -240,6 +241,7 @@ export function Settings({ onClose }: Props) {
                   <li key={provider.id} className="agent" data-agent={provider.id} data-readiness={readiness} data-used={used}>
                     <div className="agent-head">
                       <div className="agent-name">
+                        <AiLogo provider={provider.id} size={18} />
                         <strong>{provider.label}</strong>
                         <span>
                           {provider.toolName}
