@@ -49,15 +49,16 @@ describe('outputSizeFor', () => {
   })
 
   it('shapes the output around the recording\'s shorter side', () => {
-    expect(outputSizeFor(output, 'reels')).toEqual({ width: 1080, height: 1920 })
-    expect(outputSizeFor(output, 'tiktok')).toEqual({ width: 1080, height: 1920 })
-    expect(outputSizeFor({ width: 3456, height: 2234 }, 'reels')).toEqual({ width: 2234, height: 3972 })
+    expect(outputSizeFor(output, '9:16')).toEqual({ width: 1080, height: 1920 })
+    expect(outputSizeFor(output, '1:1')).toEqual({ width: 1080, height: 1080 })
+    expect(outputSizeFor(output, '4:5')).toEqual({ width: 1080, height: 1350 })
+    expect(outputSizeFor({ width: 3456, height: 2234 }, '9:16')).toEqual({ width: 2234, height: 3972 })
   })
 })
 
 describe('filling a vertical frame', () => {
   const vertical = { width: 1080, height: 1920 }
-  const filling = { ...DEFAULT_BACKGROUND, aspect: 'reels' as const, fit: 'fill' as const, paddingRatio: 0.05 }
+  const filling = { ...DEFAULT_BACKGROUND, aspect: '9:16' as const, fit: 'fill' as const, paddingRatio: 0.05 }
 
   it('gives the recording the whole room', () => {
     const { frame } = layoutFrame(vertical, output, filling, true)
@@ -85,6 +86,38 @@ describe('filling a vertical frame', () => {
   it('shows all of the recording when it does not fill, or in its own format', () => {
     expect(sourceCrop(vertical, output, { ...filling, fit: 'fit' })).toEqual({ x: 0, y: 0, width: 1, height: 1 })
     expect(sourceCrop(output, output, { ...filling, aspect: 'native' })).toEqual({ x: 0, y: 0, width: 1, height: 1 })
+  })
+
+  it('zooms the part in use further, and follows the zoom camera when asked', () => {
+    const zoomed = sourceCrop(vertical, output, { ...filling, scale: 2 })
+    expect(zoomed.width).toBeCloseTo(0.31640625 / 2)
+    expect(zoomed.height).toBeCloseTo(0.5)
+    const following = sourceCrop(vertical, output, { ...filling, fit: 'follow-mouse', crop: { x: 0.1, y: 0.5 } }, { x: 0.8, y: 0.5 })
+    expect(following.x).toBeCloseTo(0.8 - 0.31640625 / 2)
+    // Without a point to follow, the chosen centre still holds.
+    expect(sourceCrop(vertical, output, { ...filling, fit: 'follow-zoom', crop: { x: 0.1, y: 0.5 } }).x).toBe(0)
+  })
+})
+
+describe('fitting a vertical frame', () => {
+  const vertical = { width: 1080, height: 1920 }
+  const fitted = { ...DEFAULT_BACKGROUND, aspect: '9:16' as const, paddingRatio: 0 }
+
+  it('shrinks the recording by the chosen size and sets it at the top, the middle or the bottom', () => {
+    const full = layoutFrame(vertical, output, fitted, true).frame
+    expect(full.width).toBe(1080)
+    expect(full.y).toBeCloseTo((1920 - 607.5) / 2)
+    const smaller = layoutFrame(vertical, output, { ...fitted, scale: 0.5 }, true).frame
+    expect(smaller.width).toBe(540)
+    expect(smaller.x).toBe(270)
+    expect(layoutFrame(vertical, output, { ...fitted, align: 'top' }, true).frame.y).toBe(0)
+    const bottom = layoutFrame(vertical, output, { ...fitted, align: 'bottom' }, true).frame
+    expect(bottom.y + bottom.height).toBeCloseTo(1920)
+  })
+
+  it('ignores size and position in the recording\'s own format', () => {
+    const { frame } = layoutFrame(output, output, { ...DEFAULT_BACKGROUND, scale: 0.5, align: 'top' }, false)
+    expect(frame).toEqual({ x: 0, y: 0, width: 1920, height: 1080 })
   })
 })
 

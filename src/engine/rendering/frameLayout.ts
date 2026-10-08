@@ -1,4 +1,5 @@
 import type { BackgroundSettings, FrameAspect, NormalizedPoint, WebcamCorner, WebcamSettings } from '@shared/models/project'
+import { FRAME_LIMITS, isFollowing } from '@shared/models/project'
 
 export interface Size {
   width: number
@@ -34,8 +35,9 @@ export interface WebcamLayout extends Rect {
 /** Width ÷ height of each format; `null` keeps the recording's own. */
 const ASPECT_RATIOS: Record<FrameAspect, number | null> = {
   native: null,
-  reels: 9 / 16,
-  tiktok: 9 / 16
+  '9:16': 9 / 16,
+  '1:1': 1,
+  '4:5': 4 / 5
 }
 
 /**
@@ -53,27 +55,34 @@ export function outputSizeFor(source: Size, aspect: FrameAspect): Size {
 }
 
 /** Whether the recording is enlarged to fill a frame of another shape, showing only a part of it. */
-const fills = (background: BackgroundSettings): boolean => background.aspect !== 'native' && background.fit === 'fill'
+export const fillsFrame = (background: BackgroundSettings): boolean =>
+  background.aspect !== 'native' && background.fit !== 'fit'
 
 /**
- * Places the recording on the output: as large as fits, keeping its aspect
- * ratio, centred — or, when it fills, the whole room, a part of the
- * recording being shown (`sourceCrop`). With a backdrop it is inset by the
- * padding on every side and gets rounded corners; without one it goes edge
- * to edge, which fills the output when the two have the same shape.
+ * Places the recording on the output. Fitted: as large as fits (times
+ * `scale`, when the user shrank it), keeping its aspect ratio, centred
+ * across and set at the top, the middle or the bottom of a taller frame.
+ * Filling: the whole room, a part of the recording being shown
+ * (`sourceCrop`). With a backdrop it is inset by the padding on every side
+ * and gets rounded corners; without one it goes edge to edge, which fills
+ * the output when the two have the same shape.
  */
 export function layoutFrame(output: Size, source: Size, background: BackgroundSettings, framed: boolean): FrameLayout {
   const padding = framed ? background.paddingRatio : 0
   const room = { width: output.width * (1 - 2 * padding), height: output.height * (1 - 2 * padding) }
-  const scale = fills(background)
-    ? Math.max(room.width / source.width, room.height / source.height)
-    : Math.min(room.width / source.width, room.height / source.height)
-  const width = fills(background) ? room.width : source.width * scale
-  const height = fills(background) ? room.height : source.height * scale
-  return {
-    frame: { x: (output.width - width) / 2, y: (output.height - height) / 2, width, height },
-    cornerRadius: framed ? background.cornerRadiusRatio * Math.min(output.width, output.height) : 0
+  const roomX = (output.width - room.width) / 2
+  const roomY = (output.height - room.height) / 2
+  const cornerRadius = framed ? background.cornerRadiusRatio * Math.min(output.width, output.height) : 0
+  if (fillsFrame(background)) {
+    return { frame: { x: roomX, y: roomY, width: room.width, height: room.height }, cornerRadius }
   }
+  const shrink = background.aspect === 'native' ? 1 : clamp(background.scale, FRAME_LIMITS.minFitScale, 1)
+  const scale = Math.min(room.width / source.width, room.height / source.height) * shrink
+  const width = source.width * scale
+  const height = source.height * scale
+  const align = background.aspect === 'native' ? 'center' : background.align
+  const y = align === 'top' ? roomY : align === 'bottom' ? roomY + room.height - height : roomY + (room.height - height) / 2
+  return { frame: { x: (output.width - width) / 2, y, width, height }, cornerRadius }
 }
 
 /** A region of the recording, normalized to it. */
@@ -86,18 +95,27 @@ export interface NormalizedRect {
 
 /**
  * The part of the recording shown: all of it, or, when it fills a frame of
- * another shape, the largest region of the frame's shape, centred on
- * `background.crop` and kept inside the recording.
+ * another shape, the largest region of the frame's shape — smaller by the
+ * extra zoom in `background.scale` — centred on `background.crop` (or on
+ * `follow`, the zoom camera's centre, when the part follows the zoom) and
+ * kept inside the recording.
  */
-export function sourceCrop(output: Size, source: Size, background: BackgroundSettings): NormalizedRect {
-  if (!fills(background)) return { x: 0, y: 0, width: 1, height: 1 }
+export function sourceCrop(
+  output: Size,
+  source: Size,
+  background: BackgroundSettings,
+  follow?: NormalizedPoint
+): NormalizedRect {
+  if (!fillsFrame(background)) return { x: 0, y: 0, width: 1, height: 1 }
   const sourceRatio = source.width / source.height
   const frameRatio = output.width / output.height
-  const width = sourceRatio > frameRatio ? frameRatio / sourceRatio : 1
-  const height = sourceRatio > frameRatio ? 1 : sourceRatio / frameRatio
+  const zoom = clamp(background.scale, 1, FRAME_LIMITS.maxFillZoom)
+  const width = (sourceRatio > frameRatio ? frameRatio / sourceRatio : 1) / zoom
+  const height = (sourceRatio > frameRatio ? 1 : sourceRatio / frameRatio) / zoom
+  const centre = isFollowing(background.fit) && follow ? follow : background.crop
   return {
-    x: clamp(background.crop.x - width / 2, 0, 1 - width),
-    y: clamp(background.crop.y - height / 2, 0, 1 - height),
+    x: clamp(centre.x - width / 2, 0, 1 - width),
+    y: clamp(centre.y - height / 2, 0, 1 - height),
     width,
     height
   }

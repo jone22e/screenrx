@@ -16,9 +16,9 @@ describe('createExportPlan', () => {
 
   it('shapes the file for a format, capping the longer side', () => {
     const map = buildTimeMap(10_000, [])
-    const reels = createExportPlan({ width: 1920, height: 1080 }, map, { ...settings, quality: 'high' }, 'reels')
+    const reels = createExportPlan({ width: 1920, height: 1080 }, map, { ...settings, quality: 'high' }, '9:16')
     expect([reels.width, reels.height]).toEqual([1080, 1920])
-    const retina = createExportPlan({ width: 3456, height: 2234 }, map, { ...settings, quality: 'high' }, 'tiktok')
+    const retina = createExportPlan({ width: 3456, height: 2234 }, map, { ...settings, quality: 'high' }, '9:16')
     expect(retina.height).toBe(2560)
     expect(retina.width % 2).toBe(0)
     expect(retina.width / retina.height).toBeCloseTo(9 / 16, 2)

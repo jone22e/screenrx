@@ -91,16 +91,29 @@ export interface ExportSettings {
  * 9:16 of Reels and TikTok (two names for the same shape, kept apart so the
  * user sees the one they picked).
  */
-export type FrameAspect = 'native' | 'reels' | 'tiktok'
-export const FRAME_ASPECTS: readonly FrameAspect[] = ['native', 'reels', 'tiktok']
+export type FrameAspect = 'native' | '9:16' | '1:1' | '4:5'
+export const FRAME_ASPECTS: readonly FrameAspect[] = ['native', '9:16', '1:1', '4:5']
 
 /**
  * How the recording goes into a format of another shape: shrunk so all of it
  * shows (`fit`), or enlarged so it fills the frame and a part of it is used
  * (`fill`), the part being chosen with `crop`.
  */
-export type FrameFit = 'fit' | 'fill'
-export const FRAME_FITS: readonly FrameFit[] = ['fit', 'fill']
+export type FrameFit = 'fit' | 'fill' | 'follow-mouse' | 'follow-zoom' | 'follow-object'
+export const FRAME_FITS: readonly FrameFit[] = ['fit', 'fill', 'follow-mouse', 'follow-zoom', 'follow-object']
+/** Whether the part in use moves on its own: after the pointer, the zoom, or an object marked in the video. */
+export const isFollowing = (fit: FrameFit): boolean => fit !== 'fit' && fit !== 'fill'
+
+/** Where the recording sits in a frame taller than it, when it does not fill it. */
+export type FrameAlign = 'top' | 'center' | 'bottom'
+export const FRAME_ALIGNS: readonly FrameAlign[] = ['top', 'center', 'bottom']
+
+export const FRAME_LIMITS = {
+  /** Fitted: how much of the room the recording may shrink to. */
+  minFitScale: 0.4,
+  /** Filling: how far the part in use may be zoomed beyond what fills the frame. */
+  maxFillZoom: 2
+} as const
 
 export interface BackgroundSettings {
   /** A preset from the engine's catalogue, or `null` for the bare recording. */
@@ -109,6 +122,10 @@ export interface BackgroundSettings {
   fit: FrameFit
   /** Centre of the part of the recording used when it fills the frame, normalized to the recording. */
   crop: NormalizedPoint
+  /** Fitted: the recording's size as a share of what fits (≤ 1). Filling: extra zoom on the part in use (≥ 1). */
+  scale: number
+  /** Fitted: where the recording sits when the frame is taller than it. */
+  align: FrameAlign
   paddingRatio: number
   cornerRadiusRatio: number
   shadow: boolean
@@ -299,6 +316,8 @@ export const DEFAULT_BACKGROUND: BackgroundSettings = {
   aspect: 'native',
   fit: 'fit',
   crop: { x: 0.5, y: 0.5 },
+  scale: 1,
+  align: 'center',
   paddingRatio: 0.06,
   cornerRadiusRatio: 0.014,
   shadow: true
@@ -401,9 +420,17 @@ function parseBackground(value: unknown): BackgroundSettings {
         : typeof presetId === 'string' && presetId.length <= MAX_ID_LENGTH
           ? presetId
           : DEFAULT_BACKGROUND.presetId,
-    aspect: includes(FRAME_ASPECTS, value.aspect) ? value.aspect : DEFAULT_BACKGROUND.aspect,
-    fit: includes(FRAME_FITS, value.fit) ? value.fit : DEFAULT_BACKGROUND.fit,
+    // The first vertical formats were named after the networks.
+    aspect: includes(FRAME_ASPECTS, value.aspect)
+      ? value.aspect
+      : value.aspect === 'reels' || value.aspect === 'tiktok'
+        ? '9:16'
+        : DEFAULT_BACKGROUND.aspect,
+    // The first "follow" followed the zoom.
+    fit: includes(FRAME_FITS, value.fit) ? value.fit : value.fit === 'follow' ? 'follow-zoom' : DEFAULT_BACKGROUND.fit,
     crop: parseNormalizedPoint(value.crop, DEFAULT_BACKGROUND.crop),
+    scale: isFiniteNumber(value.scale) ? Math.min(Math.max(value.scale, FRAME_LIMITS.minFitScale), FRAME_LIMITS.maxFillZoom) : DEFAULT_BACKGROUND.scale,
+    align: includes(FRAME_ALIGNS, value.align) ? value.align : DEFAULT_BACKGROUND.align,
     paddingRatio: clampRatio(value.paddingRatio, DEFAULT_BACKGROUND.paddingRatio, BACKGROUND_LIMITS.maxPaddingRatio),
     cornerRadiusRatio: clampRatio(
       value.cornerRadiusRatio,

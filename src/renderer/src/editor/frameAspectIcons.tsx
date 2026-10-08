@@ -1,33 +1,49 @@
 import type { ReactNode } from 'react'
 import type { FrameAspect } from '@shared/models/project'
+import type { FrameFitChoice } from './frameAspects'
 
-/** A monitor: the recording's own shape. */
-const NativeIcon = () => (
-  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="2.5" y="4" width="19" height="13" rx="2" />
-    <path d="M9 20h6M12 17v3" />
+/** A rectangle of the format's proportion, as the tile's mark. */
+export function AspectShapeIcon({ ratio }: { ratio: number }) {
+  const box = 22
+  const width = ratio >= 1 ? box : box * ratio
+  const height = ratio >= 1 ? box / ratio : box
+  return (
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+      <rect x={(24 - width) / 2} y={(24 - height) / 2} width={width} height={height} rx="2" />
+    </svg>
+  )
+}
+
+const FitIconShape = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="3" width="18" height="18" rx="3" />
+    <rect x="7" y="9" width="10" height="6" rx="1" />
   </svg>
 )
 
-/** Instagram's mark. */
-const ReelsIcon = () => (
-  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="3" y="3" width="18" height="18" rx="5" />
-    <circle cx="12" cy="12" r="4" />
-    <circle cx="17.2" cy="6.8" r="0.9" fill="currentColor" stroke="none" />
+const FillIconShape = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M6 3v15a2 2 0 0 0 2 2h13M3 6h15a2 2 0 0 1 2 2v13" />
   </svg>
 )
 
-/** TikTok's mark, as drawn by the simple-icons project. */
-const TikTokIcon = () => (
-  <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
-    <path d="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z" />
+const FollowIconShape = () => (
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3" y="3" width="18" height="18" rx="3" />
+    <circle cx="12" cy="12" r="3.5" />
+    <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
   </svg>
 )
 
-/** The mark of each format, for the tiles in the Fundo tab. */
-export const FRAME_ASPECT_ICONS: Record<FrameAspect, ReactNode> = {
-  native: <NativeIcon />,
-  reels: <ReelsIcon />,
-  tiktok: <TikTokIcon />
+export const FRAME_FIT_ICONS: Record<FrameFitChoice, ReactNode> = {
+  fit: <FitIconShape />,
+  fill: <FillIconShape />,
+  follow: <FollowIconShape />
+}
+
+/** The proportion each format's mark is drawn with; the original takes the recording's. */
+export const FRAME_ASPECT_RATIOS: Record<Exclude<FrameAspect, 'native'>, number> = {
+  '9:16': 9 / 16,
+  '1:1': 1,
+  '4:5': 4 / 5
 }

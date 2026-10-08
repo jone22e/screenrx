@@ -98,6 +98,8 @@ describe('parseProject framing', () => {
       aspect: 'native',
       fit: 'fit',
       crop: { x: 0.5, y: 0.5 },
+      scale: 1,
+      align: 'center',
       paddingRatio: BACKGROUND_LIMITS.maxPaddingRatio,
       cornerRadiusRatio: 0,
       shadow: false
@@ -105,12 +107,18 @@ describe('parseProject framing', () => {
     expect(parsed?.webcam).toEqual({ ...DEFAULT_WEBCAM, visible: false })
     expect(
       parseProject({ ...createProject(sessionId), background: { presetId: null, aspect: 'reels' } }, sessionId)?.background.aspect
-    ).toBe('reels')
+    ).toBe('9:16')
+    expect(
+      parseProject({ ...createProject(sessionId), background: { presetId: null, aspect: '4:5', fit: 'follow', scale: 1.5, align: 'top' } }, sessionId)?.background
+    ).toMatchObject({ aspect: '4:5', fit: 'follow-zoom', scale: 1.5, align: 'top' })
+    expect(
+      parseProject({ ...createProject(sessionId), background: { presetId: null, aspect: '9:16', fit: 'follow-mouse' } }, sessionId)?.background.fit
+    ).toBe('follow-mouse')
     const filled = parseProject(
       { ...createProject(sessionId), background: { presetId: null, aspect: 'tiktok', fit: 'fill', crop: { x: 1.4, y: 0.2 } } },
       sessionId
     )?.background
-    expect(filled).toMatchObject({ aspect: 'tiktok', fit: 'fill', crop: { x: 1, y: 0.2 } })
+    expect(filled).toMatchObject({ aspect: '9:16', fit: 'fill', crop: { x: 1, y: 0.2 } })
     expect(
       parseProject({ ...createProject(sessionId), background: { presetId: null, aspect: '3:7' } }, sessionId)?.background.aspect
     ).toBe('native')
