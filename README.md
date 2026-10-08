@@ -52,7 +52,7 @@ fechando a janela da reunião.
 ## Instalador (macOS)
 
 ```bash
-make update
+make build-mac
 ```
 
 Equivale a `npm run dist` e gera `release/ScreenRx-<versão>-arm64.dmg` (Apple Silicon), com os helpers nativos
@@ -67,8 +67,16 @@ make check
 Equivale a `npm run dist:check`: abre o app empacotado e confere o que só existe no pacote (helpers, FFmpeg, ícone).
 
 Para distribuir a outras pessoas, `npm run dist:signed` assina com o certificado
-"Developer ID Application" do Chaveiro (com hardened runtime); a notarização na
-Apple ainda não está configurada.
+"Developer ID Application" do Chaveiro (com hardened runtime), sem notarizar.
+
+## Atualização automática
+
+```bash
+make update
+```
+
+Assina, notariza e publica uma versão nova em `jone22e/screenrx`; os apps instalados baixam e instalam sozinhos.
+Passo a passo, pré-requisitos e problemas comuns em [docs/RELEASE.md](docs/RELEASE.md).
 
 ## Verificação
 

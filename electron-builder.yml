@@ -1,5 +1,7 @@
-# Packaging of the desktop app (`npm run dist`). The app is built first by
-# electron-vite into out/; this only assembles and signs the bundle.
+# Packaging of the desktop app. The app is built first by electron-vite into out/; this only assembles
+# and signs the bundle.
+#   npm run dist          local installer, ad-hoc signed, nothing published
+#   npm run release:mac   Developer ID signed, notarized, uploaded to the release page (`make update`)
 appId: com.screenrx.app
 productName: ScreenRx
 copyright: Copyright © 2026 Jone
@@ -25,10 +27,16 @@ asarUnpack:
 mac:
   category: public.app-category.video
   icon: build/icon.icns
+  # The dmg is for the first installation; the zip is what the running app downloads to update itself.
   target:
     - target: dmg
       arch: arm64
+    - target: zip
+      arch: arm64
   minimumSystemVersion: "14.0"
+  # An update replaces the app only if it carries the same signature as the installed one.
+  identity: "C2S Business Ltda (3UG973ND38)"
+  notarize: true
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -52,5 +60,9 @@ dmg:
   title: ScreenRx ${version}
   artifactName: ScreenRx-${version}-${arch}.dmg
 
-# Nothing is published or uploaded by a build.
-publish: null
+# Where the installed app looks for newer versions (the release page), and where `release:mac` uploads
+# them. A plain build uploads nothing.
+publish:
+  provider: github
+  owner: jone22e
+  repo: screenrx

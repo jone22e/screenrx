@@ -81,6 +81,8 @@ src/
     capture/                       CaptureEngine (interface) + macos/ (cliente do helper)
     recording/                     RecordingController, SessionStore, diagnostics
     project/ProjectStore.ts        project.json: abertura, auto zoom inicial, salvamento
+  library/VideoImporter.ts       traz um vídeo gravado fora do app para a biblioteca
+  update/UpdateService.ts        atualização automática: consulta, baixa e instala (electron-updater)
     captions/TranscriptionService  executa o transcritor, grava transcript.json
     dub/DubbingService             executa o helper de voz, confere os trechos e monta a trilha
     ai/                            AiCliService (único lugar que pergunta algo a uma IA: CLI
@@ -141,6 +143,17 @@ disso só muda quando a gravação é renomeada na biblioteca (campo opcional `t
 que substitui o rótulo da fonte na lista, no editor e no nome sugerido da
 exportação). As trilhas são **imutáveis**: o helper se recusa a escrever sobre um
 arquivo existente.
+
+Uma sessão também pode nascer de um **vídeo gravado fora do app** ("Importar vídeo"
+na biblioteca, `VideoImporter`). O arquivo original não é tocado: a primeira trilha
+de vídeo dele vira `screen.mp4` (copiada quando já é H.264 8 bits 4:2:0, o que o
+editor e a exportação leem; re-codificada pelo FFmpeg embutido caso contrário) e a
+primeira trilha de áudio, se houver, vira `microphone.m4a` (a trilha de onde legendas
+e dublagem partem). A fonte fica `kind: "file"` com o nome do arquivo como rótulo,
+não há `cursor.json` nem `interactions.json` (diagnóstico `telemetry-missing` de
+nível info: sem zoom automático), e o manifesto é escrito com o que o FFprobe lê de
+volta dos arquivos gerados. Se a importação falha no meio, a pasta da sessão é
+removida inteira.
 
 ### Projeto (`src/shared/models/project.ts`)
 
@@ -278,8 +291,13 @@ callbacks — o cursor da timeline e o relógio são atualizados direto no DOM, 
 re-renderizar componentes a cada quadro.
 
 A trilha da tela é o relógio mestre do preview; a webcam e os áudios são arquivos
-separados que a seguem e são realinhados quando se afastam. Tudo chega pelo
-protocolo `screenrx-media://`, servido pelo main em faixas direto do disco.
+separados que a seguem. Um desvio pequeno é corrigido dobrando um pouco o
+`playbackRate` da faixa (`correctTrack`, em `engine/time/trackSync.ts`: zona morta
+de 40 ms, ajuste de 4%); só um desvio acima de 0,5 s vira seek, porque um seek num
+elemento de áudio é ouvido como um corte no som — corrigir por seek a cada quadro
+deixava o áudio picotado no preview. Faixas ainda carregando ou no meio de um seek
+não são medidas. Tudo chega pelo protocolo `screenrx-media://`, servido pelo main em
+faixas direto do disco.
 
 O projeto guarda também o enquadramento (`background`: fundo do catálogo, margem,
 cantos, sombra) e como a webcam aparece (`webcam`: visível, formato círculo /
@@ -487,7 +505,10 @@ biblioteca e sair.
   nome; abrir no editor, mostrar no Finder e excluir. Excluir pede confirmação e
   move a pasta inteira da sessão para a Lixeira do sistema (nunca apaga em
   definitivo). As capas são geradas sob demanda pelo FFmpeg embutido e ficam em um
-  cache fora das sessões.
+  cache fora das sessões. "Importar vídeo" abre o seletor de arquivos (vários de
+  uma vez) e traz cada um como uma sessão própria (ver §3); um único arquivo abre
+  direto no editor, como uma gravação recém-terminada. A importação para no
+  primeiro arquivo que falha; os anteriores já estão na biblioteca.
 - **Câmera** — com a barra aberta e uma câmera selecionada, uma janela circular flutuante mostra a
   imagem dela para o usuário se enquadrar antes e durante a gravação. É só um
   espelho: como toda janela do app, fica fora da captura, e a trilha da câmera é
@@ -743,7 +764,8 @@ só o conteúdo daquela janela, mesmo coberta por outras.
 | 7 | Exportação MP4 (FfmpegService) | **concluída** |
 | 8 | Velocidade global de exportação com pitch preservado | **concluída** |
 | 9 | Refinamento visual, otimização, Windows | pendente |
-| — | Instalador para macOS (`npm run dist`): `.dmg` para Apple Silicon, assinatura local | **concluído**; assinatura Developer ID disponível (`dist:signed`), notarização não configurada |
+| — | Instalador para macOS (`npm run dist`): `.dmg` para Apple Silicon, assinatura local | **concluído**; assinatura Developer ID disponível (`dist:signed`) |
+| — | Atualização automática (`electron-updater` + releases do GitHub; `make update` assina, notariza e publica; ver `docs/RELEASE.md`) | **implementada**; nenhuma versão publicada ainda, o fluxo completo (notarização, atualização de um app instalado) não foi exercitado |
 | — | Legendas automáticas (pedido posterior à especificação): transcrição local, estilo, posição, edição do texto, exportação | **concluída** (só macOS 26+) |
 | — | Sugestões de corte por IA (CLI do Claude, do Codex ou do Antigravity) a partir da transcrição | **concluída** (depende da transcrição: macOS 26+) |
 | — | Configurações: instalar e entrar nas ferramentas de IA, escolher modelo e esforço | **concluída** (instalar e entrar sem verificação real) |
@@ -762,7 +784,7 @@ fora do `asar`. Todos os executáveis embutidos são nativos de Apple Silicon �
 rodava com o Rosetta instalado, e por isso foi trocado. O `Info.plist` declara os
 textos de uso de microfone, câmera, áudio do sistema e reconhecimento de fala; os
 entitlements (JIT do Electron, microfone, câmera) valem para a assinatura com
-hardened runtime. Só Apple Silicon por enquanto (os helpers e o FFmpeg são
+hardened runtime. O alvo `zip` existe só para a atualização automática (o app baixa o zip, o DMG é a primeira instalação). Só Apple Silicon por enquanto (os helpers e o FFmpeg são
 compilados/baixados para a arquitetura da máquina que gera o pacote).
 
 `npm run dist:check` abre o app empacotado com um perfil descartável e confere
@@ -772,6 +794,19 @@ verificado:** abrir o app pelo Finder depois de instalado (é aí que o macOS pe
 a permissão de Gravação de Tela em nome do "ScreenRx"; no teste o app é iniciado
 pelo terminal e herda a permissão dele), a build assinada com Developer ID e a
 instalação em outro Mac.
+
+### Atualização automática
+
+`src/main/update/UpdateService.ts` envolve o `electron-updater` e lê os releases de `jone22e/screenrx`
+(`publish` do `electron-builder.yml`; o pacote leva um `app-update.yml` com esse destino). Consulta 10 s após abrir,
+a cada 30 min, ao ganhar foco e ao acordar o Mac (nesses dois, só se a última consulta tem mais de 10 min), baixa
+sozinho e instala ao sair do app (`autoInstallOnAppQuit`): o `before-quit` do app já finalizou uma gravação em
+andamento antes disso. "Reiniciar agora" (`update:install`) é recusado com gravação ou exportação em curso. O estado
+(`UpdateState`) vai à biblioteca (`UpdateNotice`) e a Configurações → Atualização pelo canal `update:state-changed`.
+Em desenvolvimento o serviço fica em `unsupported`. O macOS só troca o app por uma versão com a mesma assinatura:
+um app "ad hoc" (`make build-mac`) não se atualiza. `make update` (`scripts/release.sh`) assina com o Developer ID,
+notariza e publica; passo a passo em `docs/RELEASE.md`. **Não verificado:** a notarização com o helper de voz, o
+download e a troca de um app instalado por uma versão publicada.
 
 ### O que foi validado
 
