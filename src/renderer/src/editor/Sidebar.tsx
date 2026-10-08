@@ -279,7 +279,7 @@ function FormatPanel({ session, store, onOpenBackground }: { session: EditorSess
                 <strong>
                   {option.label} <span className="format-card-ratio">{option.ratio ?? aspectLabel(source.width, source.height)}</span>
                 </strong>
-                {option.value !== 'native' && <span>{option.hint}</span>}
+                <span>{option.hint}</span>
               </span>
             </button>
           ))}

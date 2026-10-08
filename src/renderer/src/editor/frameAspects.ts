@@ -2,7 +2,7 @@ import type { FrameAlign, FrameAspect, FrameFit } from '@shared/models/project'
 
 /** The formats offered, in the order shown. The marks are in `frameAspectIcons.tsx`. */
 export const FRAME_ASPECT_OPTIONS: ReadonlyArray<{ value: FrameAspect; label: string; ratio: string | null; hint: string }> = [
-  { value: 'native', label: 'Original', ratio: null, hint: 'O formato da gravação.' },
+  { value: 'native', label: 'Original', ratio: null, hint: 'Como gravado' },
   { value: '9:16', label: 'Vertical', ratio: '9:16', hint: 'Reels, TikTok, Shorts' },
   { value: '1:1', label: 'Quadrado', ratio: '1:1', hint: 'Feed' },
   { value: '4:5', label: 'Retrato', ratio: '4:5', hint: 'Feed' }
