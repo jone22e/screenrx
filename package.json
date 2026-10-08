@@ -24,12 +24,14 @@
     "test:voice": "swift test --package-path native/macos/VoiceHelper",
     "test:e2e": "node scripts/e2e-recording.mjs",
     "check": "npm run typecheck && npm run lint && npm run test && npm run test:native",
-    "dist": "npm run build && npm run build:voice && electron-builder --mac --arm64 -c.mac.identity=- -c.mac.hardenedRuntime=false",
-    "dist:signed": "npm run build && npm run build:voice && electron-builder --mac --arm64",
+    "dist": "npm run build && npm run build:voice && electron-builder --mac --arm64 -c.mac.identity=- -c.mac.hardenedRuntime=false -c.mac.notarize=false",
+    "dist:signed": "npm run build && npm run build:voice && electron-builder --mac --arm64 -c.mac.notarize=false",
+    "release:mac": "npm run build && npm run build:voice && electron-builder --mac --arm64 --publish always",
     "dist:check": "node scripts/smoke-packaged.mjs"
   },
   "dependencies": {
     "@ffprobe-installer/ffprobe": "^2.1.2",
+    "electron-updater": "^6.8.9",
     "ffmpeg-static": "^5.3.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
