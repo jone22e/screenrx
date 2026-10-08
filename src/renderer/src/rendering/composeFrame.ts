@@ -6,7 +6,7 @@ import type { NormalizedRect } from '@engine/rendering/frameLayout'
 import { centeredSquare, layoutFrame, layoutWebcam, sourceCrop } from '@engine/rendering/frameLayout'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { viewToSource, visibleRect } from '@engine/zoom/zoomCamera'
-import type { BackgroundSettings, CaptionStyle, WebcamSettings } from '@shared/models/project'
+import type { BackgroundSettings, CaptionStyle, NormalizedPoint, WebcamSettings } from '@shared/models/project'
 
 export interface FrameInput {
   screen: CanvasImageSource
@@ -14,6 +14,10 @@ export interface FrameInput {
   /** The webcam's current frame and how to show it, when the session has one and it is visible. */
   webcam: { image: CanvasImageSource; size: Size; settings: WebcamSettings } | null
   camera: Camera
+  /** Where the pointer was at this instant (smoothed), for the frame that follows it; `null` without telemetry. */
+  pointer: NormalizedPoint | null
+  /** Where the marked object is at this instant (smoothed), for the frame that follows it; `null` when none was tracked. */
+  object: NormalizedPoint | null
   background: BackgroundSettings
   /** The caption on screen at this instant, when there is one and captions are shown. */
   caption: { text: string; style: CaptionStyle } | null
@@ -125,8 +129,8 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
     context.restore()
   }
 
-  // The part of the recording in use, seen through the zoom camera.
-  const crop = sourceCrop(output, input.screenSize, input.background)
+  // The part of the recording in use, seen through the zoom camera; following, it is centred on the pointer or on the zoom.
+  const crop = sourceCrop(output, input.screenSize, input.background, followPoint(input.background, input.camera, input.pointer, input.object))
   const view = visibleRect(cameraWithin(input.camera, crop))
   context.save()
   framePath()
@@ -193,6 +197,18 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
 
+/** What the part in use is centred on when it follows something: the pointer, the marked object, or the zoom camera. */
+export function followPoint(
+  background: BackgroundSettings,
+  camera: Camera,
+  pointer: NormalizedPoint | null,
+  object: NormalizedPoint | null
+): NormalizedPoint {
+  if (background.fit === 'follow-mouse' && pointer) return pointer
+  if (background.fit === 'follow-object' && object) return object
+  return { x: camera.centerX, y: camera.centerY }
+}
+
 /**
  * The zoom camera, whose centre is on the whole recording, as seen from the
  * part of it in use: the same view relative to that part, kept inside it.
@@ -214,10 +230,12 @@ export function frameToSource(
   source: Size,
   background: BackgroundSettings,
   camera: Camera,
+  pointer: NormalizedPoint | null,
+  object: NormalizedPoint | null,
   frameX: number,
   frameY: number
 ): { x: number; y: number } {
-  const crop = sourceCrop(output, source, background)
+  const crop = sourceCrop(output, source, background, followPoint(background, camera, pointer, object))
   const within = viewToSource(cameraWithin(camera, crop), frameX, frameY)
   return { x: crop.x + within.x * crop.width, y: crop.y + within.y * crop.height }
 }

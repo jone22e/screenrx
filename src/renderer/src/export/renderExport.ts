@@ -1,4 +1,5 @@
 import { captionAt } from '@engine/captions/captionCues'
+import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
 import { textsAt } from '@engine/captions/textOverlays'
 import { frameSourceTimeMs } from '@engine/export/exportPlan'
 import { buildTimeMap } from '@engine/time/timeMapping'
@@ -7,6 +8,7 @@ import type { EditorSession } from '@shared/models/editor'
 import type { AppError } from '@shared/models/errors'
 import type { ExportJob } from '@shared/models/export'
 import type { Project } from '@shared/models/project'
+import type { ObjectTrack } from '@shared/models/telemetry'
 import { zoomsOf } from '@shared/models/project'
 import { composeFrame } from '../rendering/composeFrame'
 import { TrackFrameReader } from './TrackFrameReader'
@@ -40,6 +42,7 @@ export async function renderExport(
   job: ExportJob,
   session: EditorSession,
   project: Project,
+  objectTrack: ObjectTrack | null,
   onProgress: (framesDone: number) => void,
   signal: AbortSignal
 ): Promise<void> {
@@ -47,6 +50,8 @@ export async function renderExport(
   const api = window.screenrx.export
   const map = buildTimeMap(session.durationMs, project.effects)
   const zooms = zoomsOf(project)
+  const cursorPath = smoothCursorPath(session.cursor, session.durationMs)
+  const objectPath = objectTrack ? smoothCursorPath(objectTrack.samples, session.durationMs) : []
   const { captions } = project
   const output = { width: plan.width, height: plan.height }
 
@@ -84,6 +89,8 @@ export async function renderExport(
             }
           : null,
         camera: cameraAt(zooms, sourceMs),
+        pointer: cursorPath.length > 0 ? pointerAt(cursorPath, sourceMs) : null,
+        object: objectPath.length > 0 ? pointerAt(objectPath, sourceMs) : null,
         background: project.background,
         caption: caption === null ? null : { text: caption, style: captions.style },
         texts: textsAt(project.texts, sourceMs)
