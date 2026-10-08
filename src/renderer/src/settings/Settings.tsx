@@ -4,6 +4,7 @@ import { AI_EFFORT_LABELS, choiceFor, effortsOf, readyProvider } from '@shared/m
 import { formatBytes } from '@shared/format'
 import { aiSettings } from '../common/aiSettings'
 import { meetSettings, useMeetSettings } from '../common/meetSettings'
+import { updateStatus, useUpdateStatus } from '../common/updateStatus'
 import { voiceModel } from '../common/voiceModel'
 import './settings.css'
 
@@ -106,8 +107,70 @@ function MeetSection() {
   )
 }
 
+/** The version running, whether a newer one exists, and a way to look for it now. */
+function UpdateSection() {
+  const update = useUpdateStatus()
+  const [restartRefused, setRestartRefused] = useState(false)
+  if (!update) return null
+
+  const busy = update.status === 'checking' || update.status === 'downloading'
+  const summary =
+    update.status === 'unsupported'
+      ? 'Disponível só no app instalado.'
+      : update.status === 'checking'
+        ? 'Procurando uma versão nova…'
+        : update.status === 'downloading'
+          ? `Baixando a versão ${update.version ?? ''} · ${update.percent ?? 0}%`
+          : update.status === 'ready'
+            ? `A versão ${update.version ?? ''} está pronta e será instalada quando você fechar o app.`
+            : update.status === 'error'
+              ? (update.error ?? 'Não foi possível verificar atualizações.')
+              : 'Você está na versão mais recente.'
+
+  return (
+    <section className="settings-section">
+      <header className="settings-section-head">
+        <div>
+          <h2>Atualização</h2>
+          <p>
+            O app procura versões novas sozinho, baixa em segundo plano e instala quando você o fecha. Nada é
+            instalado durante uma gravação.
+          </p>
+        </div>
+      </header>
+
+      <div className="agent">
+        <div className="agent-head">
+          <div className="agent-name">
+            <strong>ScreenRx {update.current}</strong>
+            <span>{summary}</span>
+          </div>
+          {update.status !== 'unsupported' &&
+            (update.status === 'ready' ? (
+              <button
+                className="settings-button settings-button-primary"
+                onClick={() => void updateStatus.install().then((started) => setRestartRefused(!started))}
+              >
+                Reiniciar agora
+              </button>
+            ) : (
+              <button className="settings-button" disabled={busy} onClick={() => void updateStatus.check()}>
+                Verificar agora
+              </button>
+            ))}
+        </div>
+        {restartRefused && (
+          <p className="agent-failure" role="alert">
+            Termine a gravação ou a exportação em andamento para reiniciar.
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
 /**
- * The settings screen: the meeting app, the AI tools (which are installed
+ * The settings screen: the app's updates, the meeting app, the AI tools (which are installed
  * and signed in, installing and signing in from here, and which tool, model
  * and effort the app's AI features use) and the dubbing voice model.
  */
@@ -144,6 +207,8 @@ export function Settings({ onClose }: Props) {
       </header>
 
       <main className="settings-content">
+        <UpdateSection />
+
         <MeetSection />
 
         <section className="settings-section">
