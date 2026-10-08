@@ -150,8 +150,12 @@
 
 .agent-name {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
+}
+
+.agent-name .ai-logo {
+  margin-right: -2px;
 }
 
 .agent-name strong {

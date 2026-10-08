@@ -50,3 +50,17 @@ button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* The AI tools' marks, in their own colours. */
+.ai-logo {
+  flex: none;
+  display: block;
+}
+
+.ai-logo[data-provider='claude'] {
+  color: #d97757;
+}
+
+.ai-logo[data-provider='codex'] {
+  color: var(--text);
+}

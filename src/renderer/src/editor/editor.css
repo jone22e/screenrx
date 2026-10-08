@@ -6,16 +6,21 @@
   --zoom-manual: #34c48b;
   --suggestion: #a57cff;
 
-  display: flex;
+  /* The rail and the panel run the whole height; the timeline sits under the stage. */
+  display: grid;
   flex: 1;
-  flex-direction: column;
+  grid-template-columns: var(--rail-width) auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 0;
   background: #121317;
+
+  --rail-width: 76px;
 }
 
 /* --- toolbar ------------------------------------------------------------- */
 
 .editor-toolbar {
+  grid-column: 1 / -1;
   display: flex;
   flex: none;
   align-items: center;
@@ -100,6 +105,7 @@
 }
 
 .editor-message {
+  grid-column: 1 / -1;
   margin: 48px;
   text-align: center;
   color: var(--text-muted);
@@ -107,15 +113,10 @@
 
 /* --- stage --------------------------------------------------------------- */
 
-.editor-main {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
 .editor-stage {
+  grid-row: 2;
+  grid-column: 3;
   display: flex;
-  flex: 1;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
@@ -226,52 +227,85 @@
   color: var(--text-muted);
 }
 
-/* --- sidebar ------------------------------------------------------------- */
+/* --- rail and sidebar ---------------------------------------------------- */
 
-.sidebar {
+/* The tools, one icon each, down the whole left edge. */
+.rail {
+  grid-row: 2 / 4;
+  grid-column: 1;
   display: flex;
-  flex: none;
   flex-direction: column;
-  width: 344px;
-  background: var(--panel);
-  border-left: 1px solid var(--hairline);
+  gap: 4px;
+  min-height: 0;
+  padding: 10px 6px;
+  overflow-y: auto;
+  background: #15161a;
+  border-right: 1px solid var(--hairline);
 }
 
-.tabs {
+.rail-item {
   display: flex;
   flex: none;
-  gap: 2px;
-  padding: 8px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.tab {
-  display: flex;
-  flex: 1;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  padding: 7px 0 6px;
-  font-size: 10.5px;
+  padding: 8px 2px 6px;
+  font-size: 10px;
+  letter-spacing: -0.01em;
   color: var(--text-muted);
   background: transparent;
   border: 0;
-  border-radius: 8px;
-  min-width: 0;
+  border-radius: 10px;
 }
 
-.tab:hover {
+.rail-item svg {
+  width: 18px;
+  height: 18px;
+}
+
+.rail-item span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-item:hover {
   color: var(--text);
   background: var(--panel-raised);
 }
 
-.tab[aria-selected='true'] {
+.rail-item[aria-selected='true'] {
   color: #fff;
   background: rgba(91, 140, 255, 0.2);
 }
 
-.tab[aria-selected='true'] svg {
+.rail-item[aria-selected='true'] svg {
   color: #8aa9ff;
+}
+
+/* The panel of the chosen tool, beside the rail, the whole height. */
+.sidebar {
+  grid-row: 2 / 4;
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  width: 344px;
+  min-height: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--hairline);
+}
+
+.sidebar-assistant {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.sidebar-assistant[hidden],
+.sidebar-body[hidden] {
+  display: none;
 }
 
 .sidebar-body {
@@ -881,6 +915,7 @@ kbd {
 
 .ai-choice-text {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 1px;
   min-width: 0;
@@ -1156,14 +1191,16 @@ kbd {
 /* --- timeline ------------------------------------------------------------ */
 
 .timeline {
-  --lane-height: 30px;
+  --lane-height: 32px;
   --tall-lane-height: 48px;
-  --ruler-height: 22px;
-  --lane-gap: 4px;
+  --ruler-height: 26px;
+  --lane-gap: 6px;
 
+  grid-row: 3;
+  grid-column: 3;
   display: flex;
-  flex: none;
   flex-direction: column;
+  min-width: 0;
   gap: 6px;
   padding: 8px 18px 14px;
   background: var(--panel);
@@ -1174,14 +1211,93 @@ kbd {
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 28px;
+  min-height: 30px;
+}
+
+/* The tools on the left, the clock in the middle, the zoom on the right. */
+.timeline-tools {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+}
+
+.timeline-tool {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.timeline-tool svg {
+  width: 13px;
+  height: 13px;
+}
+
+.timeline-tool:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--panel-raised);
+}
+
+.timeline-tool:disabled {
+  opacity: 0.4;
+}
+
+.timeline-tool[aria-checked='true'] {
+  color: #fff;
+  background: rgba(91, 140, 255, 0.2);
+  border-color: rgba(91, 140, 255, 0.4);
+}
+
+.timeline-tool-icon {
+  justify-content: center;
+  width: 26px;
+  padding: 0;
+  font-size: 14px;
+}
+
+.timeline-clock {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
 }
 
 .timeline-timecode {
-  width: 70px;
   font-size: 13px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+.timeline-total {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.timeline-zoom {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.timeline-zoom-slider {
+  width: 90px;
+  margin: 0 2px;
+  accent-color: var(--accent);
+}
+
+.timeline-track-count {
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .timeline-hint {
@@ -1245,12 +1361,71 @@ kbd {
 }
 
 .timeline-label {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
+  width: 100%;
   height: var(--lane-height);
   font-size: 11.5px;
   color: var(--text-muted);
+}
+
+.timeline-label-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "+" beside a lane's name: adds one of its regions at the playhead. Shown when the label is hovered. */
+.lane-add {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+}
+
+.lane-add svg {
+  width: 11px;
+  height: 11px;
+}
+
+.timeline-label:hover .lane-add,
+.lane-add:focus-visible {
+  opacity: 1;
+}
+
+.lane-add:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The eye of a lane that can be hidden from the video. */
+.lane-eye {
+  display: flex;
+  flex: none;
+  align-items: center;
+  opacity: 0.55;
+}
+
+.timeline-label-toggle[data-hidden='true'] {
+  color: var(--text-muted);
+}
+
+.timeline-label-toggle[data-hidden='true'] .lane-eye {
+  color: #ff8a8d;
+  opacity: 1;
 }
 
 .timeline-label svg {
@@ -1293,13 +1468,100 @@ kbd {
   height: var(--ruler-height);
 }
 
+/* The tracks can be stretched beyond the window; this scrolls them. */
+.timeline-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
 .timeline-tracks {
   position: relative;
   display: flex;
-  flex: 1;
   flex-direction: column;
   gap: var(--lane-gap);
-  min-width: 0;
+  min-width: 100%;
+}
+
+/* A locked lane: nothing on it reacts. */
+.lane[data-locked='true'] .region {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.lane-lock {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+}
+
+.lane-lock svg {
+  width: 12px;
+  height: 12px;
+}
+
+.timeline-label:hover .lane-lock,
+.lane-lock[aria-checked='true'],
+.lane-lock:focus-visible {
+  opacity: 1;
+}
+
+.lane-lock[aria-checked='true'] {
+  color: var(--warning);
+}
+
+.lane-lock:hover {
+  color: var(--text);
+  background: var(--panel-raised);
+}
+
+/* The name on a clip: the recording's on each kept stretch, the track's on the audio. */
+.clip-label {
+  position: absolute;
+  top: 4px;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin-left: 4px;
+  padding: 1px 7px;
+  font-size: 10.5px;
+  color: var(--text);
+  white-space: nowrap;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 5px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.clip-label-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.clip-label-length {
+  flex: none;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  color: var(--text-muted);
+}
+
+.clip-label-audio {
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  color: var(--text-muted);
 }
 
 .ruler {
@@ -1392,13 +1654,70 @@ kbd {
   align-items: center;
   justify-content: center;
   min-width: 14px;
-  border-radius: 5px;
+  border-radius: 7px;
   cursor: grab;
   touch-action: none;
+  transition: box-shadow 0.12s ease-out;
 }
 
 .region[data-selected='true'] {
-  box-shadow: 0 0 0 2px #fff;
+  z-index: 3;
+  box-shadow:
+    0 0 0 2px #fff,
+    0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+/* The mark at the start of a caption or text block, before its words. */
+.region-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  margin-left: 10px;
+  color: rgba(255, 255, 255, 0.85);
+  pointer-events: none;
+}
+
+.region-icon svg {
+  width: 11px;
+  height: 11px;
+}
+
+.region-icon-text {
+  font-size: 10px;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: -0.02em;
+}
+
+.region-icon + .cue-label {
+  padding-left: 5px;
+}
+
+/* The trash on the selected region. */
+.region-remove {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+  margin-left: auto;
+  padding: 0;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.region-remove svg {
+  width: 11px;
+  height: 11px;
+}
+
+.region-remove:hover {
+  background: var(--record);
 }
 
 .trim-block {
@@ -1410,13 +1729,34 @@ kbd {
   border: 1px solid #ff5a5f;
 }
 
+/* How much a cut takes, on its block. */
+.cut-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--record);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.cut-badge svg {
+  width: 10px;
+  height: 10px;
+}
+
 /* The stretch a cut removes, dimmed over all the lanes. */
 .cut-shade {
   position: absolute;
   top: var(--ruler-height);
   bottom: 0;
   z-index: 1;
-  background: rgba(10, 10, 12, 0.66);
+  background: repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.55) 0 8px, rgba(0, 0, 0, 0.7) 8px 16px);
+  border-right: 1px solid rgba(255, 90, 95, 0.8);
+  border-left: 1px solid rgba(255, 90, 95, 0.8);
   pointer-events: none;
 }
 
@@ -1450,14 +1790,40 @@ kbd {
   right: -6px;
 }
 
+/*
+ * A zoom block is a trapezoid — the picture closing in and opening up — drawn
+ * by a pseudo-element, so the selection outline and the handles on the block
+ * itself are not clipped with it.
+ */
 .zoom-block {
-  background: linear-gradient(180deg, rgba(91, 140, 255, 0.6), rgba(91, 140, 255, 0.4));
-  border: 1px solid var(--zoom-auto);
+  --zoom-fill: var(--zoom-auto);
+
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+}
+
+.zoom-block::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content: '';
+  background: linear-gradient(180deg, color-mix(in srgb, var(--zoom-fill) 92%, #fff), var(--zoom-fill) 55%, color-mix(in srgb, var(--zoom-fill) 75%, #000));
+  clip-path: polygon(0 100%, 8px 0, calc(100% - 8px) 0, 100% 100%);
+  border-radius: 3px 3px 0 0;
 }
 
 .zoom-block[data-mode='manual'] {
-  background: linear-gradient(180deg, rgba(52, 196, 139, 0.55), rgba(52, 196, 139, 0.36));
-  border-color: var(--zoom-manual);
+  --zoom-fill: var(--zoom-manual);
+}
+
+.zoom-block .zoom-label {
+  color: #fff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+}
+
+.zoom-block .region-handle::after {
+  background: rgba(255, 255, 255, 0.35);
 }
 
 /* Proposed cuts: over the cuts lane, dashed, until the user accepts them. */
@@ -1529,8 +1895,15 @@ kbd {
   left: 3px;
   width: 2px;
   content: '';
-  background: rgba(255, 255, 255, 0.65);
+  background: rgba(255, 255, 255, 0.45);
   border-radius: 1px;
+}
+
+.region[data-selected='true'] .region-handle::after {
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  background: #fff;
 }
 
 .region-handle-start {
@@ -1556,11 +1929,629 @@ kbd {
 
 .playhead::before {
   position: absolute;
-  top: -2px;
+  top: 18px;
   left: -5px;
   width: 12px;
-  height: 12px;
+  height: 8px;
   content: '';
   background: #fff;
-  border-radius: 3px 3px 7px 7px;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+/* The time at the playhead, as a pill riding the ruler. */
+.playhead-time {
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  color: #111;
+  white-space: nowrap;
+  background: #fff;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+/* --- assistant ----------------------------------------------------------- */
+
+.assistant {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.assistant-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.assistant-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.assistant-title svg {
+  color: var(--suggestion);
+}
+
+.assistant-messages {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 14px;
+  overflow-y: auto;
+}
+
+.assistant-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assistant-message {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 92%;
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  border-radius: 12px;
+}
+
+.assistant-message p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.assistant-message[data-role='user'] {
+  align-self: flex-end;
+  color: var(--text);
+  background: rgba(91, 140, 255, 0.18);
+  border-bottom-right-radius: 4px;
+}
+
+.assistant-message[data-role='assistant'] {
+  align-self: flex-start;
+  color: var(--text);
+  background: var(--panel-raised);
+  border-bottom-left-radius: 4px;
+}
+
+.assistant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.assistant-actions li {
+  padding: 2px 8px;
+  font-size: 11.5px;
+  color: var(--text);
+  background: rgba(52, 196, 139, 0.18);
+  border: 1px solid rgba(52, 196, 139, 0.35);
+  border-radius: 999px;
+}
+
+.assistant-actions li[data-done='false'] {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  background: transparent;
+  border-color: var(--hairline);
+}
+
+.assistant-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+}
+
+.assistant-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--suggestion);
+  border-radius: 50%;
+  animation: assistant-spin 0.8s linear infinite;
+}
+
+@keyframes assistant-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.assistant-compose {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--hairline);
+}
+
+.assistant-input {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  resize: none;
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.assistant-input:focus {
+  border-color: rgba(165, 124, 255, 0.6);
+  outline: none;
+}
+
+.assistant-input:disabled {
+  opacity: 0.6;
+}
+
+.assistant-compose-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assistant-compose-row .ai-picker {
+  flex: 1;
+  margin-right: auto;
+}
+
+/* Dictation: the microphone, and while recording, the time and a way to throw it away. */
+.assistant-dictate {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.assistant-dictate-time {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.assistant-dictate-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+}
+
+.assistant-dictate-cancel:hover {
+  color: var(--text);
+  background: var(--panel-raised);
+}
+
+.assistant-mic {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--text-muted);
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 50%;
+}
+
+.assistant-mic:hover:not(:disabled) {
+  color: var(--text);
+  border-color: rgba(165, 124, 255, 0.6);
+}
+
+.assistant-mic:disabled {
+  opacity: 0.5;
+}
+
+.assistant-dictate[data-phase='recording'] .assistant-mic {
+  color: #fff;
+  background: var(--record);
+  border-color: var(--record);
+  animation: assistant-mic-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes assistant-mic-pulse {
+  50% {
+    box-shadow: 0 0 0 5px rgba(255, 90, 95, 0.25);
+  }
+}
+
+.assistant-stop {
+  width: 10px;
+  height: 10px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+.assistant-send {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  color: #fff;
+  background: var(--suggestion);
+  border: none;
+  border-radius: 50%;
+}
+
+.assistant-send:disabled {
+  color: var(--text-muted);
+  background: var(--panel-raised);
+}
+
+/* The AI chooser: a chip that opens a small panel above it. */
+.ai-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.ai-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+}
+
+.ai-chip strong {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-chip span {
+  white-space: nowrap;
+}
+
+.ai-chip:hover:not(:disabled),
+.ai-chip[aria-expanded='true'] {
+  color: var(--text);
+  border-color: rgba(165, 124, 255, 0.6);
+}
+
+.ai-chip:disabled {
+  opacity: 0.6;
+}
+
+.ai-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 272px;
+  padding: 12px;
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+}
+
+.ai-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: #15161a;
+  border-radius: 10px;
+}
+
+.ai-tab {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.ai-tab[aria-selected='true'] {
+  color: var(--text);
+  background: rgba(165, 124, 255, 0.18);
+  border-color: rgba(165, 124, 255, 0.5);
+}
+
+.ai-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ai-field > span {
+  display: flex;
+  justify-content: space-between;
+}
+
+.ai-field strong {
+  color: var(--suggestion);
+  font-weight: 600;
+}
+
+.ai-effort {
+  width: 100%;
+  margin: 4px 0;
+  accent-color: var(--suggestion);
+}
+
+.ai-popover-settings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--hairline);
+}
+
+.ai-popover-settings:hover {
+  color: var(--text);
+}
+
+/* The format of the finished video: one tile per shape. */
+.format-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.format-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+}
+
+.format-tile:hover {
+  color: var(--text);
+}
+
+.format-tile[aria-checked='true'] {
+  color: var(--text);
+  background: rgba(91, 140, 255, 0.14);
+  border-color: var(--accent);
+}
+
+/* --- texts over the video ------------------------------------------------ */
+
+.text-block {
+  justify-content: flex-start;
+  min-width: 3px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(86, 209, 232, 0.5), rgba(86, 209, 232, 0.3));
+  border: 1px solid #56d1e8;
+}
+
+.text-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-input {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  resize: vertical;
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.text-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+/* --- assistant: what it sees to do ---------------------------------------- */
+
+.assistant-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assistant-subtitle {
+  margin: 0 0 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.suggestion-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+}
+
+.suggestion-card h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.suggestion-card p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.suggestion-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.suggestion-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+}
+
+.suggestion-card[data-tone='cut'] .suggestion-dot {
+  background: var(--record);
+}
+
+.suggestion-card[data-tone='zoom'] .suggestion-dot {
+  background: var(--zoom-auto);
+}
+
+.suggestion-card[data-tone='captions'] .suggestion-dot {
+  background: #ffc44d;
+}
+
+.suggestion-card[data-tone='ai'] .suggestion-dot {
+  background: var(--suggestion);
+}
+
+.suggestion-card[data-state='done'] {
+  opacity: 0.75;
+}
+
+.suggestion-metric {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.suggestion-done {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.suggestion-apply {
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #111;
+  background: #fff;
+  border: none;
+  border-radius: 7px;
+}
+
+.suggestion-apply:hover {
+  background: #e8e8ee;
+}
+
+/* Simple (cards) or advanced (conversation). */
+.assistant-mode {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  background: #15161a;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+}
+
+.assistant-mode button {
+  padding: 4px 9px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+}
+
+.assistant-mode button[aria-checked='true'] {
+  color: var(--text);
+  background: var(--panel-raised);
+}
+
+/* The compression level in the export dialog. */
+.dialog-value {
+  margin-left: 8px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.dialog-slider {
+  width: 100%;
+  margin: 6px 0 0;
+  accent-color: var(--accent);
+}
+
+.dialog-slider-ends {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+  font-size: 10.5px;
+  color: var(--text-muted);
 }
