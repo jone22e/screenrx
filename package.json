@@ -1,7 +1,7 @@
 {
   "name": "screenrx",
   "productName": "ScreenRx",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Gravador e editor de tela não destrutivo para desktop",
   "author": "Jone",
