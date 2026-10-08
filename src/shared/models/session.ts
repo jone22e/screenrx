@@ -109,6 +109,10 @@ export interface RecordingSessionManifest {
   source: SessionSource
   /** Name given by the user; absent until the recording is renamed. */
   title?: string
+  /** When the recording was last exported; absent until it is. */
+  lastExportAt?: string
+  /** The start of what was said, kept once transcribed, for searching and for suggesting a name. */
+  transcriptPreview?: string
   capture: {
     fps: number
     cursorInVideo: boolean
@@ -132,10 +136,18 @@ export interface RecordingSessionManifest {
 }
 
 /** What the library screen needs to list a recording. */
+/** How far a recording has come, for the label on it: the furthest step wins. */
+export type RecordingProgress = 'new' | 'imported' | 'edited' | 'captioned' | 'exported'
+
 export interface RecordingSummary {
   id: string
   createdAt: string
   status: SessionStatus
+  progress: RecordingProgress
+  /** A name worth giving a recording that still has the source's label, from what was said. */
+  suggestedTitle: string | null
+  /** The start of what was said, when transcribed; searched along with the title. */
+  transcriptPreview: string | null
   /** What the recording is called: the user's name for it, or the source's label. */
   title: string
   sourceLabel: string
