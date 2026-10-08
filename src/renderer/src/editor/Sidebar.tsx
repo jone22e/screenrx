@@ -6,20 +6,26 @@ import { formatTimecode } from '@shared/format'
 import type { EditorSession } from '@shared/models/editor'
 import type { WebcamCorner, WebcamShape } from '@shared/models/project'
 import { BACKGROUND_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
+import { AssistantPanel } from './AssistantPanel'
 import { CaptionsPanel } from './CaptionsPanel'
 import { DubbingPanel } from './DubbingSection'
 import type { EditorStore } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
 import { SuggestionsPanel } from './SuggestionsPanel'
+import { TextPanel } from './TextPanel'
+import { FRAME_ASPECT_ICONS } from './frameAspectIcons'
+import { FRAME_ASPECT_OPTIONS, FRAME_FIT_OPTIONS } from './frameAspects'
 import { Section, Segmented, Slider } from './panelControls'
 import {
   BackdropIcon,
   CameraIcon,
+  FormatIcon,
   CaptionsIcon,
   VoiceIcon,
   PlusIcon,
   ScissorsIcon,
   SparklesIcon,
+  TextIcon,
   TrashIcon,
   ZoomIcon
 } from './icons'
@@ -30,13 +36,16 @@ interface Props {
   player: PreviewPlayer | null
 }
 
-type Tab = 'cuts' | 'zoom' | 'captions' | 'dub' | 'background' | 'webcam'
+type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'dub' | 'format' | 'background' | 'webcam'
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
 const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
 const seconds = (ms: number): string => `${decimal(ms / 1000)} s`
 
-/** The inspector: one tab per aspect of the edit. */
+/**
+ * The tools, as a rail of icons down the left edge — one per aspect of the
+ * edit, plus the assistant — and the panel of the chosen one beside it.
+ */
 export function Sidebar({ session, store, player }: Props) {
   const state = useSyncExternalStore(store.subscribe, store.getState)
   const [chosen, setChosen] = useState<Tab>('cuts')
@@ -47,13 +56,18 @@ export function Sidebar({ session, store, player }: Props) {
       ? 'cuts'
       : state.selectedCueId
         ? 'captions'
-        : chosen
+        : state.selectedTextId
+          ? 'text'
+          : chosen
 
   const tabs: Array<{ id: Tab; label: string; icon: ReactNode }> = [
+    { id: 'assistant', label: 'Assistente', icon: <SparklesIcon /> },
     { id: 'cuts', label: 'Cortes', icon: <ScissorsIcon /> },
     { id: 'zoom', label: 'Zoom', icon: <ZoomIcon /> },
     { id: 'captions', label: 'Legendas', icon: <CaptionsIcon /> },
+    { id: 'text', label: 'Texto', icon: <TextIcon /> },
     { id: 'dub', label: 'Dublagem', icon: <VoiceIcon /> },
+    { id: 'format', label: 'Formato', icon: <FormatIcon /> },
     { id: 'background', label: 'Fundo', icon: <BackdropIcon /> },
     ...(session.webcam ? [{ id: 'webcam' as const, label: 'Câmera', icon: <CameraIcon /> }] : [])
   ]
@@ -63,24 +77,32 @@ export function Sidebar({ session, store, player }: Props) {
   }
 
   return (
-    <aside className="sidebar">
-      <div className="tabs" role="tablist">
+    <>
+      <nav className="rail" role="tablist" aria-label="Ferramentas">
         {tabs.map(({ id, label, icon }) => (
-          <button key={id} className="tab" role="tab" aria-selected={tab === id} aria-label={label} onClick={() => choose(id)}>
+          <button key={id} className="rail-item" role="tab" aria-selected={tab === id} aria-label={label} title={label} onClick={() => choose(id)}>
             {icon}
             <span>{label}</span>
           </button>
         ))}
-      </div>
-      <div className="sidebar-body">
+      </nav>
+      <aside className="sidebar">
+        {/* The assistant stays mounted, so its conversation and an answer on its way survive a change of tool. */}
+        <div className="sidebar-assistant" hidden={tab !== 'assistant'}>
+          <AssistantPanel store={store} />
+        </div>
+        <div className="sidebar-body" hidden={tab === 'assistant'}>
         {tab === 'cuts' && <CutsPanel session={session} store={store} player={player} />}
         {tab === 'zoom' && <ZoomPanel session={session} store={store} player={player} />}
         {tab === 'captions' && <CaptionsPanel session={session} store={store} player={player} />}
+        {tab === 'text' && <TextPanel store={store} player={player} />}
         {tab === 'dub' && <DubbingPanel store={store} onOpenCaptions={() => choose('captions')} />}
+        {tab === 'format' && <FormatPanel store={store} />}
         {tab === 'background' && <BackgroundPanel store={store} />}
         {tab === 'webcam' && <WebcamPanel store={store} />}
-      </div>
-    </aside>
+        </div>
+      </aside>
+    </>
   )
 }
 
@@ -108,8 +130,7 @@ function CutsPanel({ session, store, player }: Props) {
         ) : (
           <>
             <p className="panel-hint">
-              Arraste sobre o vídeo na linha do tempo para selecionar o trecho que quer remover. As teclas{' '}
-              <kbd>I</kbd> e <kbd>O</kbd> marcam o início e o fim na posição atual.
+              Arraste sobre o vídeo, ou use <kbd>I</kbd> e <kbd>O</kbd>.
             </p>
             <button
               className="panel-button"
@@ -126,7 +147,7 @@ function CutsPanel({ session, store, player }: Props) {
 
       <Section title={`Cortes${trims.length > 0 ? ` (${trims.length})` : ''}`}>
         {trims.length === 0 ? (
-          <p className="panel-hint">Nenhum corte. A gravação original nunca é alterada.</p>
+          <p className="panel-hint">Nenhum corte.</p>
         ) : (
           <>
             <ul className="region-list">
@@ -181,10 +202,7 @@ function ZoomPanel({ session, store, player }: Props) {
           onChange={(scale) => store.setScale(zoom.id, scale)}
           onCommit={() => store.endGesture()}
         />
-        <p className="panel-hint">
-          Clique no vídeo para mudar o foco. Na linha do tempo, arraste o bloco para mover e as bordas para
-          mudar a duração.
-        </p>
+        <p className="panel-hint">Clique no vídeo para mudar o foco.</p>
         <button className="panel-button panel-button-danger" onClick={() => store.removeZoom(zoom.id)}>
           <TrashIcon /> Remover zoom
         </button>
@@ -196,8 +214,8 @@ function ZoomPanel({ session, store, player }: Props) {
     <Section title="Zoom">
       <p className="panel-hint">
         {state.zooms.length === 0
-          ? 'Esta gravação ainda não tem zooms.'
-          : `${state.zooms.length} ${state.zooms.length === 1 ? 'zoom' : 'zooms'} na linha do tempo. Selecione um para ajustar.`}
+          ? 'Nenhum zoom.'
+          : `${state.zooms.length} ${state.zooms.length === 1 ? 'zoom' : 'zooms'}. Selecione um para ajustar.`}
       </p>
       <button
         className="panel-button panel-button-primary"
@@ -218,6 +236,48 @@ function ZoomPanel({ session, store, player }: Props) {
       >
         <SparklesIcon /> Regenerar zooms automáticos
       </button>
+    </Section>
+  )
+}
+
+/** The shape of the finished video, and how the recording goes into a vertical one. */
+function FormatPanel({ store }: { store: EditorStore }) {
+  const { background } = useSyncExternalStore(store.subscribe, store.getState)
+
+  return (
+    <Section title="Formato">
+      <div className="field">
+        <div className="format-tiles" role="radiogroup" aria-label="Formato">
+          {FRAME_ASPECT_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              className="format-tile"
+              role="radio"
+              aria-checked={option.value === background.aspect}
+              title={option.hint}
+              onClick={() => store.setBackground({ aspect: option.value })}
+            >
+              {FRAME_ASPECT_ICONS[option.value]}
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {background.aspect !== 'native' && (
+        <>
+          <Segmented
+            label="Enquadramento"
+            value={background.fit}
+            options={FRAME_FIT_OPTIONS.map(({ value, label }) => ({ value, label }))}
+            onChange={(fit) => store.setBackground({ fit })}
+          />
+          <p className="panel-hint">{FRAME_FIT_OPTIONS.find((option) => option.value === background.fit)?.hint}</p>
+        </>
+      )}
+      {background.aspect === 'native' && (
+        <p className="panel-hint">{FRAME_ASPECT_OPTIONS.find((option) => option.value === 'native')?.hint}</p>
+      )}
     </Section>
   )
 }
@@ -348,7 +408,7 @@ function WebcamPanel({ store }: { store: EditorStore }) {
                 />
               ))}
             </div>
-            <p className="panel-hint">Ou arraste a câmera no vídeo para qualquer lugar.</p>
+            <p className="panel-hint">Ou arraste no vídeo.</p>
           </div>
 
           <Slider
@@ -380,7 +440,6 @@ function WebcamPanel({ store }: { store: EditorStore }) {
           </label>
         </>
       )}
-      <p className="panel-hint">A câmera foi gravada em um arquivo separado; nada disso altera a gravação.</p>
     </Section>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from 'react'
 import { formatTimecode } from '@shared/format'
 import { AI_EFFORT_LABELS } from '@shared/models/ai'
 import type { CutSuggestion, CutSuggestionKind } from '@shared/models/suggestions'
+import { AiLogo } from '../common/AiLogo'
 import { aiSettings, currentAiChoice } from '../common/aiSettings'
 import { openSettings } from '../common/settingsScreen'
 import type { EditorStore } from './EditorStore'
@@ -54,18 +55,12 @@ export function SuggestionsPanel({ store, player }: Props) {
   return (
     <Section title="Limpeza com IA">
       {!hasSpeech ? (
-        <p className="panel-hint">
-          A IA lê a transcrição da fala e propõe o que cortar: frases recomeçadas, vícios de fala e trechos
-          fora do assunto. Gere as legendas primeiro, na aba Legendas — elas podem ficar ocultas.
-        </p>
+        <p className="panel-hint">Gere as legendas primeiro, na aba Legendas.</p>
       ) : ai.providers === null ? (
         <p className="panel-hint">Procurando as ferramentas de IA…</p>
       ) : !current ? (
         <>
-          <p className="panel-hint">
-            Nenhuma ferramenta de IA está pronta neste Mac. Nas configurações você instala e entra no Claude,
-            no ChatGPT ou no Antigravity.
-          </p>
+          <p className="panel-hint">Nenhuma ferramenta de IA está pronta.</p>
           <button className="panel-button" onClick={openSettings}>
             <GearIcon /> Configurar IA
           </button>
@@ -73,10 +68,7 @@ export function SuggestionsPanel({ store, player }: Props) {
       ) : (
         <>
           {suggestions.length === 0 && (
-            <p className="panel-hint">
-              A IA lê a transcrição e propõe cortes: frases recomeçadas, vícios de fala e trechos fora do
-              assunto. Você decide, um por um.
-            </p>
+            <p className="panel-hint">A IA propõe cortes a partir da fala. Você decide um por um.</p>
           )}
           <button
             className="ai-choice"
@@ -84,6 +76,7 @@ export function SuggestionsPanel({ store, player }: Props) {
             disabled={suggesting}
             onClick={openSettings}
           >
+            <AiLogo provider={current.provider.id} size={16} />
             <span className="ai-choice-text">
               <strong>{current.provider.label}</strong>
               <span>
@@ -157,10 +150,7 @@ export function SuggestionsPanel({ store, player }: Props) {
               </div>
             </>
           )}
-          <p className="panel-hint">
-            Só o texto da transcrição é enviado ao {current.provider.label}, pela ferramenta instalada neste
-            Mac. O áudio e o vídeo não saem daqui.
-          </p>
+          <p className="panel-hint">Só o texto é enviado ao {current.provider.label}.</p>
         </>
       )}
     </Section>

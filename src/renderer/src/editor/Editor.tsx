@@ -104,7 +104,8 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
         store.getState().selection &&
         !store.selectedZoom &&
         !store.selectedTrim &&
-        !store.selectedCue
+        !store.selectedCue &&
+        !store.selectedText
       ) {
         event.preventDefault()
         store.cutSelection()
@@ -117,6 +118,9 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
       } else if ((event.key === 'Backspace' || event.key === 'Delete') && store.selectedCue) {
         event.preventDefault()
         store.removeCue(store.selectedCue.id)
+      } else if ((event.key === 'Backspace' || event.key === 'Delete') && store.selectedText) {
+        event.preventDefault()
+        store.removeText(store.selectedText.id)
       } else if (event.key === 'Escape') {
         store.select(null)
         store.setSelection(null)
@@ -197,12 +201,10 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
         </button>
       </header>
 
-      <div className="editor-main">
-        <div className="editor-stage">
-          <Preview session={session} store={store} onPlayerReady={setPlayer} />
-          {player && <Transport player={player} store={store} />}
-        </div>
-        <Sidebar session={session} store={store} player={player} />
+      <Sidebar session={session} store={store} player={player} />
+      <div className="editor-stage">
+        <Preview session={session} store={store} onPlayerReady={setPlayer} />
+        {player && <Transport player={player} store={store} />}
       </div>
 
       {player && <Timeline session={session} store={store} player={player} />}

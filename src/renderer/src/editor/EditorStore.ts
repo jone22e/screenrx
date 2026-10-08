@@ -8,7 +8,7 @@ import { buildTimeMap } from '@engine/time/timeMapping'
 import { moveSpan, resizeSpan, spanForNew } from '@engine/timeline/spanEditing'
 import { TRIM_CONFIG } from '@engine/timeline/trimConfig'
 import { regenerateAutoZooms } from '@engine/zoom/autoZoom'
-import { MANUAL_ZOOM_DEFAULTS } from '@engine/zoom/zoomConfig'
+import { MANUAL_ZOOM_DEFAULTS, ZOOM_LIMITS } from '@engine/zoom/zoomConfig'
 import type { TimeSpan } from '@engine/zoom/zoomEditing'
 import { clampScale, spanForNewZoom } from '@engine/zoom/zoomEditing'
 import type { Transcript, TranscriptionRequest, TranscriptionStage } from '@shared/models/captions'
@@ -28,6 +28,7 @@ import type {
   ExportSettings,
   NormalizedPoint,
   Project,
+  TextOverlay,
   TrimEffect,
   WebcamSettings,
   ZoomEffect
@@ -35,6 +36,8 @@ import type {
 import {
   BACKGROUND_LIMITS,
   CAPTION_LIMITS,
+  DEFAULT_TEXT_STYLE,
+  TEXT_LIMITS,
   WEBCAM_LIMITS,
   isExportFps,
   trimsOf,
@@ -59,6 +62,8 @@ export interface EditorState {
   background: BackgroundSettings
   webcam: WebcamSettings
   captions: CaptionSettings
+  /** Texts written over the video, sorted by start. */
+  texts: readonly TextOverlay[]
   audio: AudioSettings
   /** Which dubbing is heard instead of the recorded voice. */
   dub: DubSettings
@@ -85,6 +90,7 @@ export interface EditorState {
   selectedZoomId: string | null
   selectedTrimId: string | null
   selectedCueId: string | null
+  selectedTextId: string | null
   /** UI state: a stretch of the recording marked on the timeline, e.g. to cut it. */
   selection: TimeSpan | null
   saveStatus: SaveStatus
@@ -113,15 +119,17 @@ const NO_SPEECH_NOTICE = 'Nenhuma fala foi encontrada nesta trilha de áudio.'
 const createZoomId = (): string => `zoom-${crypto.randomUUID()}`
 const createTrimId = (): string => `trim-${crypto.randomUUID()}`
 const createCueId = (): string => `cue-${crypto.randomUUID()}`
+const createTextId = (): string => `text-${crypto.randomUUID()}`
 
 /** What is selected on the timeline; at most one of these is set. */
 interface Selected {
   zoomId: string | null
   trimId: string | null
   cueId: string | null
+  textId: string | null
 }
 
-const NOTHING_SELECTED: Selected = { zoomId: null, trimId: null, cueId: null }
+const NOTHING_SELECTED: Selected = { zoomId: null, trimId: null, cueId: null, textId: null }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
 
@@ -148,6 +156,8 @@ export class EditorStore {
   private future: Project[] = []
   /** Consecutive edits with the same key (a drag, a slider) collapse into one undo step. */
   private gestureKey: string | null = null
+  /** While a batch runs, every edit goes into the undo step the first one opened. */
+  private batch: { opened: boolean } | null = null
   private saveTimer: ReturnType<typeof setTimeout> | null = null
   private saving: Promise<void> = Promise.resolve()
   private readonly listeners = new Set<() => void>()
@@ -181,6 +191,10 @@ export class EditorStore {
     return this.state.captions.cues.find((cue) => cue.id === this.state.selectedCueId) ?? null
   }
 
+  get selectedText(): TextOverlay | null {
+    return this.state.texts.find((text) => text.id === this.state.selectedTextId) ?? null
+  }
+
   select(zoomId: string | null): void {
     this.setSelected({ ...NOTHING_SELECTED, zoomId })
   }
@@ -193,12 +207,17 @@ export class EditorStore {
     this.setSelected({ ...NOTHING_SELECTED, cueId })
   }
 
+  selectText(textId: string | null): void {
+    this.setSelected({ ...NOTHING_SELECTED, textId })
+  }
+
   private setSelected(selected: Selected): void {
-    const { selectedZoomId, selectedTrimId, selectedCueId } = this.state
+    const { selectedZoomId, selectedTrimId, selectedCueId, selectedTextId } = this.state
     if (
       selected.zoomId === selectedZoomId &&
       selected.trimId === selectedTrimId &&
-      selected.cueId === selectedCueId
+      selected.cueId === selectedCueId &&
+      selected.textId === selectedTextId
     ) {
       return
     }
@@ -206,9 +225,75 @@ export class EditorStore {
       ...this.state,
       selectedZoomId: selected.zoomId,
       selectedTrimId: selected.trimId,
-      selectedCueId: selected.cueId
+      selectedCueId: selected.cueId,
+      selectedTextId: selected.textId
     }
     this.emit()
+  }
+
+  // --- texts --------------------------------------------------------------------
+
+  /** Writes a text over the video from `timeMs`, for a few seconds, and selects it. Returns its id. */
+  addText(timeMs: number, content = 'Seu texto', style: CaptionStyle = DEFAULT_TEXT_STYLE): string {
+    const startMs = clamp(timeMs, 0, Math.max(0, this.session.durationMs - TEXT_LIMITS.minDurationMs))
+    return this.addTextSpan({ startMs, endMs: startMs + TEXT_LIMITS.defaultDurationMs }, content, style)
+  }
+
+  /** Writes a text over the video during `span`. Returns its id. */
+  addTextSpan(span: TimeSpan, content: string, style: CaptionStyle = DEFAULT_TEXT_STYLE): string {
+    const startMs = clamp(span.startMs, 0, this.session.durationMs)
+    const endMs = clamp(Math.max(span.endMs, startMs + TEXT_LIMITS.minDurationMs), 0, this.session.durationMs)
+    const text: TextOverlay = {
+      id: createTextId(),
+      startMs,
+      endMs: Math.max(endMs, Math.min(startMs + TEXT_LIMITS.minDurationMs, this.session.durationMs)),
+      text: content.slice(0, TEXT_LIMITS.maxTextLength),
+      style: { ...style, position: { ...style.position } }
+    }
+    this.commitTexts([...this.project.texts, text], text.id, null)
+    return text.id
+  }
+
+  setTextContent(textId: string, content: string): void {
+    const clipped = content.slice(0, TEXT_LIMITS.maxTextLength)
+    this.editText(textId, `text-content:${textId}`, (text) => ({ ...text, text: clipped }))
+  }
+
+  setTextStyle(textId: string, change: Partial<CaptionStyle>, gestureKey: string | null = null): void {
+    this.editText(textId, gestureKey === null ? null : `${gestureKey}:${textId}`, (text) => {
+      const merged = { ...text.style, ...change }
+      return {
+        ...text,
+        style: {
+          ...merged,
+          sizeRatio: clamp(merged.sizeRatio, CAPTION_LIMITS.minSizeRatio, CAPTION_LIMITS.maxSizeRatio),
+          position: { x: clamp(merged.position.x, 0, 1), y: clamp(merged.position.y, 0, 1) }
+        }
+      }
+    })
+  }
+
+  /** Slides a text in time, keeping its length within the recording. Texts may overlap. */
+  moveText(original: TextOverlay, deltaMs: number): void {
+    const length = original.endMs - original.startMs
+    const startMs = clamp(original.startMs + deltaMs, 0, Math.max(0, this.session.durationMs - length))
+    this.editText(original.id, `text-span:${original.id}`, (text) => ({ ...text, startMs, endMs: startMs + length }))
+  }
+
+  resizeText(original: TextOverlay, edge: 'start' | 'end', timeMs: number): void {
+    const span =
+      edge === 'start'
+        ? { startMs: clamp(timeMs, 0, original.endMs - TEXT_LIMITS.minDurationMs), endMs: original.endMs }
+        : { startMs: original.startMs, endMs: clamp(timeMs, original.startMs + TEXT_LIMITS.minDurationMs, this.session.durationMs) }
+    this.editText(original.id, `text-span:${original.id}`, (text) => ({ ...text, ...span }))
+  }
+
+  removeText(textId: string): void {
+    this.commitTexts(
+      this.project.texts.filter((text) => text.id !== textId),
+      this.state.selectedTextId === textId ? null : this.state.selectedTextId,
+      null
+    )
   }
 
   // --- cuts -------------------------------------------------------------------
@@ -247,6 +332,12 @@ export class EditorStore {
         ? { startMs: timeMs, endMs: current && current.endMs > timeMs ? current.endMs : duration }
         : { startMs: current && current.startMs < timeMs ? current.startMs : 0, endMs: timeMs }
     )
+  }
+
+  /** Cuts a stretch out of the edit, as `cutSelection` does for the selected one. */
+  cutStretch(span: TimeSpan): boolean {
+    if (span.endMs - span.startMs < TRIM_CONFIG.minDurationMs) return false
+    return this.cutSpans([span])
   }
 
   /**
@@ -367,6 +458,26 @@ export class EditorStore {
     return true
   }
 
+  /** Adds a zoom over exactly `span`, unless a zoom is already there. Returns whether it was added. */
+  addZoomSpan(span: TimeSpan, scale: number | null): boolean {
+    const startMs = clamp(span.startMs, 0, this.session.durationMs)
+    const endMs = clamp(span.endMs, 0, this.session.durationMs)
+    if (endMs - startMs < ZOOM_LIMITS.minDurationMs) return false
+    if (this.state.zooms.some((zoom) => zoom.startMs < endMs && zoom.endMs > startMs)) return false
+    const zoom: ZoomEffect = {
+      id: createZoomId(),
+      type: 'zoom',
+      startMs,
+      endMs,
+      focus: { x: 0.5, y: 0.5 },
+      scale: clampScale(scale ?? MANUAL_ZOOM_DEFAULTS.scale),
+      easing: 'easeInOut',
+      mode: 'manual'
+    }
+    this.commitZooms([...this.state.zooms, zoom], zoom.id)
+    return true
+  }
+
   setSpan(zoomId: string, span: TimeSpan): void {
     this.editZoom(zoomId, 'span', (zoom) => ({ ...zoom, ...span }))
   }
@@ -407,6 +518,7 @@ export class EditorStore {
     const merged = { ...this.project.background, ...change }
     const background: BackgroundSettings = {
       ...merged,
+      crop: { x: clamp(merged.crop.x, 0, 1), y: clamp(merged.crop.y, 0, 1) },
       paddingRatio: clamp(merged.paddingRatio, 0, BACKGROUND_LIMITS.maxPaddingRatio),
       cornerRadiusRatio: clamp(merged.cornerRadiusRatio, 0, BACKGROUND_LIMITS.maxCornerRadiusRatio)
     }
@@ -725,6 +837,22 @@ export class EditorStore {
     this.gestureKey = null
   }
 
+  /** Runs several edits as one undo step (what the assistant does for one message). */
+  runAsOneStep(edits: () => void): void {
+    if (this.batch) {
+      edits()
+      return
+    }
+    this.gestureKey = null
+    this.batch = { opened: false }
+    try {
+      edits()
+    } finally {
+      this.batch = null
+      this.gestureKey = null
+    }
+  }
+
   undo(): void {
     const previous = this.past.pop()
     if (!previous) return
@@ -857,21 +985,33 @@ export class EditorStore {
     this.commitCaptions({ ...this.project.captions, cues }, `${gesture}:${cueId}`, cueId)
   }
 
+  private editText(textId: string, gestureKey: string | null, change: (text: TextOverlay) => TextOverlay): void {
+    const texts = this.project.texts.map((text) => (text.id === textId ? change(text) : text))
+    this.commitTexts(texts, textId, gestureKey)
+  }
+
+  private commitTexts(texts: readonly TextOverlay[], selectedTextId: string | null, gestureKey: string | null): void {
+    const sorted = [...texts].sort((a, b) => a.startMs - b.startMs)
+    this.commit({ ...this.project, texts: sorted }, { ...NOTHING_SELECTED, textId: selectedTextId }, gestureKey)
+  }
+
   private commitCaptions(captions: CaptionSettings, gestureKey: string | null, selectedCueId: string | null): void {
     this.commit({ ...this.project, captions }, { ...NOTHING_SELECTED, cueId: selectedCueId }, gestureKey)
   }
 
   /** The selection an edit of the look (framing, webcam, export) leaves in place. */
   private selected(): Selected {
-    return { zoomId: this.state.selectedZoomId, trimId: null, cueId: this.state.selectedCueId }
+    return { zoomId: this.state.selectedZoomId, trimId: null, cueId: this.state.selectedCueId, textId: this.state.selectedTextId }
   }
 
   private commit(project: Project, selected: Selected, gestureKey: string | null): void {
     const continuesGesture = gestureKey !== null && gestureKey === this.gestureKey
-    if (!continuesGesture) {
+    const continuesBatch = this.batch !== null && this.batch.opened
+    if (!continuesGesture && !continuesBatch) {
       this.past.push(this.project)
       if (this.past.length > HISTORY_LIMIT) this.past.shift()
     }
+    if (this.batch) this.batch.opened = true
     this.future = []
     this.gestureKey = gestureKey
     this.project = project
@@ -888,12 +1028,14 @@ export class EditorStore {
     const zoomExists = zoomsOf(project).some((zoom) => zoom.id === this.state.selectedZoomId)
     const trimExists = trimsOf(project).some((trim) => trim.id === this.state.selectedTrimId)
     const cueExists = project.captions.cues.some((cue) => cue.id === this.state.selectedCueId)
+    const textExists = project.texts.some((text) => text.id === this.state.selectedTextId)
     this.state = {
       ...this.derive(
         {
           zoomId: zoomExists ? this.state.selectedZoomId : null,
           trimId: trimExists ? this.state.selectedTrimId : null,
-          cueId: cueExists ? this.state.selectedCueId : null
+          cueId: cueExists ? this.state.selectedCueId : null,
+          textId: textExists ? this.state.selectedTextId : null
         },
         'pending'
       ),
@@ -911,6 +1053,7 @@ export class EditorStore {
       background: this.project.background,
       webcam: this.project.webcam,
       captions: this.project.captions,
+      texts: this.project.texts,
       audio: this.project.audio,
       dub: this.project.dub,
       dubs: this.dubs,
@@ -927,6 +1070,7 @@ export class EditorStore {
       selectedZoomId: selected.zoomId,
       selectedTrimId: selected.trimId,
       selectedCueId: selected.cueId,
+      selectedTextId: selected.textId,
       selection: null,
       saveStatus,
       canUndo: this.past.length > 0,

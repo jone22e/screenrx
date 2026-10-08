@@ -131,10 +131,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
   if (tracks.length === 0) {
     return (
       <Section title="Legendas">
-        <p className="panel-hint">
-          Esta gravação não tem áudio. As legendas são geradas a partir da fala: grave com o microfone ligado
-          para poder usá-las.
-        </p>
+        <p className="panel-hint">Esta gravação não tem áudio.</p>
       </Section>
     )
   }
@@ -208,10 +205,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
   if (captions.cues.length === 0) {
     return (
       <Section title="Legendas automáticas">
-        <p className="panel-hint">
-          O ScreenRx ouve a gravação e escreve o que foi dito, com o tempo de cada palavra. A fala é
-          reconhecida aqui no Mac: o áudio não é enviado para lugar nenhum.
-        </p>
+        <p className="panel-hint">Escreve o que foi dito. Tudo roda neste Mac.</p>
         {source}
         {activity ?? (
           <button className="panel-button panel-button-primary" onClick={() => void generate(false)}>
@@ -265,9 +259,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
       </Section>
 
       <Section title="Idioma da legenda">
-        <p className="panel-hint">
-          Em que idioma o texto aparece no vídeo. Muda só a legenda; para mudar a voz, use a aba Dublagem.
-        </p>
+        <p className="panel-hint">Muda só a legenda. A voz fica na aba Dublagem.</p>
         <div className="languages" role="radiogroup" aria-label="Idioma da legenda">
           <button
             className="language"
@@ -313,9 +305,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
           </div>
         ) : !aiChoice ? (
           <>
-            <p className="panel-hint">
-              A tradução é feita por uma ferramenta de IA, e nenhuma está pronta neste Mac.
-            </p>
+            <p className="panel-hint">A tradução precisa de uma ferramenta de IA.</p>
             <button className="panel-button" onClick={openSettings}>
               <GearIcon /> Configurar IA
             </button>
@@ -328,8 +318,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
               </button>
             )}
             <p className="panel-hint">
-              A tradução usa o {aiChoice.provider.label}; só o texto das legendas é enviado. Corrija o que quiser
-              na lista abaixo. Trocar o tamanho do texto refaz as legendas e descarta as traduções.
+              Só o texto é enviado ao {aiChoice.provider.label}. Mudar o “Texto por legenda” descarta as traduções.
             </p>
           </>
         )}
@@ -444,11 +433,11 @@ export function CaptionsPanel({ session, store, player }: Props) {
             value !== 'free' && store.setCaptionStyle({ position: { x: 0.5, y: CAPTION_POSITIONS[value] } })
           }
         />
-        <p className="panel-hint">Ou arraste a legenda no vídeo para qualquer lugar.</p>
+        <p className="panel-hint">Ou arraste no vídeo.</p>
       </Section>
 
       <Section title={`Texto (${captions.cues.length})`}>
-        <p className="panel-hint">Corrija o que foi entendido errado. O tempo se ajusta na linha do tempo.</p>
+        <p className="panel-hint">Corrija o que foi entendido errado.</p>
         <ul className="cue-list">
           {captions.cues.map((cue) => (
             <li
@@ -494,10 +483,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
       </Section>
 
       <Section title="Refazer a transcrição">
-        <p className="panel-hint">
-          Use só se o texto original saiu errado. O idioma aqui é o que foi <strong>falado na gravação</strong>,
-          não o idioma de destino: para traduzir a legenda, use "Idioma da legenda", mais acima.
-        </p>
+        <p className="panel-hint">Use só se o texto saiu errado. Escolha o idioma falado na gravação.</p>
         {source}
         {activity ?? (
           <button className="panel-button" onClick={() => void generate(true)}>
@@ -507,9 +493,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
         <button className="panel-button panel-button-danger" onClick={() => store.removeCaptions()}>
           <TrashIcon /> Remover legendas
         </button>
-        <p className="panel-hint">
-          Transcrever de novo substitui o texto, inclusive as correções e as traduções.
-        </p>
+        <p className="panel-hint">Transcrever de novo apaga as correções e as traduções.</p>
       </Section>
     </>
   )

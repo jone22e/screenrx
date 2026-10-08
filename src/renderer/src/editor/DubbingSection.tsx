@@ -65,8 +65,7 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
 
   const intro = (
     <p className="panel-hint">
-      O vídeo falado em outro idioma, com a sua própria voz. É separado das legendas: elas continuam como
-      estiverem, visíveis ou não, no idioma que você escolher lá.
+      O vídeo falado em outro idioma, com a sua própria voz.
     </p>
   )
 
@@ -87,8 +86,7 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
       <Section title="Dublagem">
         {intro}
         <p className="panel-hint">
-          A dublagem parte do que você falou. Gere as legendas primeiro, na aba Legendas; depois elas podem
-          ficar ocultas, se você não quiser legenda no vídeo.
+          Gere as legendas primeiro, na aba Legendas. Depois você pode ocultá-las.
         </p>
       </Section>
     )
@@ -113,9 +111,8 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
         ) : (
           <>
             <p className="panel-hint">
-              Para clonar a sua voz o app precisa baixar um modelo de voz, uma única vez (
-              {formatBytes(status.modelDownloadBytes)}). Ele roda aqui no Mac; a sua voz não é enviada para
-              lugar nenhum.
+              Para clonar a sua voz, baixe o modelo de voz uma única vez ({formatBytes(status.modelDownloadBytes)}).
+              Tudo roda neste Mac.
             </p>
             <button className="panel-button panel-button-primary" onClick={() => void voiceModel.download()}>
               Baixar modelo de voz · {formatBytes(status.modelDownloadBytes)}
@@ -170,9 +167,7 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
         {spoken && (
           <div className="dub-spoken">
             <p className="panel-hint">
-              Idioma falado na gravação, segundo a transcrição: <strong>{spoken}</strong>. Por isso ele não
-              aparece na lista abaixo. Se não foi esse o idioma que você falou, refaça a transcrição antes de
-              dublar: o texto errado deixaria a dublagem errada.
+              Idioma falado: <strong>{spoken}</strong>. Se estiver errado, corrija antes de dublar.
             </p>
             <button className="panel-button" disabled={busy} onClick={onOpenCaptions}>
               Corrigir o idioma falado
@@ -237,12 +232,9 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
 
       <Section title="Como funciona">
         <p className="panel-hint">
-          O texto falado é traduzido{aiChoice ? ` pelo ${aiChoice.provider.label}` : ' por uma ferramenta de IA'} e
-          depois dito com a sua voz, aprendida dos primeiros segundos do microfone. A voz é gerada neste Mac.
-        </p>
-        <p className="panel-hint">
-          Com uma dublagem em uso, ela toca no lugar do microfone no preview e no vídeo exportado; o som do
-          sistema continua. A gravação original não é alterada.
+          O texto é traduzido{aiChoice ? ` pelo ${aiChoice.provider.label}` : ' por uma ferramenta de IA'} e dito com
+          a sua voz, gerada neste Mac. A dublagem em uso toca no lugar do microfone, no preview e na exportação. A
+          gravação original não muda.
         </p>
       </Section>
     </>
