@@ -72,18 +72,21 @@ src/
     timeline/                      spanEditing (mover/redimensionar regiões), trimConfig
     export/                        exportPlan (tamanho, quadros), audioFilters
                                    (atempo, grafo de áudio), exportConfig
-    dub/                           dubUnits (legendas → trechos de fala, referência de voz,
+    dub/                           spellNumbers (números por extenso no idioma da dublagem),
+                                   dubUnits (legendas → trechos de fala, referência de voz,
                                    posição dos trechos), dubVerification, dubConfig
-    captions/                      captionCues (palavras → legendas, legenda do instante),
+    captions/                      textOverlays (textos do instante), captionCues (palavras → legendas, legenda do instante),
                                    captionLayout (quebra de linha e posição), captionConfig
     suggestions/cutSuggestions.ts  pedido à IA (palavras numeradas) e validação da resposta
+    assistant/assistantPrompt.ts   chat de edição: prompt (estado + transcrição + conversa) e validação das ações
   main/
     capture/                       CaptureEngine (interface) + macos/ (cliente do helper)
     recording/                     RecordingController, SessionStore, diagnostics
     project/ProjectStore.ts        project.json: abertura, auto zoom inicial, salvamento
   library/VideoImporter.ts       traz um vídeo gravado fora do app para a biblioteca
   update/UpdateService.ts        atualização automática: consulta, baixa e instala (electron-updater)
-    captions/TranscriptionService  executa o transcritor, grava transcript.json
+    captions/DictationService      ditado do assistente: WAV → texto pelo transcritor nativo
+  captions/TranscriptionService  executa o transcritor, grava transcript.json
     dub/DubbingService             executa o helper de voz, confere os trechos e monta a trilha
     ai/                            AiCliService (único lugar que pergunta algo a uma IA: CLI
                                    do Claude, do Codex ou do Antigravity), AiSetupService
@@ -291,19 +294,63 @@ callbacks — o cursor da timeline e o relógio são atualizados direto no DOM, 
 re-renderizar componentes a cada quadro.
 
 A trilha da tela é o relógio mestre do preview; a webcam e os áudios são arquivos
-separados que a seguem. Um desvio pequeno é corrigido dobrando um pouco o
-`playbackRate` da faixa (`correctTrack`, em `engine/time/trackSync.ts`: zona morta
-de 40 ms, ajuste de 4%); só um desvio acima de 0,5 s vira seek, porque um seek num
-elemento de áudio é ouvido como um corte no som — corrigir por seek a cada quadro
-deixava o áudio picotado no preview. Faixas ainda carregando ou no meio de um seek
-não são medidas. Tudo chega pelo protocolo `screenrx-media://`, servido pelo main em
+separados que a seguem. Um desvio de até 0,3 s é deixado como está
+(`correctTrack`, em `engine/time/trackSync.ts`); só um acima disso vira seek. Dobrar o
+`playbackRate` para alcançar a tela foi tentado e removido: o navegador estica o som
+e isso se ouve como uma interferência no preview (a exportação não tem o problema),
+e o áudio fica sempre uns 200 ms atrás da imagem depois de iniciar ou de um seek,
+então a correção ficava perseguindo esse atraso fixo, trocando a velocidade umas duas
+vezes por segundo. Um seek também é ouvido como um corte, por isso é raro. Faixas
+ainda carregando ou no meio de um seek não são medidas. Tudo chega pelo protocolo `screenrx-media://`, servido pelo main em
 faixas direto do disco.
 
-O projeto guarda também o enquadramento (`background`: fundo do catálogo, margem,
-cantos, sombra) e como a webcam aparece (`webcam`: visível, formato círculo /
+O projeto guarda também o enquadramento (`background`: formato do vídeo, fundo do
+catálogo, margem, cantos, sombra) e como a webcam aparece (`webcam`: visível, formato círculo /
 arredondada / quadrada, tamanho, canto ou posição livre, borda, espelhada). A
 posição da webcam é calculada por `layoutWebcam`, usada pelo preview, pelo arrasto
 no vídeo e pela exportação.
+
+**Formato do vídeo** (`background.aspect`, ferramenta Formato da trilha, com os logotipos):
+nativo, Reels ou TikTok (os dois são 9:16; o nome escolhido fica guardado).
+`outputSizeFor` dá o tamanho da saída: o da gravação no nativo; na vertical, uma
+caixa 9:16 cujo lado menor é o lado menor da gravação (1920×1080 → 1080×1920).
+Na vertical há dois enquadramentos (`background.fit`): **reduzir** (`fit`): a
+gravação inteira, menor, centrada sobre o fundo (barras pretas sem fundo); **zoom**
+(`fill`): a gravação ampliada até preencher o quadro, mostrando só uma parte dela
+— a maior região da forma do quadro, centrada em `background.crop` (`sourceCrop`),
+que o usuário escolhe arrastando o vídeo no preview (sem zoom selecionado). O zoom
+da câmera continua em coordenadas da gravação inteira (os zooms automáticos
+valem): `cameraWithin` leva a câmera para dentro da parte usada e a mantém contida;
+`frameToSource` faz o caminho inverso no clique de foco. O preview redimensiona o
+canvas ao trocar o formato; a exportação limita o lado maior (não a largura) à
+qualidade escolhida, e o diálogo mostra a resolução final. Projetos antigos sem os
+campos abrem como nativo. O assistente troca o formato ("format") e o
+enquadramento ("framing"). **Não verificado:** nenhuma exportação real fora do
+nativo; o arrasto da parte usada só por leitura do código.
+
+O editor se organiza como os editores de vídeo, numa grade (`.editor`): uma
+trilha de ícones na borda esquerda, da barra de ferramentas até o fim da janela
+(`Sidebar`: Assistente, Cortes, Zoom, Legendas, Texto, Dublagem, Formato, Fundo e,
+quando há, Câmera), o painel da ferramenta escolhida ao lado, também na altura toda, e à
+direita o preview com a linha do tempo embaixo dele. Selecionar uma região na linha do tempo abre a
+ferramenta dela.
+
+A linha do tempo (`Timeline`) tem uma barra de ferramentas: **Remover** (a região
+selecionada), **Encaixar** (ao arrastar ou redimensionar, uma borda a até 8 px de
+um corte, de outra região, do cursor ou das pontas gruda nela; lembrado em
+`localStorage`), o relógio "atual / total" e o zoom horizontal (1× a 8×: as pistas
+se esticam dentro de um contêiner com rolagem, e durante a reprodução a rolagem
+segue o cursor; o botão de ajustar volta a 1×). Os rótulos mostram "N trilhas", e
+Cortes, Zoom e Texto têm um cadeado que trava a pista (estado só de interface: as
+regiões dela param de reagir). O vídeo mostra, em cada trecho mantido, o nome da
+gravação e a duração; as pistas de áudio, o nome da trilha (e "· mudo"); cada corte
+é uma coluna escura hachurada com bordas vermelhas em todas as pistas e um selo
+"✂ 1,6 s" no bloco; os zooms são trapézios. Além disso traz: um balão com o tempo em cima
+do cursor; um "+" ao passar o mouse nos rótulos Cortes, Zoom e Texto, que cria a
+região na posição do play; os rótulos Legendas e Câmera são interruptores de
+visibilidade (olho); a pista Texto existe sempre (duplo clique adiciona); blocos de
+legenda e de texto têm um ícone antes do texto; e a região selecionada ganha
+alças brancas mais fortes e uma lixeira, quando é larga o bastante (64 px).
 
 A linha do tempo mostra o próprio material: miniaturas do vídeo e da câmera
 (`Filmstrip`, desenhadas buscando quadros em um elemento de vídeo descartável) e a
@@ -361,6 +408,21 @@ trilha de áudio → screenrx-transcribe (SpeechAnalyzer, local) → transcript.
   Refazer as legendas (novo tamanho, nova transcrição) descarta as traduções,
   porque os ids mudam. Idiomas sem espaços quebram linha entre caracteres
   (`captionPieces`), com a pontuação de fechamento presa ao caractere anterior.
+
+### Textos sobre o vídeo
+
+Títulos e avisos escritos pelo usuário (`project.texts`, `TextOverlay`: intervalo
+de origem, texto e um `CaptionStyle` próprio — fonte, tamanho, negrito, maiúsculas,
+cor, fundo, posição). Podem se sobrepor no tempo. Aba **Texto** do editor
+(`TextPanel`): "Adicionar texto" cria um na posição do play, com 3 s, "Seu texto",
+grande e com sombra no meio do quadro; o selecionado tem caixa de texto e os
+mesmos controles de estilo das legendas. No preview, arrastar um texto o posiciona
+(o desenhado por último fica por cima e é o que o clique pega); na linha do tempo
+há uma pista "Texto" com blocos que se movem e se redimensionam (mínimo 0,3 s).
+Backspace remove o selecionado. O desenho reaproveita `drawCaption`
+(`composeFrame`, campo `texts`), depois da legenda, no preview e na exportação
+(`textsAt`). O assistente também escreve textos ("text"). **Não verificado:** só
+por testes e leitura; nenhum arrasto nem exportação real com textos.
 
 ### Dublagem com a voz de quem gravou
 
@@ -424,6 +486,13 @@ microfone + transcrição → pickVoiceReference ─┤
   1,35× mais rápido; se ainda assim invadir o seguinte, o seguinte espera
   (`layoutDubClips`) — dois trechos nunca tocam ao mesmo tempo, e a pausa
   seguinte absorve o atraso.
+- **Números por extenso.** O modelo lê algarismos no idioma de quem gravou:
+  "300:5" numa dublagem em inglês saía em português. Antes de sintetizar, o texto de
+  cada trecho passa por `spellNumbers` (`engine/dub/spellNumbers.ts`), que escreve
+  inteiros, decimais, porcentagens e razões ("300:5" → "three hundred to five") em
+  inglês, espanhol, português ou chinês; as legendas continuam com os algarismos.
+  A conferência compara os dois lados por extenso, porque o transcritor devolve
+  dígitos. Não testado de ouvido.
 - **Conferência.** Clonar voz entre idiomas erra às vezes (uma palavra engolida,
   um trecho ininteligível). Cada trecho gerado é ouvido pelo transcritor no idioma
   de destino e comparado com o texto (`speechSimilarity`); abaixo de 80% de
@@ -431,6 +500,58 @@ microfone + transcrição → pickVoiceReference ─┤
 - **Montagem.** O `FfmpegService` posiciona os trechos em uma trilha do tamanho da
   gravação (`mixClips`, em grupos de 48 entradas) e grava AAC; o arquivo é escrito
   como `.part` e renomeado ao terminar.
+
+### Assistente de edição (chat)
+
+O painel abre no modo **Simples**: cartões com o que o assistente vê para fazer
+nesta gravação, calculados dela mesma, sem chamar IA (`AssistantSuggestions`,
+`engine/assistant/quickFixes.ts`): remover pausas longas (silêncios de mais de
+1,5 s entre palavras da transcrição, cortados com 200 ms de margem, num passo só
+de desfazer), zoom automático nos cliques (`regenerateAutoZooms`), gerar legendas
+(pt-BR, trilha do microfone) e limpar a fala com IA (as sugestões de corte). Cada
+cartão tem **Aplicar** e passa a "Aplicado ✓" quando a condição já está atendida.
+O modo **Avançado** é a conversa; enviar uma mensagem muda para ele.
+
+
+```
+mensagem + estado da edição + conversa (renderer)  →  ai:assist
+        ↓ AssistantService: lê transcript.json, buildAssistantPrompt
+        ↓ AiCliService (a mesma ferramenta de "Sugerir cortes"), resposta em JSON
+parseAssistantResponse → { text, actions[] } já em ms e validadas
+        ↓ applyAssistantActions (renderer): um passo de desfazer por mensagem
+cortes, zooms, velocidade, legendas, fundo, câmera, mudo no project.json
+```
+
+Uma das ferramentas da trilha de ícones do editor (`AssistantPanel`, aberta pelo
+primeiro item, "Assistente"; o painel fica montado mesmo com outra ferramenta
+escolhida, para a conversa e uma resposta a caminho não se perderem). Dá para ditar a mensagem: o botão
+de microfone grava pelo `MediaRecorder` do renderer (um clique começa, outro
+termina; o × descarta; no máximo 10 min), o áudio vira WAV mono de 16 kHz no
+próprio renderer (`shared/dictation.ts`, `OfflineAudioContext`) e vai para o main
+(`dictation:transcribe`), que o grava num arquivo temporário, roda o
+`screenrx-transcribe` (`DictationService`, em pt-BR) e apaga o arquivo; o texto
+entra no campo para ser lido antes de enviar. O acesso ao microfone é pedido ao
+macOS pelo main (`dictation:request-microphone`), e o handler de permissões da
+sessão passou a liberar áudio, além da câmera, para as janelas do app. Igual ao
+ditado do Ovseer. **Não verificado:** nenhum ditado real. A ferramenta, o modelo e o esforço
+são escolhidos num chip da barra de composição (`AiChoicePicker`: uma aba por
+ferramenta pronta neste Mac, o modelo e um controle de esforço; a mesma preferência
+da tela de Configurações e de "Sugerir cortes"). Cada mensagem é uma chamada nova à
+CLI: vai o estado da edição (cortes, zooms, velocidade, legendas, fundo, câmera,
+mudo), a transcrição numerada com marcadores de tempo a cada 10 s e as pausas
+(até 12 000 palavras), e as últimas 12 mensagens da conversa; nada de áudio ou
+vídeo. A resposta é `{ reply, actions }` com um objeto plano por ação (todos os
+campos presentes, `null` nos que não se aplicam), o único formato que as três
+ferramentas aceitam como saída estrita. Trechos vêm de preferência em índices de
+palavra (um corte vai do início da primeira palavra ao início da seguinte à
+última, como nas sugestões) ou em segundos quando não há fala. O parser descarta
+tudo que o editor não oferece (velocidade fora da lista, fundo inexistente,
+trecho inválido). As ações são aplicadas direto, como um único passo de desfazer
+(`EditorStore.runAsOneStep`); a tradução de legendas é a exceção: começa e
+termina sozinha, como pela aba Legendas. Um zoom sobre outro é recusado e aparece
+riscado na resposta. A conversa vive só na memória do editor aberto. **Não
+verificado:** nenhuma conversa real com as CLIs; só o prompt, o parser e o
+aplicador têm testes.
 
 ### Sugestões de corte por IA
 
@@ -466,8 +587,12 @@ corte comum (TrimEffect) no project.json, com desfazer
   são aceitos (`isAiModelId`); o esforço é mapeado para o nível mais próximo que
   cada ferramenta aceita (`toolEffort`).
 - **`AiSetupService`** diz como cada ferramenta está neste Mac: instalada,
-  versão, com login (e em qual conta), modelos e níveis de esforço. Os modelos do
-  Claude são os apelidos do próprio CLI (seguem sempre a versão mais nova); os do
+  versão, com login (e em qual conta), modelos e níveis de esforço. O Claude Code
+  não lista modelos: os oferecidos são os ids reais que apareceram nos registros de
+  sessão dele (`~/.claude/projects/**/*.jsonl`, campo `model` de cada resposta;
+  lidos só os 40 registros mais recentes dos últimos 90 dias, e só o fim de cada
+  um), do mais recente para o mais antigo, com rótulo derivado do id ("Fable 5.1");
+  sem nenhuma sessão, ficam os apelidos do CLI (`sonnet`, `opus`…). Os do
   Codex vêm do catálogo que ele guarda em `~/.codex/models_cache.json`; os do
   Antigravity, de `agy models`. Também instala (o instalador oficial de cada
   fornecedor, só depois de uma confirmação nativa) e inicia o login do Claude e
@@ -477,6 +602,29 @@ corte comum (TrimEffect) no project.json, com desfazer
 - **Privacidade:** só o texto da transcrição é enviado ao provedor da ferramenta
   escolhida, e só quando o usuário pede. Áudio, vídeo, caminhos e ids ficam no Mac.
 - Transcrições muito longas são analisadas até 12 000 palavras, e o painel avisa.
+
+### Tela inicial (biblioteca)
+
+`Home.tsx`. Barra: busca "em títulos e transcrições" (⌘K foca; o título e o rótulo
+da fonte são filtrados no renderer, e, depois de 250 ms parado, `library:search`
+pergunta ao main quais transcrições contêm o texto — `SessionStore.searchTranscripts`
+lê os `transcript.json` inteiros, com cache por mtime), engrenagem, importar
+(ícone) e **Nova gravação** (⌘⇧R). Um vídeo arrastado para a janela também é
+importado (`library:import-paths`, com o caminho obtido por `webUtils` no preload).
+Cabeçalho "Gravações N" com ordem (mais recentes, mais antigas, nome, duração,
+tamanho; só as duas primeiras agrupam por dia), grade/lista e, na lista, filtros
+(Todas, Em edição, Com legendas, Exportadas, Importadas) e colunas Nome · Status ·
+Duração · Tamanho. Cada gravação mostra até onde chegou (`RecordingSummary.progress`,
+o passo mais avançado: exportada › com legendas › em edição › importada; vem do
+`project.json`, lido na listagem, e de `lastExportAt` no `session.json`, gravado ao
+terminar uma exportação) e, quando ainda tem o nome da fonte e já foi transcrita,
+"Renomear para “…”" (`suggestTitle` sobre `transcriptPreview`, as primeiras
+palavras ditas, guardadas no `session.json` ao transcrever e preenchidas na primeira
+listagem para sessões antigas). Na grade, as ações (Editar, Finder, renomear,
+excluir) aparecem sobre a capa ao passar o mouse. Rodapé: total de gravações e
+tempo, e espaço usado. As reuniões ao vivo do Screen Live viram um banner cada
+("está ao vivo · começou há N min · N participantes") com Ignorar e Gravar reunião;
+sem reunião, nada aparece.
 
 ### Janelas
 
@@ -589,7 +737,10 @@ mais: o relógio do editor, o tempo de cada quadro exportado e os filtros de áu
 ### Cortes
 
 Um corte é um `TrimEffect`: um intervalo da origem que sai do resultado. Nada é
-removido da gravação. No preview a reprodução salta os cortes; a linha do tempo
+removido da gravação. No preview a reprodução salta os cortes, e o cursor parado
+nunca fica num trecho cortado: um seek para dentro de um corte (clique na linha do
+tempo, ⏮, abertura do editor) vai para onde a edição retoma, e um corte feito em
+volta do cursor o empurra para a parte mantida (`keptSourceTime`); a linha do tempo
 continua desenhada no tempo de origem, com os trechos cortados escurecidos, e o
 relógio mostra o tempo já editado. Um corte nunca pode deixar menos de
 `minKeptDurationMs` de vídeo.
@@ -623,6 +774,17 @@ FFmpeg: codifica H.264 uma única vez, processa o áudio, gera o MP4
 
 - O renderer desenha cada quadro de saída diretamente no seu instante final. Uma
   exportação em 2× tem metade dos quadros; não existe render em 1× recodificado.
+- **Compactação** (`ExportSettings.compression`, 0 a 4, controle deslizante no
+  diálogo): os níveis estão em `EXPORT_CONFIG.compressionLevels` — 0 e 1 são H.264
+  (100% e 72% do bitrate), 2 a 4 são HEVC/H.265 (55%, 40% e 30%), com o áudio
+  descendo de 192 a 96 kbps. HEVC mantém a nitidez com cerca de metade dos bits;
+  gravação de tela, quase parada, segue nítida bem abaixo disso. HEVC sai pelo
+  `hevc_videotoolbox` (ou `libx265` CRF 24 sem o hardware), com a tag `hvc1` para o
+  QuickTime e o iPhone abrirem. O diálogo mostra o tamanho estimado
+  (`estimatedFileBytes`: bitrates × duração + 2%). Projetos da primeira versão
+  ('normal' | 'compact') leem como 0 e 2. O preview e os quadros são os mesmos; só
+  o codificador muda. **Não verificado:** nenhuma exportação HEVC real pelo app (só
+  um teste do FFmpeg com vídeo sintético: 1080p30, 3 s, 3,4 MB → 1,9 MB no nível 2).
 - A taxa de quadros é escolha do usuário (`ExportSettings.fps`: 24, 30 ou 60;
   padrão 30) e só muda quantos instantes são desenhados: o mesmo tempo de saída
   mostra o mesmo instante da gravação em qualquer taxa. A taxa de bits acompanha
@@ -768,6 +930,7 @@ só o conteúdo daquela janela, mesmo coberta por outras.
 | — | Atualização automática (`electron-updater` + releases do GitHub; `make update` assina, notariza e publica; ver `docs/RELEASE.md`) | **implementada**; nenhuma versão publicada ainda, o fluxo completo (notarização, atualização de um app instalado) não foi exercitado |
 | — | Legendas automáticas (pedido posterior à especificação): transcrição local, estilo, posição, edição do texto, exportação | **concluída** (só macOS 26+) |
 | — | Sugestões de corte por IA (CLI do Claude, do Codex ou do Antigravity) a partir da transcrição | **concluída** (depende da transcrição: macOS 26+) |
+| — | Assistente de edição em chat (coluna do editor; pede cortes, zooms, legendas, velocidade, fundo, câmera) | **implementado**; nunca conversado com uma CLI real |
 | — | Configurações: instalar e entrar nas ferramentas de IA, escolher modelo e esforço | **concluída** (instalar e entrar sem verificação real) |
 | — | Dublagem com voz clonada (OmniVoice em MLX, local), modelo baixado por dentro do app | **concluída** (só Apple Silicon; qualidade da voz não avaliada por ouvido) |
 
