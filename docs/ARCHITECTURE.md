@@ -416,7 +416,11 @@ de origem, texto e um `CaptionStyle` próprio — fonte, tamanho, negrito, maiú
 cor, fundo, posição). Podem se sobrepor no tempo. Aba **Texto** do editor
 (`TextPanel`): "Adicionar texto" cria um na posição do play, com 3 s, "Seu texto",
 grande e com sombra no meio do quadro; o selecionado tem caixa de texto e os
-mesmos controles de estilo das legendas. No preview, arrastar um texto o posiciona
+mesmos controles de estilo das legendas. No preview, o texto selecionado ganha uma
+moldura tracejada com uma alça quadrada em cada canto, desenhada pelo
+`PreviewPlayer` depois do `composeFrame` (só no preview; a exportação não passa por
+ali); arrastar uma alça muda o tamanho da fonte na proporção da distância ao centro
+do texto (`text-resize`, um passo de desfazer por arrasto). Arrastar um texto o posiciona
 (o desenhado por último fica por cima e é o que o clique pega); na linha do tempo
 há uma pista "Texto" com blocos que se movem e se redimensionam (mínimo 0,3 s).
 Backspace remove o selecionado. O desenho reaproveita `drawCaption`
@@ -486,6 +490,32 @@ microfone + transcrição → pickVoiceReference ─┤
   1,35× mais rápido; se ainda assim invadir o seguinte, o seguinte espera
   (`layoutDubClips`) — dois trechos nunca tocam ao mesmo tempo, e a pausa
   seguinte absorve o atraso.
+- **Painel** (`DubbingPanel`): "Em uso: X" no cabeçalho; a linha "Falado em …"
+  com Alterar (vai à aba Legendas); um cartão por voz — Original e cada dublagem
+  gerada, como opções de rádio, com ⟳ para gerar de novo; a dublagem em andamento é
+  um cartão tracejado com os três passos (Transcrever · Traduzir · Gerar voz) e
+  Cancelar; "+ Adicionar idioma" abre a lista dos idiomas ainda sem dublagem; e,
+  quando a dublagem em uso não é o idioma das legendas visíveis, um aviso "As
+  legendas ainda estão em …" com "Usar <idioma>" (troca a legenda; traduz se preciso).
+- **Sem legendas ainda.** "Dublar em X" numa gravação não transcrita primeiro
+  descobre o idioma falado e transcreve nele, depois dubla (progresso e cancelar na
+  própria aba Dublagem). A detecção (`captions:detect-locale`,
+  `TranscriptionService.detectLocale`): o FFmpeg corta os primeiros 20 s da trilha
+  em WAV 16 kHz; o `screenrx-transcribe --detect --locales …` transcreve o trecho
+  em cada idioma da lista do app **cujo modelo já está baixado neste Mac** (baixar
+  todos levaria muito) e dá nota a cada texto com o reconhecedor de idioma do
+  sistema (`NLLanguageRecognizer`: quanto o texto parece ser daquele idioma, vezes
+  um fator que só é cheio a partir de 12 palavras); vence a maior nota; sem nenhum
+  candidato pontuado, fica o padrão pt-BR. A aba Legendas tem "Detectar" ao lado do
+  idioma, com o resultado e quantos idiomas foram tentados. Uma gravação sem áudio
+  não oferece dublagem. Quais modelos estão baixados vem de
+  `SpeechTranscriber.installedLocales` — `AssetInventory.status` responde
+  `supported` até para um modelo já instalado, por isso o `transcribe` normal
+  anuncia "downloading" mesmo quando não baixa nada. **Verificado uma vez** num
+  trecho de 20 s de uma gravação em português do Mac do Jone (pt-BR, en-US, es-ES
+  e zh-CN instalados): pt-BR 0,99998 com 70 palavras, es-ES 0,95, inglês e chinês
+  0; 5,9 s no total. O espanhol perto do português é o caso a vigiar: um clipe
+  curto ou mal falado pode pender para ele.
 - **Números por extenso.** O modelo lê algarismos no idioma de quem gravou:
   "300:5" numa dublagem em inglês saía em português. Antes de sintetizar, o texto de
   cada trecho passa por `spellNumbers` (`engine/dub/spellNumbers.ts`), que escreve
