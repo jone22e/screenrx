@@ -5,6 +5,7 @@ import { CAPTION_LOCALES, DEFAULT_CAPTION_LOCALE } from '@shared/models/captions
 import type { DubStage } from '@shared/models/dub'
 import type { CaptionLanguage } from '@shared/models/project'
 import { aiSettings, currentAiChoice } from '../common/aiSettings'
+import { AiChoicePicker } from './AiChoicePicker'
 import { openSettings } from '../common/settingsScreen'
 import { voiceModel } from '../common/voiceModel'
 import type { EditorStore } from './EditorStore'
@@ -176,11 +177,8 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
 
   return (
     <>
-      <Section title="Dublagem">
-        <div className="dub-head">
-          <span className="panel-hint">{introText}</span>
-          <span className="dub-in-use">Em uso: {inUse ? CAPTION_LANGUAGE_NAMES[inUse].label : 'Original'}</span>
-        </div>
+      <Section title="Dublagem" aside={`Em uso: ${inUse ? CAPTION_LANGUAGE_NAMES[inUse].label : 'Original'}`}>
+        <p className="panel-hint">{introText}</p>
 
         <div className="dub-spoken-row">
           <VoiceIcon />
@@ -215,22 +213,24 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
             const selected = inUse === language
             return (
               <li key={language} className="dub-card" data-in-use={selected}>
-                <label className="dub-card-main">
-                  <input type="radio" name="dub-voice" checked={selected} disabled={busy} onChange={() => store.setDubLanguage(language)} />
-                  <span className="dub-card-text">
-                    <strong>{name}</strong>
-                    <span>Gerada · {formatClock(store.session.durationMs)}</span>
-                  </span>
-                </label>
-                <button
-                  className="dub-again"
-                  disabled={busy}
-                  aria-label={`Gerar de novo a dublagem em ${name.toLowerCase()}`}
-                  title="Gerar de novo"
-                  onClick={() => void dub(language)}
-                >
-                  <RefreshIcon />
-                </button>
+                <div className="dub-card-row">
+                  <label className="dub-card-main">
+                    <input type="radio" name="dub-voice" checked={selected} disabled={busy} onChange={() => store.setDubLanguage(language)} />
+                    <span className="dub-card-text">
+                      <strong>{name}</strong>
+                      <span>Gerada · {formatClock(store.session.durationMs)}</span>
+                    </span>
+                  </label>
+                  <button
+                    className="dub-again"
+                    disabled={busy}
+                    aria-label={`Gerar de novo a dublagem em ${name.toLowerCase()}`}
+                    title="Gerar de novo"
+                    onClick={() => void dub(language)}
+                  >
+                    <RefreshIcon />
+                  </button>
+                </div>
               </li>
             )
           })}
@@ -310,12 +310,9 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
         )}
       </Section>
 
-      <Section title="Como funciona">
-        <p className="panel-hint">
-          O texto é traduzido{aiChoice ? ` pelo ${aiChoice.provider.label}` : ' por uma ferramenta de IA'} e dito com
-          a sua voz, gerada neste Mac. A dublagem em uso toca no lugar do microfone, no preview e na exportação. A
-          gravação original não muda.
-        </p>
+      <Section title="Tradução">
+        <p className="panel-hint">A ferramenta de IA que traduz o texto antes de gerar a voz.</p>
+        <AiChoicePicker disabled={busy} placement="below" />
       </Section>
     </>
   )

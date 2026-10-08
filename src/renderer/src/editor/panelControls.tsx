@@ -2,10 +2,13 @@ import type { ReactNode } from 'react'
 
 /** Building blocks shared by the inspector's panels. */
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
     <section className="panel">
-      <h2 className="panel-title">{title}</h2>
+      <h2 className="panel-title">
+        {title}
+        {aside && <span className="panel-title-aside">{aside}</span>}
+      </h2>
       {children}
     </section>
   )
