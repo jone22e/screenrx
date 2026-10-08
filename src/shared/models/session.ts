@@ -33,8 +33,9 @@ export function normalizeSessionTitle(value: unknown): string | null {
 }
 
 export interface SessionSource {
-  kind: 'display' | 'window'
-  /** Human readable, e.g. "Display 1" or "Google Chrome — Docs". */
+  /** `file`: a video recorded elsewhere and imported into the library. */
+  kind: 'display' | 'window' | 'file'
+  /** Human readable, e.g. "Display 1", "Google Chrome — Docs" or the imported file's name. */
   label: string
   displayId: number | null
   windowId: number | null

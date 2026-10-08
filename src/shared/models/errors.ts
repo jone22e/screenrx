@@ -39,6 +39,8 @@ export type AppErrorCode =
   | 'meet-unauthorized'
   | 'meet-failed'
   | 'meet-join-failed'
+  | 'import-unsupported'
+  | 'import-failed'
   | 'invalid-state'
   | 'unknown'
 
@@ -102,6 +104,8 @@ const MESSAGES: Record<AppErrorCode, string> = {
   'meet-unauthorized': 'O Screen Live recusou o token de gravação. Confira-o em Configurações.',
   'meet-failed': 'O Screen Live respondeu de forma inesperada.',
   'meet-join-failed': 'Não foi possível entrar na reunião para gravar.',
+  'import-unsupported': 'O arquivo escolhido não tem uma trilha de vídeo que o ScreenRx consiga ler.',
+  'import-failed': 'Não foi possível importar o vídeo.',
   'invalid-state': 'Essa ação não está disponível no momento.',
   unknown: 'Ocorreu um erro inesperado.'
 }
