@@ -19,6 +19,7 @@ import type { Project } from '../models/project'
 import type { RecordingStateSnapshot } from '../models/recording'
 import type { RecordingSummary } from '../models/session'
 import type { CutSuggestionResult } from '../models/suggestions'
+import type { ObjectTrack, ObjectTrackRequest } from '../models/telemetry'
 import type { UpdateState } from '../models/update'
 
 /** An audio track whose outline the timeline can draw: a recorded one, or a dubbing. */
@@ -115,6 +116,9 @@ export interface IpcInvokeContract {
   'meet:list-rooms': { args: []; result: IpcResult<MeetRoom[]> }
   'meet:record': { args: [code: string]; result: IpcResult<null> }
 
+  'track:start': { args: [sessionId: string, request: ObjectTrackRequest]; result: IpcResult<ObjectTrack> }
+  'track:cancel': { args: []; result: void }
+
   'dictation:request-microphone': { args: []; result: boolean }
   'dictation:transcribe': { args: [wav: Uint8Array]; result: IpcResult<{ text: string }> }
 
@@ -130,6 +134,7 @@ export interface IpcEventContract {
   'captions:progress': TranscriptionProgress
   'dub:progress': DubProgress
   'update:state-changed': UpdateState
+  'track:progress': { sessionId: string; fraction: number }
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -273,6 +278,15 @@ export interface ScreenRxApi {
      * window with its audio. The recording bar comes up as for any recording.
      */
     record(code: string): Promise<IpcResult<null>>
+  }
+  track: {
+    /**
+     * Follows the object inside `rect` (normalized, origin top left) from `startMs` to where it is
+     * lost or the video ends, on this Mac, and keeps the result with the session. `cancel` stops it.
+     */
+    start(sessionId: string, request: ObjectTrackRequest): Promise<IpcResult<ObjectTrack>>
+    cancel(): Promise<void>
+    onProgress(listener: (progress: { sessionId: string; fraction: number }) => void): Unsubscribe
   }
   dictation: {
     /** Asks macOS for the microphone, once; resolves whether the app may use it. */

@@ -1,7 +1,7 @@
 import type { Transcript } from './captions'
 import type { DubTrack } from './dub'
 import type { Project } from './project'
-import type { InteractionEvent } from './telemetry'
+import type { CursorSample, InteractionEvent, ObjectTrack } from './telemetry'
 
 /** Everything the editor needs to open one recording. */
 export interface EditorSession {
@@ -21,6 +21,10 @@ export interface EditorSession {
   audio: Array<{ kind: 'microphone' | 'systemAudio'; url: string }>
   /** Recorded pointer interactions; empty when the session has no telemetry. */
   interactions: InteractionEvent[]
+  /** Where the pointer was, sample by sample; empty when the session has no telemetry. */
+  cursor: CursorSample[]
+  /** Where an object the user marked goes through the video, when one was tracked. */
+  track: ObjectTrack | null
   /** Dubbing tracks already generated for this session, one per language. */
   dubs: DubTrack[]
   /** Speech-to-text of the session's audio, when it has been transcribed. */

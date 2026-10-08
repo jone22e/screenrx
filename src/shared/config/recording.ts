@@ -31,6 +31,8 @@ export const SESSION_FILES = {
   project: 'project.json',
   /** Derived from an audio track; can be regenerated at any time. */
   transcript: 'transcript.json',
+  /** Where an object the user marked goes through the video; derived, made again at any time. */
+  track: 'track.json',
   /** Dubbing tracks: speech synthesized in another language. Derived, one per language. */
   dubEn: 'dub-en.m4a',
   dubEs: 'dub-es.m4a',

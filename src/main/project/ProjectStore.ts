@@ -10,7 +10,7 @@ import { DUB_TRACKS, trackUrl } from '@shared/models/media'
 import type { Project } from '@shared/models/project'
 import { CAPTION_LANGUAGES, createProject, parseProject } from '@shared/models/project'
 import type { InteractionEvent } from '@shared/models/telemetry'
-import { parseInteractions } from '@shared/models/telemetry'
+import { parseCursorSamples, parseInteractions, parseObjectTrack } from '@shared/models/telemetry'
 import { writeJsonAtomic } from '../filesystem/atomicWrite'
 import type { Logger } from '../logging/logger'
 import type { SessionStore } from '../recording/SessionStore'
@@ -89,6 +89,8 @@ export class ProjectStore {
         .filter((kind) => manifest.assets[kind])
         .map((kind) => ({ kind, url: trackUrl(sessionId, kind) })),
       interactions,
+      cursor: parseCursorSamples(await this.readJson(sessionId, SESSION_FILES.cursor)),
+      track: parseObjectTrack(await this.readJson(sessionId, SESSION_FILES.track)),
       dubs: await this.dubsOf(sessionId),
       // A transcript that does not parse is simply absent: it can be generated again.
       transcript: parseTranscript(await this.readJson(sessionId, SESSION_FILES.transcript)),
