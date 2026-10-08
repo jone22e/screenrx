@@ -1,7 +1,8 @@
 import os from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
-import { app, dialog, screen, session } from 'electron'
+import { app, dialog, powerMonitor, screen, session } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { appError } from '@shared/models/errors'
 import { AiCliService } from './ai/AiCliService'
 import { AiSetupService } from './ai/AiSetupService'
@@ -15,6 +16,7 @@ import { ExportService } from './export/ExportService'
 import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
 import { DubbingService } from './dub/DubbingService'
 import { registerIpc } from './ipc/registerIpc'
+import { VideoImporter } from './library/VideoImporter'
 import { addLogSink, consoleSink, createLogger, fileSink } from './logging/logger'
 import { ThumbnailService } from './media/ThumbnailService'
 import { WaveformService } from './media/WaveformService'
@@ -27,6 +29,8 @@ import { MeetSettingsStore } from './meet/MeetSettingsStore'
 import { ProjectStore } from './project/ProjectStore'
 import { RecordingController } from './recording/RecordingController'
 import { SessionStore } from './recording/SessionStore'
+import { UpdateService } from './update/UpdateService'
+import type { UpdaterDriver } from './update/UpdateService'
 import { WindowManager } from './windows/WindowManager'
 import { createTray } from './windows/tray'
 
@@ -224,6 +228,21 @@ async function bootstrap(): Promise<void> {
     logger: createLogger('meet')
   })
 
+  // Looks for a newer version on the release page and installs it when the app quits. Never while a
+  // recording or an export is running, which restarting would cut short.
+  const updates = new UpdateService({
+    driver: autoUpdater as unknown as UpdaterDriver,
+    packaged: app.isPackaged,
+    currentVersion: app.getVersion(),
+    logger: createLogger('update'),
+    onChange: (state) => windows.broadcast('update:state-changed', state),
+    busy: () => controller.getState().phase !== 'idle' || exports.isRunning()
+  })
+  updates.start()
+  app.on('browser-window-focus', () => updates.checkIfStale())
+  powerMonitor.on('resume', () => setTimeout(() => updates.checkIfStale(), 5_000))
+  app.on('will-quit', () => updates.stop())
+
   registerIpc({
     engine,
     controller,
@@ -237,8 +256,10 @@ async function bootstrap(): Promise<void> {
     aiSetup,
     waveforms: new WaveformService(ffmpeg, sessions),
     thumbnails,
+    importer: new VideoImporter({ ffmpeg, sessions, logger: createLogger('import') }),
     meet,
     meetSettings,
+    updates,
     windows,
     logger: createLogger('ipc'),
     ownPids
