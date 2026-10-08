@@ -8,6 +8,7 @@ import { frameToSource, outputToFrame } from '../rendering/composeFrame'
 import type { EditorState, EditorStore } from './EditorStore'
 import type { PreviewSettings } from './PreviewPlayer'
 import { frameCorners, textSelectionFrame } from './PreviewPlayer'
+import { safeAreas } from '../common/safeAreas'
 import { PreviewPlayer } from './PreviewPlayer'
 
 interface Props {
@@ -26,6 +27,8 @@ type Press =
   | { kind: 'picture' }
   /** Dragging the part of the recording in use, when it fills a frame of another shape. */
   | { kind: 'crop'; startX: number; startY: number; cropX: number; cropY: number }
+  /** Drawing the rectangle around the object to follow, in output pixels. */
+  | { kind: 'mark'; startX: number; startY: number }
 
 const settingsOf = (state: EditorState): PreviewSettings => ({
   timeMap: state.timeMap,
@@ -35,6 +38,8 @@ const settingsOf = (state: EditorState): PreviewSettings => ({
   captions: state.captions,
   texts: state.texts,
   selectedTextId: state.selectedTextId,
+  safeAreas: safeAreas.getState(),
+  objectTrack: state.objectTrack,
   audio: state.audio,
   dubUrl: state.dubs.find((dub) => dub.language === state.dub.language)?.url ?? null,
   speed: state.exportSettings.speed
@@ -51,6 +56,8 @@ export function Preview({ session, store, onPlayerReady }: Props) {
   const player = useRef<PreviewPlayer | null>(null)
   const press = useRef<Press | null>(null)
   const [failed, setFailed] = useState(false)
+  /** The rectangle being drawn to mark an object, in CSS pixels over the canvas, while the pointer is down. */
+  const [marking, setMarking] = useState<{ left: number; top: number; width: number; height: number } | null>(null)
   const state = useSyncExternalStore(store.subscribe, store.getState)
 
   useEffect(() => {
@@ -58,11 +65,13 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     const instance = new PreviewPlayer(canvas.current, session, settingsOf(store.getState()))
     player.current = instance
     const stopListening = instance.onError(() => setFailed(true))
-    // The player redraws itself whenever the project changes.
+    // The player redraws itself whenever the project (or a preview preference) changes.
     const unsubscribe = store.subscribe(() => instance.update(settingsOf(store.getState())))
+    const unsubscribeSafeAreas = safeAreas.subscribe(() => instance.update(settingsOf(store.getState())))
     onPlayerReady(instance)
     return () => {
       unsubscribe()
+      unsubscribeSafeAreas()
       stopListening()
       onPlayerReady(null)
       player.current = null
@@ -113,6 +122,10 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     const grabbed = at.text?.box ?? at.caption ?? at.picture
     const { background, selectedZoomId } = store.getState()
     const cropping = background.aspect !== 'native' && background.fit === 'fill' && selectedZoomId === null
+    if (state.markingObject) {
+      press.current = { kind: 'mark', startX: at.x, startY: at.y }
+      return
+    }
     if (at.handle) {
       const centerX = at.handle.box.x + at.handle.box.width / 2
       const centerY = at.handle.box.y + at.handle.box.height / 2
@@ -178,6 +191,19 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       )
       return
     }
+    if (current?.kind === 'mark') {
+      // Output pixels → CSS pixels of the canvas, measured here rather than while rendering.
+      const element = event.currentTarget
+      const scaleX = element.clientWidth / at.output.width
+      const scaleY = element.clientHeight / at.output.height
+      setMarking({
+        left: element.offsetLeft + Math.min(current.startX, at.x) * scaleX,
+        top: element.offsetTop + Math.min(current.startY, at.y) * scaleY,
+        width: Math.abs(at.x - current.startX) * scaleX,
+        height: Math.abs(at.y - current.startY) * scaleY
+      })
+      return
+    }
     if (current?.kind === 'text-resize') {
       // Pulling a corner away from the centre enlarges the text in proportion; towards it, shrinks.
       const distance = Math.hypot(at.x - current.centerX, at.y - current.centerY)
@@ -221,6 +247,27 @@ export function Preview({ session, store, onPlayerReady }: Props) {
   const onPointerUp = (event: PointerEvent<HTMLCanvasElement>): void => {
     const current = press.current
     press.current = null
+    if (current?.kind === 'mark') {
+      setMarking(null)
+      const at = locate(event)
+      if (!at) return
+      // The rectangle, in the recording's own coordinates: each corner goes through the frame and the crop.
+      const { background } = store.getState()
+      const corner = (x: number, y: number) => {
+        const onFrame = outputToFrame(at.output, sourceSize, background, x / at.output.width, y / at.output.height)
+        return onFrame
+          ? frameToSource(at.output, sourceSize, background, at.instance.camera, at.instance.pointer, at.instance.object, onFrame.x, onFrame.y)
+          : null
+      }
+      const a = corner(Math.min(current.startX, at.x), Math.min(current.startY, at.y))
+      const b = corner(Math.max(current.startX, at.x), Math.max(current.startY, at.y))
+      if (!a || !b || b.x - a.x < 0.01 || b.y - a.y < 0.01) return
+      void store.startObjectTracking(
+        { startMs: at.instance.currentTimeMs, rect: { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y } },
+        (sessionId, request) => window.screenrx.track.start(sessionId, request)
+      )
+      return
+    }
     if (
       current?.kind === 'webcam' ||
       current?.kind === 'caption' ||
@@ -238,7 +285,10 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     const { background } = store.getState()
     const onFrame = outputToFrame(at.output, sourceSize, background, at.x / at.output.width, at.y / at.output.height)
     if (onFrame) {
-      store.setFocus(zoom.id, frameToSource(at.output, sourceSize, background, at.instance.camera, onFrame.x, onFrame.y))
+      store.setFocus(
+        zoom.id,
+        frameToSource(at.output, sourceSize, background, at.instance.camera, at.instance.pointer, at.instance.object, onFrame.x, onFrame.y)
+      )
     }
   }
 
@@ -248,6 +298,7 @@ export function Preview({ session, store, onPlayerReady }: Props) {
         ref={canvas}
         className="preview-canvas"
         data-pick-focus={state.selectedZoomId !== null}
+        data-marking={state.markingObject}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -256,6 +307,7 @@ export function Preview({ session, store, onPlayerReady }: Props) {
           store.endGesture()
         }}
       />
+      {marking && <span className="mark-rect" style={marking} />}
       {failed && <p className="editor-message">Não foi possível reproduzir este vídeo.</p>}
     </div>
   )

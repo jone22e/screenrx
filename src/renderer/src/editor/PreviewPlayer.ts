@@ -2,16 +2,20 @@ import { captionAt } from '@engine/captions/captionCues'
 import { textsAt } from '@engine/captions/textOverlays'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import { outputSizeFor } from '@engine/rendering/frameLayout'
+import { SAFE_AREA_BANDS } from '../common/safeAreas'
 import type { TimeMap } from '@engine/time/timeMapping'
 import { keptSourceTime, nextKeptSourceTime } from '@engine/time/timeMapping'
 import { correctTrack } from '@engine/time/trackSync'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { cameraAt } from '@engine/zoom/zoomCamera'
+import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
 import type { EditorSession } from '@shared/models/editor'
+import type { ObjectTrack } from '@shared/models/telemetry'
 import type {
   AudioSettings,
   BackgroundSettings,
   CaptionSettings,
+  NormalizedPoint,
   TextOverlay,
   WebcamSettings,
   ZoomEffect
@@ -62,6 +66,10 @@ export interface PreviewSettings {
   texts: readonly TextOverlay[]
   /** The text picked in the editor: it gets a frame with handles, drawn only here, never exported. */
   selectedTextId: string | null
+  /** Whether to shade where a vertical video is covered by the apps' interface; drawn only here. */
+  safeAreas: boolean
+  /** Where the marked object goes, for the frame that follows it. */
+  objectTrack: ObjectTrack | null
   /** Which audio tracks are heard. */
   audio: AudioSettings
   /** The dubbing heard instead of the recorded voice, when one is in use. */
@@ -93,6 +101,10 @@ export class PreviewPlayer {
   private dub: { url: string; element: HTMLAudioElement } | null = null
   private readonly audioTracks: Array<{ kind: 'microphone' | 'systemAudio'; element: HTMLAudioElement }>
   private readonly context: CanvasRenderingContext2D
+  /** The pointer's smoothed path, for the frame that follows it; computed once. */
+  private readonly cursorPath: NormalizedPoint[]
+  /** The marked object's smoothed path, computed again only when a new track arrives. */
+  private objectPath: { track: ObjectTrack | null; path: NormalizedPoint[] } = { track: null, path: [] }
   private output: Size
   private settings: PreviewSettings
   private frameRequest = 0
@@ -109,6 +121,7 @@ export class PreviewPlayer {
     settings: PreviewSettings
   ) {
     this.settings = settings
+    this.cursorPath = smoothCursorPath(session.cursor, session.durationMs)
     this.output = this.outputFor(settings)
     canvas.width = this.output.width
     canvas.height = this.output.height
@@ -152,6 +165,25 @@ export class PreviewPlayer {
   /** The camera currently applied to the frame on screen. */
   get camera(): Camera {
     return cameraAt(this.settings.zooms, this.currentTimeMs)
+  }
+
+  /** Where the pointer is taken to be right now, for the frame that follows it. */
+  get pointer(): NormalizedPoint | null {
+    return this.cursorPath.length > 0 ? pointerAt(this.cursorPath, this.currentTimeMs) : null
+  }
+
+  /** Where the marked object is taken to be right now. */
+  get object(): NormalizedPoint | null {
+    return this.objectPointAt(this.currentTimeMs)
+  }
+
+  private objectPointAt(timeMs: number): NormalizedPoint | null {
+    const track = this.settings.objectTrack
+    if (!track) return null
+    if (this.objectPath.track !== track) {
+      this.objectPath = { track, path: smoothCursorPath(track.samples, this.session.durationMs) }
+    }
+    return this.objectPath.path.length > 0 ? pointerAt(this.objectPath.path, timeMs) : null
   }
 
   /** The block of the caption currently on screen, in output pixels; `null` when there is none. */
@@ -345,15 +377,34 @@ export class PreviewPlayer {
           }
         : null,
       camera: cameraAt(this.settings.zooms, timeMs),
+      pointer: this.cursorPath.length > 0 ? pointerAt(this.cursorPath, timeMs) : null,
+      object: this.objectPointAt(timeMs),
       background: this.settings.background,
       caption: caption === null ? null : { text: caption, style: captions.style },
       texts: textsAt(this.settings.texts, timeMs)
     })
     this.drawnCaption = regions.caption
     this.drawnTexts = regions.texts
+    if (this.settings.safeAreas && this.settings.background.aspect === '9:16') this.drawSafeAreas()
     const selected = regions.texts.find((text) => text.id === this.settings.selectedTextId)
     if (selected) this.drawTextSelection(selected.box)
     for (const listener of this.timeListeners) listener(timeMs)
+  }
+
+  /** Shades where the social apps' interface covers a vertical video — on the preview only. */
+  private drawSafeAreas(): void {
+    const context = this.context
+    const { width, height } = this.output
+    context.save()
+    context.fillStyle = 'rgba(255, 80, 80, 0.18)'
+    context.strokeStyle = 'rgba(255, 120, 120, 0.6)'
+    context.lineWidth = Math.max(1, width / 1080)
+    context.setLineDash([6 * context.lineWidth, 4 * context.lineWidth])
+    for (const band of SAFE_AREA_BANDS) {
+      context.fillRect(band.x * width, band.y * height, band.width * width, band.height * height)
+      context.strokeRect(band.x * width, band.y * height, band.width * width, band.height * height)
+    }
+    context.restore()
   }
 
   /** The dashed frame and corner handles around the selected text — on the preview only. */
