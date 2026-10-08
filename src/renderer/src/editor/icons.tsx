@@ -176,3 +176,56 @@ export const RefreshIcon = () => (
     <path d="M21 3v6h-6" />
   </Icon>
 )
+
+export const TextIcon = () => (
+  <Icon>
+    <path d="M5 7V4h14v3M12 4v16M9 20h6" />
+  </Icon>
+)
+
+export const EyeIcon = () => (
+  <Icon>
+    <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12Z" />
+    <circle cx="12" cy="12" r="3" />
+  </Icon>
+)
+
+export const EyeOffIcon = () => (
+  <Icon>
+    <path d="M3 3l18 18M10.6 10.6a2.9 2.9 0 0 0 4 4M6.5 6.7C4 8.3 2 12 2 12s3.5 6 10 6c1.6 0 3-.3 4.2-.8M9.9 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7s-.8 1.5-2.4 3.1" />
+  </Icon>
+)
+
+export const FormatIcon = () => (
+  <Icon>
+    <rect x="6" y="3" width="12" height="18" rx="2.5" />
+    <path d="M10 18h4" />
+  </Icon>
+)
+
+export const LockIcon = () => (
+  <Icon>
+    <rect x="5" y="11" width="14" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </Icon>
+)
+
+export const UnlockIcon = () => (
+  <Icon>
+    <rect x="5" y="11" width="14" height="10" rx="2" />
+    <path d="M8 11V7a4 4 0 0 1 7.5-2" />
+  </Icon>
+)
+
+export const MagnetIcon = () => (
+  <Icon>
+    <path d="M6 3v8a6 6 0 0 0 12 0V3" />
+    <path d="M6 3h4v8a2 2 0 0 0 4 0V3h4" />
+  </Icon>
+)
+
+export const FitIcon = () => (
+  <Icon>
+    <path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" />
+  </Icon>
+)

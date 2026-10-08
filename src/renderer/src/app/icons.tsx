@@ -105,3 +105,9 @@ export const ImportIcon = () => (
     <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
   </Icon>
 )
+
+export const SparklesIcon = () => (
+  <Icon>
+    <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18" />
+  </Icon>
+)
