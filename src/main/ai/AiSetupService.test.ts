@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -82,6 +82,30 @@ describe('AiSetupService.providers', () => {
     await writeFile(path.join(bin, 'signed-in'), '')
     const [claude] = await createService().providers()
     expect(claude).toMatchObject({ installed: true, version: '2.1.288', loggedIn: true, account: 'ana@example.com · max' })
+  })
+
+  it('offers the Claude models seen in its session logs, newest first, or the aliases without any', async () => {
+    await install('claude', CLAUDE)
+    const [withoutSessions] = await createService().providers()
+    expect(withoutSessions?.models.map((model) => model.id)).toEqual(['sonnet', 'haiku', 'opus', 'fable'])
+
+    const project = path.join(home, '.claude', 'projects', '-Users-ana-app')
+    await mkdir(path.join(project, 'old', 'subagents'), { recursive: true })
+    const line = (model: string): string => `{"type":"assistant","message":{"model":"${model}"}}\n`
+    await writeFile(path.join(project, 'a.jsonl'), line('claude-opus-5') + line('claude-fable-5-1'))
+    await writeFile(path.join(project, 'old', 'subagents', 'b.jsonl'), line('claude-sonnet-5-5'))
+    const old = new Date(Date.now() - 100 * 24 * 60 * 60_000)
+    await utimes(path.join(project, 'old', 'subagents', 'b.jsonl'), old, old)
+    await writeFile(path.join(project, 'c.jsonl'), line('claude-haiku-4-5-20251001'))
+    const later = new Date(Date.now() + 60_000)
+    await utimes(path.join(project, 'c.jsonl'), later, later)
+
+    const [claude] = await createService().providers()
+    expect(claude?.models).toEqual([
+      { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 (20251001)' },
+      { id: 'claude-opus-5', label: 'Opus 5' },
+      { id: 'claude-fable-5-1', label: 'Fable 5.1' }
+    ])
   })
 
   it('reads Codex status from its exit code and its models from its own catalogue', async () => {

@@ -47,7 +47,10 @@ export const AI_PROVIDER_SPECS: Record<AiProviderId, AiProviderSpec> = {
 /** The account's own default: no model is named and the tool decides. */
 export const ACCOUNT_DEFAULT_MODEL: AiModel = { id: '', label: 'Padrão da conta' }
 
-/** Claude Code's aliases: each always points at the newest model of its family. */
+/**
+ * Claude Code's aliases, each pointing at the newest model of its family:
+ * what is offered when no session of the tool has been seen on this machine.
+ */
 export const CLAUDE_MODELS: AiModel[] = [
   { id: 'sonnet', label: 'Sonnet', description: 'Equilíbrio entre rapidez e qualidade (recomendado).' },
   { id: 'haiku', label: 'Haiku', description: 'O mais rápido.' },
@@ -117,4 +120,32 @@ export function toolEffort(provider: AiProviderId, effort: AiEffort): string {
   if (effort === 'ultra') return 'max'
   if (provider === 'agy' && effort === 'xhigh') return 'max'
   return effort
+}
+
+/** Claude Code lists no models; the ones the user has run show up in its session logs, as full ids. */
+const CLAUDE_SESSION_MODEL = /"model":"(claude-[a-z0-9.-]{2,60})"/g
+
+/** The model ids in a stretch of a Claude Code session log, in order of first appearance. */
+export function parseClaudeSessionModels(text: string): string[] {
+  const ids = new Set<string>()
+  for (const match of text.matchAll(CLAUDE_SESSION_MODEL)) ids.add(match[1] as string)
+  return [...ids]
+}
+
+const CLAUDE_FAMILIES: Record<string, string> = { fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' }
+
+/** "claude-fable-5-1" → "Fable 5.1"; "claude-haiku-4-5-20251001" → "Haiku 4.5 (20251001)"; otherwise the id itself. */
+export function claudeModelLabel(id: string): string {
+  const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/.exec(id)
+  if (!match) return id
+  const [, family = '', major = '', minor, date] = match
+  const name = CLAUDE_FAMILIES[family] ?? family.charAt(0).toUpperCase() + family.slice(1)
+  return `${name} ${major}${minor ? `.${minor}` : ''}${date ? ` (${date})` : ''}`
+}
+
+/** Models seen in Claude Code's sessions, most recently used first, as the app offers them. */
+export function claudeModelsSeen(seen: ReadonlyMap<string, number>): AiModel[] {
+  return [...seen.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([id]) => ({ id, label: claudeModelLabel(id) }))
 }

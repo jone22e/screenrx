@@ -1,8 +1,9 @@
 import { access } from 'node:fs/promises'
-import { Menu, app, dialog, ipcMain, screen, shell } from 'electron'
+import { Menu, app, dialog, ipcMain, screen, shell, systemPreferences } from 'electron'
 import type { IpcInvokeChannel, IpcInvokeContract } from '@shared/ipc/contract'
 import type { AiProvider } from '@shared/models/ai'
 import { isAiProviderId, parseAiChoice } from '@shared/models/ai'
+import { parseAssistantRequest } from '@shared/models/assistant'
 import { parseCaptionTranslationRequest, parseTranscriptionRequest } from '@shared/models/captions'
 import type { CaptureSourceCatalog } from '@shared/models/capture'
 import { isDeviceId } from '@shared/models/devices'
@@ -18,8 +19,11 @@ import { isExportTrackName } from '@shared/models/export'
 import { AiError } from '../ai/AiCliService'
 import { AI_PROVIDER_SPECS } from '../ai/aiCatalog'
 import type { AiSetupService } from '../ai/AiSetupService'
+import type { AssistantService } from '../ai/AssistantService'
 import type { CaptionTranslationService } from '../ai/CaptionTranslationService'
 import type { CutSuggestionService } from '../ai/CutSuggestionService'
+import { DictationError } from '../captions/DictationService'
+import type { DictationService } from '../captions/DictationService'
 import { TranscriptionError } from '../captions/TranscriptionService'
 import { DubError } from '../dub/DubbingService'
 import type { DubbingService } from '../dub/DubbingService'
@@ -52,7 +56,9 @@ export interface IpcDependencies {
   projects: ProjectStore
   exports: ExportService
   transcriptions: TranscriptionService
+  dictation: DictationService
   suggestions: CutSuggestionService
+  assistant: AssistantService
   translations: CaptionTranslationService
   dubbing: DubbingService
   aiSetup: AiSetupService
@@ -91,7 +97,9 @@ export function registerIpc(deps: IpcDependencies): void {
     projects,
     exports,
     transcriptions,
+    dictation,
     suggestions,
+    assistant,
     translations,
     dubbing,
     aiSetup,
@@ -265,6 +273,24 @@ export function registerIpc(deps: IpcDependencies): void {
     return { ok: true, value: { sessionIds } }
   })
 
+  handle('library:import-paths', async ([value]) => {
+    const paths = Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry !== '') : []
+    const allowed = paths.filter((filePath) => IMPORT_EXTENSIONS.includes(filePath.split('.').pop()?.toLowerCase() ?? ''))
+    if (allowed.length === 0) return { ok: false, error: appError('invalid-state', 'no video files') }
+    const sessionIds: string[] = []
+    for (const filePath of allowed) {
+      try {
+        sessionIds.push(await importer.import(filePath))
+        windows.broadcast('library:changed', null)
+      } catch (error) {
+        return { ok: false, error: toImportAppError(error) }
+      }
+    }
+    return { ok: true, value: { sessionIds } }
+  })
+
+  handle('library:search', ([query]) => (typeof query === 'string' ? sessions.searchTranscripts(query) : []))
+
   handle('hud:show-source-menu', async () => {
     const hud = windows.hudWindow
     if (!hud || controller.getState().phase !== 'idle') return
@@ -432,6 +458,23 @@ export function registerIpc(deps: IpcDependencies): void {
 
   handle('ai:cancel', () => suggestions.cancel())
 
+  handle('ai:assist', async ([sessionId, value, chosen]) => {
+    const request = parseAssistantRequest(value)
+    const choice = parseAiChoice(chosen)
+    if (!isSessionId(sessionId) || !request || !choice) {
+      return { ok: false, error: appError('ai-failed', 'invalid assistant request') }
+    }
+    try {
+      return { ok: true, value: await assistant.ask(sessionId, request, choice) }
+    } catch (error) {
+      const failure = error instanceof AiError ? error.appError : appError('ai-failed', String(error))
+      if (failure.code !== 'ai-cancelled') {
+        logger.error('assistant failed', { sessionId, provider: choice.provider, code: failure.code, detail: failure.detail })
+      }
+      return { ok: false, error: failure }
+    }
+  })
+
   handle('captions:translate', async ([value, chosen]) => {
     const request = parseCaptionTranslationRequest(value)
     const choice = parseAiChoice(chosen)
@@ -493,7 +536,10 @@ export function registerIpc(deps: IpcDependencies): void {
   handle('export:finish', ([exportId]) =>
     exportResult(async () => {
       if (!isExportId(exportId)) throw new ExportError(appError('export-failed', 'invalid export id'))
-      return exports.finish(exportId)
+      const result = await exports.finish(exportId)
+      // The library labels an exported recording.
+      windows.broadcast('library:changed', null)
+      return result
     })
   )
 
@@ -584,6 +630,20 @@ export function registerIpc(deps: IpcDependencies): void {
       const failure = toMeetAppError(error)
       logger.warn('meeting recording failed', { code, error: failure.code, detail: failure.detail })
       return { ok: false, error: failure }
+    }
+  })
+
+  handle('dictation:request-microphone', async () => {
+    if (process.platform !== 'darwin') return true
+    return systemPreferences.getMediaAccessStatus('microphone') === 'granted' || systemPreferences.askForMediaAccess('microphone')
+  })
+
+  handle('dictation:transcribe', async ([wav]) => {
+    if (!(wav instanceof Uint8Array)) return { ok: false, error: appError('transcription-failed', 'invalid audio') }
+    try {
+      return { ok: true, value: { text: await dictation.transcribe(wav) } }
+    } catch (error) {
+      return { ok: false, error: error instanceof DictationError ? error.appError : appError('transcription-failed', String(error)) }
     }
   })
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAgyModels, parseCodexCatalog, toolEffort } from './aiCatalog'
+import { claudeModelLabel, claudeModelsSeen, parseAgyModels, parseClaudeSessionModels, parseCodexCatalog, toolEffort } from './aiCatalog'
 
 describe('parseCodexCatalog', () => {
   const catalog = {
@@ -48,5 +48,32 @@ describe('toolEffort', () => {
     expect(toolEffort('agy', 'xhigh')).toBe('max')
     expect(toolEffort('codex', 'ultra')).toBe('ultra')
     expect(toolEffort('codex', 'minimal')).toBe('minimal')
+  })
+})
+
+describe('Claude models from session logs', () => {
+  it('finds the model ids an answer names, once each', () => {
+    const log = [
+      '{"type":"assistant","message":{"model":"claude-fable-5-1","content":[]}}',
+      '{"type":"user","message":{"role":"user"}}',
+      '{"type":"assistant","message":{"model":"claude-sonnet-5-5"}}',
+      '{"type":"assistant","message":{"model":"claude-fable-5-1"}}',
+      '{"type":"assistant","message":{"model":"gpt-6"}}'
+    ].join('\n')
+    expect(parseClaudeSessionModels(log)).toEqual(['claude-fable-5-1', 'claude-sonnet-5-5'])
+  })
+
+  it('labels an id by family and version', () => {
+    expect(claudeModelLabel('claude-fable-5-1')).toBe('Fable 5.1')
+    expect(claudeModelLabel('claude-opus-5')).toBe('Opus 5')
+    expect(claudeModelLabel('claude-haiku-4-5-20251001')).toBe('Haiku 4.5 (20251001)')
+    expect(claudeModelLabel('claude-nova-7')).toBe('Nova 7')
+    expect(claudeModelLabel('something-else')).toBe('something-else')
+  })
+
+  it('offers the most recently used first', () => {
+    const models = claudeModelsSeen(new Map([['claude-opus-5', 10], ['claude-fable-5-1', 30], ['claude-sonnet-5-5', 20]]))
+    expect(models.map((model) => model.id)).toEqual(['claude-fable-5-1', 'claude-sonnet-5-5', 'claude-opus-5'])
+    expect(models[0]).toEqual({ id: 'claude-fable-5-1', label: 'Fable 5.1' })
   })
 })

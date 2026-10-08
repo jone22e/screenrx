@@ -1,4 +1,5 @@
 import type { AiChoice, AiProvider, AiProviderId } from '../models/ai'
+import type { AssistantReply, AssistantRequest } from '../models/assistant'
 import type {
   CaptionTranslationRequest,
   Transcript,
@@ -48,6 +49,8 @@ export interface IpcInvokeContract {
   'library:delete': { args: [sessionId: string]; result: IpcResult<{ deleted: boolean }> }
   'library:rename': { args: [sessionId: string, title: string]; result: IpcResult<null> }
   'library:import': { args: []; result: IpcResult<{ sessionIds: string[] }> }
+  'library:import-paths': { args: [paths: string[]]; result: IpcResult<{ sessionIds: string[] }> }
+  'library:search': { args: [query: string]; result: string[] }
 
   'editor:open': { args: [sessionId: string]; result: IpcResult<EditorSession> }
   'project:save': { args: [project: Project]; result: IpcResult<null> }
@@ -81,6 +84,10 @@ export interface IpcInvokeContract {
     result: IpcResult<CutSuggestionResult>
   }
   'ai:cancel': { args: []; result: void }
+  'ai:assist': {
+    args: [sessionId: string, request: AssistantRequest, choice: AiChoice]
+    result: IpcResult<AssistantReply>
+  }
 
   'export:start': { args: [sessionId: string]; result: IpcResult<ExportJob> }
   'export:read-chunk': {
@@ -104,6 +111,9 @@ export interface IpcInvokeContract {
   'meet:save-settings': { args: [settings: MeetSettings]; result: IpcResult<MeetSettings> }
   'meet:list-rooms': { args: []; result: IpcResult<MeetRoom[]> }
   'meet:record': { args: [code: string]; result: IpcResult<null> }
+
+  'dictation:request-microphone': { args: []; result: boolean }
+  'dictation:transcribe': { args: [wav: Uint8Array]; result: IpcResult<{ text: string }> }
 
   'update:get-state': { args: []; result: UpdateState }
   'update:check': { args: []; result: UpdateState }
@@ -160,6 +170,10 @@ export interface ScreenRxApi {
      * file that fails, after the ones before it are already in the library.
      */
     import(): Promise<IpcResult<{ sessionIds: string[] }>>
+    /** Brings video files dropped on the window into the library, as `import` does for chosen ones. */
+    importFiles(files: File[]): Promise<IpcResult<{ sessionIds: string[] }>>
+    /** The ids of the recordings whose transcript contains the words; the title is matched by the caller. */
+    search(query: string): Promise<string[]>
     onChanged(listener: () => void): Unsubscribe
   }
   editor: {
@@ -215,6 +229,11 @@ export interface ScreenRxApi {
      * text is sent; nothing is applied — the result is a list of proposals.
      */
     suggestCuts(sessionId: string, choice: AiChoice): Promise<IpcResult<CutSuggestionResult>>
+    /**
+     * One message of the editing assistant's conversation. The transcript's text, the state of the
+     * edit and the conversation are sent; the answer carries the edits to make. `cancel` stops it.
+     */
+    assist(sessionId: string, request: AssistantRequest, choice: AiChoice): Promise<IpcResult<AssistantReply>>
     cancel(): Promise<void>
   }
   export: {
@@ -249,6 +268,12 @@ export interface ScreenRxApi {
      * window with its audio. The recording bar comes up as for any recording.
      */
     record(code: string): Promise<IpcResult<null>>
+  }
+  dictation: {
+    /** Asks macOS for the microphone, once; resolves whether the app may use it. */
+    requestMicrophone(): Promise<boolean>
+    /** Turns a short recording (16 kHz mono WAV) into text on this Mac; the audio is not kept. */
+    transcribe(wav: Uint8Array): Promise<IpcResult<{ text: string }>>
   }
   update: {
     getState(): Promise<UpdateState>
