@@ -91,8 +91,8 @@ Actions and their fields:
 - "caption-language": value = ${CAPTION_LANGUAGES.map((language) => `"${language}"`).join(', ')} or "original". Translating takes the editor a while.
 - "caption-length": value = "short", "medium" or "long" (how much text per caption).
 - "background": value = ${BACKGROUND_PRESETS.map((preset) => `"${preset.id}" (${preset.name})`).join(', ')} or "none".
-- "format": the shape of the finished video. value = "native" (the recording's own), "reels" or "tiktok" (both vertical 9:16; Shorts is "tiktok").
-- "framing": how the recording goes into a vertical format. value = "fit" (all of it, smaller, over the background) or "fill" (enlarged to fill the frame; a part of it is used).
+- "format": the shape of the finished video. value = "native" (the recording's own), "9:16" (vertical: Reels, TikTok, Shorts), "1:1" (square) or "4:5" (portrait, feed).
+- "framing": how the recording goes into a format of another shape. value = "fit" (all of it, smaller, over the background), "fill" (enlarged to fill the frame; a part of it is used), "follow-mouse" (fills, and the part in use follows the pointer), "follow-zoom" (fills, and it follows the zooms) or "follow-object" (fills, and it follows an object the user marked; the user has to mark it).
 - "webcam": value = "show" or "hide".
 - "mute" / "unmute": value = "microphone" or "system".
 - "text": writes a text over the video (a title, a call-out). value = the text itself; fromWord/toWord or startSec/endSec say when it shows (without an end, ${ASSISTANT_CONFIG.defaultZoomMs / 1000} s). It appears in the middle of the frame; the user moves it.
@@ -295,12 +295,28 @@ export function parseAssistantResponse(
         break
       }
       case 'format': {
-        const aspect = text === 'vertical' || text === '9:16' || text === 'instagram' ? 'reels' : text === 'shorts' ? 'tiktok' : text
+        const aspect =
+          text === 'vertical' || text === 'reels' || text === 'tiktok' || text === 'shorts' || text === 'instagram'
+            ? '9:16'
+            : text === 'square' || text === 'quadrado'
+              ? '1:1'
+              : text === 'portrait' || text === 'retrato' || text === 'feed'
+                ? '4:5'
+                : text
         if ((FRAME_ASPECTS as readonly string[]).includes(aspect ?? '')) actions.push({ type: 'format', aspect: aspect as (typeof FRAME_ASPECTS)[number] })
         break
       }
       case 'framing': {
-        const fit = text === 'zoom' || text === 'crop' ? 'fill' : text === 'reduce' || text === 'shrink' ? 'fit' : text
+        const fit =
+          text === 'zoom' || text === 'crop'
+            ? 'fill'
+            : text === 'reduce' || text === 'shrink'
+              ? 'fit'
+              : text === 'follow' || text === 'seguir' || text === 'mouse' || text === 'cursor' || text === 'track'
+                ? 'follow-mouse'
+                : text === 'object' || text === 'objeto'
+                  ? 'follow-object'
+                  : text
         if ((FRAME_FITS as readonly string[]).includes(fit ?? '')) actions.push({ type: 'framing', fit: fit as (typeof FRAME_FITS)[number] })
         break
       }

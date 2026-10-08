@@ -17,6 +17,7 @@ function session(overrides: Partial<EditorSession> = {}): EditorSession {
     webcam: null,
     audio: [{ kind: 'microphone', url: 'screenrx-media://session/x/microphone' }],
     interactions: [],
+    cursor: [],
     dubs: [],
     transcript: null,
     project: createProject(SESSION_ID),

@@ -94,7 +94,10 @@ export function applyAssistantActions(
         case 'framing': {
           const ok = store.getState().background.aspect !== 'native'
           if (ok) store.setBackground({ fit: action.fit })
-          did(action.fit === 'fill' ? 'Enquadramento: zoom' : 'Enquadramento: reduzir', ok)
+          did(
+            `Enquadramento: ${action.fit === 'fill' ? 'preencher' : action.fit === 'follow-mouse' ? 'seguir o mouse' : action.fit === 'follow-zoom' ? 'seguir o zoom' : action.fit === 'follow-object' ? 'seguir o objeto' : 'ajustar'}`,
+            ok
+          )
           break
         }
         case 'text':
