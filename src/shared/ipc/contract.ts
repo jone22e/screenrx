@@ -16,6 +16,7 @@ import type { Project } from '../models/project'
 import type { RecordingStateSnapshot } from '../models/recording'
 import type { RecordingSummary } from '../models/session'
 import type { CutSuggestionResult } from '../models/suggestions'
+import type { UpdateState } from '../models/update'
 
 /** An audio track whose outline the timeline can draw: a recorded one, or a dubbing. */
 export type WaveformTrack = 'microphone' | 'systemAudio' | 'dubEn' | 'dubEs' | 'dubZh' | 'dubPt'
@@ -46,6 +47,7 @@ export interface IpcInvokeContract {
   'library:reveal': { args: [sessionId: string]; result: IpcResult<null> }
   'library:delete': { args: [sessionId: string]; result: IpcResult<{ deleted: boolean }> }
   'library:rename': { args: [sessionId: string, title: string]; result: IpcResult<null> }
+  'library:import': { args: []; result: IpcResult<{ sessionIds: string[] }> }
 
   'editor:open': { args: [sessionId: string]; result: IpcResult<EditorSession> }
   'project:save': { args: [project: Project]; result: IpcResult<null> }
@@ -102,6 +104,10 @@ export interface IpcInvokeContract {
   'meet:save-settings': { args: [settings: MeetSettings]; result: IpcResult<MeetSettings> }
   'meet:list-rooms': { args: []; result: IpcResult<MeetRoom[]> }
   'meet:record': { args: [code: string]; result: IpcResult<null> }
+
+  'update:get-state': { args: []; result: UpdateState }
+  'update:check': { args: []; result: UpdateState }
+  'update:install': { args: []; result: boolean }
 }
 
 /** Every main → renderer broadcast. */
@@ -110,6 +116,7 @@ export interface IpcEventContract {
   'library:changed': null
   'captions:progress': TranscriptionProgress
   'dub:progress': DubProgress
+  'update:state-changed': UpdateState
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -147,6 +154,12 @@ export interface ScreenRxApi {
     delete(sessionId: string): Promise<IpcResult<{ deleted: boolean }>>
     /** Gives the recording a name; an empty one brings the source's label back. */
     rename(sessionId: string, title: string): Promise<IpcResult<null>>
+    /**
+     * Asks for video files recorded elsewhere and brings each into the library as a recording of its
+     * own. Resolves with the ids imported (none when the dialog is cancelled); stops at the first
+     * file that fails, after the ones before it are already in the library.
+     */
+    import(): Promise<IpcResult<{ sessionIds: string[] }>>
     onChanged(listener: () => void): Unsubscribe
   }
   editor: {
@@ -236,5 +249,16 @@ export interface ScreenRxApi {
      * window with its audio. The recording bar comes up as for any recording.
      */
     record(code: string): Promise<IpcResult<null>>
+  }
+  update: {
+    getState(): Promise<UpdateState>
+    /** Looks for a newer version now; it downloads by itself when there is one. */
+    check(): Promise<UpdateState>
+    /**
+     * Restarts into the downloaded version. Resolves false when there is none yet, or while a recording
+     * or an export is running.
+     */
+    install(): Promise<boolean>
+    onStateChanged(listener: (state: UpdateState) => void): Unsubscribe
   }
 }

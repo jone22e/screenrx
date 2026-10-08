@@ -29,6 +29,8 @@ import { CaptureError } from '../capture/CaptureEngine'
 import { ExportError } from '../export/ExportService'
 import type { ExportService } from '../export/ExportService'
 import type { Logger } from '../logging/logger'
+import { toImportAppError } from '../library/VideoImporter'
+import type { VideoImporter } from '../library/VideoImporter'
 import type { ThumbnailService } from '../media/ThumbnailService'
 import { toMeetAppError } from '../meet/MeetRecorder'
 import type { MeetRecorder } from '../meet/MeetRecorder'
@@ -37,6 +39,7 @@ import type { WaveformService } from '../media/WaveformService'
 import { isAudioTrackName } from '../media/WaveformService'
 import type { RecordingController } from '../recording/RecordingController'
 import type { SessionStore } from '../recording/SessionStore'
+import type { UpdateService } from '../update/UpdateService'
 import type { WindowManager } from '../windows/WindowManager'
 import type { DeviceMenuActions } from '../windows/deviceMenus'
 import { showCameraMenu, showMicrophoneMenu } from '../windows/deviceMenus'
@@ -55,14 +58,19 @@ export interface IpcDependencies {
   aiSetup: AiSetupService
   waveforms: WaveformService
   thumbnails: ThumbnailService
+  importer: VideoImporter
   meet: MeetRecorder
   meetSettings: MeetSettingsStore
+  updates: UpdateService
   windows: WindowManager
   logger: Logger
   ownPids: () => number[]
 }
 
 type Result<Channel extends IpcInvokeChannel> = IpcInvokeContract[Channel]['result']
+
+/** Containers FFmpeg opens that the file dialog offers; anything else is just not listed. */
+const IMPORT_EXTENSIONS = ['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', 'mts', 'm2ts', 'mpg', 'mpeg', 'wmv', 'flv', '3gp']
 
 const SYSTEM_SETTINGS_URLS: Record<PermissionKind, string> = {
   screenRecording: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
@@ -89,8 +97,10 @@ export function registerIpc(deps: IpcDependencies): void {
     aiSetup,
     waveforms,
     thumbnails,
+    importer,
     meet,
     meetSettings,
+    updates,
     windows,
     logger,
     ownPids
@@ -231,6 +241,28 @@ export function registerIpc(deps: IpcDependencies): void {
       logger.error('could not rename recording', { sessionId, error: String(error) })
       return { ok: false, error: appError('storage-unavailable', String(error)) }
     }
+  })
+
+  handle('library:import', async () => {
+    const owner = windows.mainWindow
+    const options = {
+      title: 'Importar vídeo',
+      buttonLabel: 'Importar',
+      properties: ['openFile', 'multiSelections'] as Array<'openFile' | 'multiSelections'>,
+      filters: [{ name: 'Vídeos', extensions: IMPORT_EXTENSIONS }]
+    }
+    const answer = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    if (answer.canceled) return { ok: true, value: { sessionIds: [] } }
+    const sessionIds: string[] = []
+    for (const filePath of answer.filePaths) {
+      try {
+        sessionIds.push(await importer.import(filePath))
+        windows.broadcast('library:changed', null)
+      } catch (error) {
+        return { ok: false, error: toImportAppError(error) }
+      }
+    }
+    return { ok: true, value: { sessionIds } }
   })
 
   handle('hud:show-source-menu', async () => {
@@ -554,6 +586,10 @@ export function registerIpc(deps: IpcDependencies): void {
       return { ok: false, error: failure }
     }
   })
+
+  handle('update:get-state', () => updates.getState())
+  handle('update:check', () => updates.check())
+  handle('update:install', () => updates.install())
 
   handle('recorder:open', () => {
     if (controller.getState().phase === 'idle') controller.dismissError()

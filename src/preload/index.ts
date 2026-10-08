@@ -59,6 +59,7 @@ const api: ScreenRxApi = {
     reveal: (sessionId) => invoke('library:reveal', sessionId),
     delete: (sessionId) => invoke('library:delete', sessionId),
     rename: (sessionId, title) => invoke('library:rename', sessionId, title),
+    import: () => invoke('library:import'),
     onChanged: (listener) => subscribe('library:changed', () => listener())
   },
   editor: {
@@ -112,6 +113,12 @@ const api: ScreenRxApi = {
     saveSettings: (settings) => invoke('meet:save-settings', settings),
     listRooms: () => invoke('meet:list-rooms'),
     record: (code) => invoke('meet:record', code)
+  },
+  update: {
+    getState: () => invoke('update:get-state'),
+    check: () => invoke('update:check'),
+    install: () => invoke('update:install'),
+    onStateChanged: (listener) => subscribe('update:state-changed', listener)
   }
 }
 
