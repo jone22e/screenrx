@@ -1374,7 +1374,7 @@ kbd {
   flex: none;
   flex-direction: column;
   gap: var(--lane-gap);
-  width: 84px;
+  width: 118px;
 }
 
 .timeline-label {
@@ -1500,6 +1500,9 @@ kbd {
   flex-direction: column;
   gap: var(--lane-gap);
   min-width: 100%;
+  /* Pills and handles at the far right must not add scrollable width; the vertical axis stays free for the playhead pill. */
+  overflow-x: clip;
+  overflow-y: visible;
 }
 
 /* A locked lane: nothing on it reacts. */
@@ -3016,7 +3019,8 @@ kbd {
 
 .format-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: 1fr;
   gap: 8px;
 }
 
@@ -3024,6 +3028,8 @@ kbd {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  min-height: 60px;
   padding: 10px 12px;
   text-align: left;
   color: var(--text-muted);

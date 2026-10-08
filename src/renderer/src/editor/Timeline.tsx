@@ -61,6 +61,8 @@ const CLICK_TYPES = new Set(['click', 'doubleClick', 'rightClick'])
 /** Candidate distances between ruler labels, in seconds. */
 const RULER_STEPS_S = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
 const MIN_LABEL_SPACING_PX = 72
+/** Room a ruler label takes to the right of its mark ("00:35" plus padding). */
+const RULER_LABEL_WIDTH_PX = 44
 /** Pointer travel that turns a click on the video lane into a selection. */
 const SELECT_THRESHOLD_PX = 3
 /** A region narrower than this on screen does not get the trash button. */
@@ -91,8 +93,10 @@ function rulerMarks(durationMs: number, widthPx: number): number[] {
   if (widthPx <= 0 || durationMs <= 0) return []
   const pxPerSecond = widthPx / (durationMs / 1000)
   const step = RULER_STEPS_S.find((seconds) => seconds * pxPerSecond >= MIN_LABEL_SPACING_PX) ?? 600
+  // A label that would run past the right edge is left out, so the tracks never grow a scrollbar.
+  const lastLabelStartMs = ((widthPx - RULER_LABEL_WIDTH_PX) / pxPerSecond) * 1000
   const marks: number[] = []
-  for (let seconds = 0; seconds * 1000 <= durationMs; seconds += step) marks.push(seconds * 1000)
+  for (let seconds = 0; seconds * 1000 <= Math.min(durationMs, lastLabelStartMs); seconds += step) marks.push(seconds * 1000)
   return marks
 }
 
