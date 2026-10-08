@@ -3,14 +3,17 @@ import path from 'node:path'
 import { existsSync } from 'node:fs'
 import { app, dialog, powerMonitor, screen, session } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { DEFAULT_CAPTION_LOCALE } from '@shared/models/captions'
 import { appError } from '@shared/models/errors'
 import { AiCliService } from './ai/AiCliService'
 import { AiSetupService } from './ai/AiSetupService'
+import { AssistantService } from './ai/AssistantService'
 import { CaptionTranslationService } from './ai/CaptionTranslationService'
 import { defaultAiSearchDirs } from './ai/cliProcess'
 import { CutSuggestionService } from './ai/CutSuggestionService'
 import { createCaptureEngine } from './capture/createCaptureEngine'
 import { RoutingCaptureEngine } from './capture/RoutingCaptureEngine'
+import { DictationService } from './captions/DictationService'
 import { TranscriptionService } from './captions/TranscriptionService'
 import { ExportService } from './export/ExportService'
 import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
@@ -130,15 +133,15 @@ async function bootstrap(): Promise<void> {
   addLogSink(fileSink(path.join(app.getPath('logs'), 'main.log')))
   logger.info('starting', { version: app.getVersion(), platform: process.platform })
 
-  // Recording is done natively. The only web permission the renderers get is
-  // the camera, for the live preview shown before recording.
+  // Recording is done natively. The only web permissions the renderers get are
+  // the camera, for the live preview shown before recording, and the microphone,
+  // for dictating to the assistant.
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
-    const cameraOnly =
+    const mediaOnly =
       permission === 'media' &&
       'mediaTypes' in details &&
-      details.mediaTypes?.length === 1 &&
-      details.mediaTypes[0] === 'video'
-    callback(cameraOnly && windows.owns(contents))
+      (details.mediaTypes ?? []).every((type) => type === 'video' || type === 'audio')
+    callback(mediaOnly && windows.owns(contents))
   })
 
   const windows = new WindowManager({
@@ -250,8 +253,10 @@ async function bootstrap(): Promise<void> {
     projects,
     exports,
     transcriptions,
+    dictation: new DictationService({ binaryPath: transcriberPath(), locale: DEFAULT_CAPTION_LOCALE, logger: createLogger('dictation') }),
     dubbing,
     suggestions: new CutSuggestionService(ai, sessions, createLogger('ai')),
+    assistant: new AssistantService(ai, sessions, createLogger('ai')),
     translations: new CaptionTranslationService(ai, createLogger('ai')),
     aiSetup,
     waveforms: new WaveformService(ffmpeg, sessions),
