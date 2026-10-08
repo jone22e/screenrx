@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { formatBytes, formatClock } from '@shared/format'
+import type { AppError } from '@shared/models/errors'
 import type { RecordingStateSnapshot } from '@shared/models/recording'
 import type { RecordingSummary } from '@shared/models/session'
 import { MeetRooms } from './MeetRooms'
@@ -7,9 +8,10 @@ import { PermissionNotice } from './PermissionNotice'
 import { RecordingBanner } from './RecordingBanner'
 import { RecordingCard } from './RecordingCard'
 import { RecordingRow } from './RecordingRow'
+import { UpdateNotice } from './UpdateNotice'
 import { usePermissions } from './hooks'
 import { openSettings } from '../common/settingsScreen'
-import { FilmIcon, GearIcon, GridIcon, ListIcon, SearchIcon } from './icons'
+import { FilmIcon, GearIcon, GridIcon, ImportIcon, ListIcon, SearchIcon } from './icons'
 
 interface Props {
   state: RecordingStateSnapshot
@@ -74,6 +76,23 @@ export function Home({ state, recordings, onEdit }: Props) {
   }, [view])
   const granted = permissions.report?.permissions.screenRecording === 'granted'
 
+  // Importing a video recorded elsewhere: a file dialog, then the file is brought into the library.
+  const [importing, setImporting] = useState(false)
+  const [importError, setImportError] = useState<AppError | null>(null)
+  const importVideo = (): void => {
+    setImporting(true)
+    setImportError(null)
+    void window.screenrx.library
+      .import()
+      .then((result) => {
+        if (!result.ok) setImportError(result.error)
+        // One file opens straight in the editor, like a recording that has just finished.
+        else if (result.value.sessionIds.length === 1) onEdit(result.value.sessionIds[0] as string)
+      })
+      .finally(() => setImporting(false))
+  }
+  const canImport = state.phase === 'idle' && !importing
+
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase()
     const all = recordings ?? []
@@ -108,6 +127,10 @@ export function Home({ state, recordings, onEdit }: Props) {
         <button className="bar-icon" aria-label="Configurações" title="Configurações" onClick={openSettings}>
           <GearIcon />
         </button>
+        <button className="import-video" disabled={!canImport} title="Trazer um vídeo gravado fora do ScreenRx" onClick={importVideo}>
+          <ImportIcon />
+          {importing ? 'Importando…' : 'Importar vídeo'}
+        </button>
         <button className="new-recording" disabled={state.phase !== 'idle'} onClick={() => void window.screenrx.recorder.open()}>
           <span className="new-recording-dot" aria-hidden="true" />
           Nova gravação
@@ -116,6 +139,7 @@ export function Home({ state, recordings, onEdit }: Props) {
 
       <main className="home-content">
         <RecordingBanner state={state} />
+        <UpdateNotice idle={state.phase === 'idle'} />
         {state.lastError && (
           <div className="notice notice-error" role="alert">
             <p>{state.lastError.message}</p>
@@ -127,6 +151,19 @@ export function Home({ state, recordings, onEdit }: Props) {
         {permissions.error && (
           <div className="notice notice-error" role="alert">
             <p>{permissions.error.message}</p>
+          </div>
+        )}
+        {importing && (
+          <div className="notice" role="status">
+            <p>Importando vídeo… Um arquivo que não está em H.264 é convertido, o que pode levar alguns minutos.</p>
+          </div>
+        )}
+        {importError && (
+          <div className="notice notice-error" role="alert">
+            <p>{importError.message}</p>
+            <button className="button" onClick={() => setImportError(null)}>
+              Fechar
+            </button>
           </div>
         )}
         {permissions.report && !granted && (
@@ -143,12 +180,19 @@ export function Home({ state, recordings, onEdit }: Props) {
             <h1>Nenhuma gravação ainda</h1>
             <p>
               Clique em Nova gravação para abrir a barra de gravação e escolher o que gravar. Quando terminar,
-              a gravação abre no editor e aparece aqui.
+              a gravação abre no editor e aparece aqui. Um vídeo gravado em outro app também pode ser
+              importado para ser editado.
             </p>
-            <button className="new-recording" disabled={state.phase !== 'idle'} onClick={() => void window.screenrx.recorder.open()}>
-              <span className="new-recording-dot" aria-hidden="true" />
-              Nova gravação
-            </button>
+            <div className="empty-actions">
+              <button className="new-recording" disabled={state.phase !== 'idle'} onClick={() => void window.screenrx.recorder.open()}>
+                <span className="new-recording-dot" aria-hidden="true" />
+                Nova gravação
+              </button>
+              <button className="import-video" disabled={!canImport} onClick={importVideo}>
+                <ImportIcon />
+                {importing ? 'Importando…' : 'Importar vídeo'}
+              </button>
+            </div>
           </div>
         )}
 
