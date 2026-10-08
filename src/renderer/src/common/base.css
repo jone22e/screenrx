@@ -64,3 +64,7 @@ button:focus-visible {
 .ai-logo[data-provider='codex'] {
   color: var(--text);
 }
+
+.ai-logo[data-provider='agy'] {
+  color: #8ab4f8;
+}

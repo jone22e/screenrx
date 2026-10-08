@@ -8,6 +8,8 @@ import { GearIcon } from './icons'
 
 interface Props {
   disabled?: boolean
+  /** Where the panel opens: above the chip (in the composer) or below it (in a panel). */
+  placement?: 'above' | 'below'
 }
 
 const isReady = (provider: AiProvider): boolean => provider.installed && provider.loggedIn
@@ -18,7 +20,7 @@ const isReady = (provider: AiProvider): boolean => provider.installed && provide
  * tool's models and an effort slider. The choice is the same one the
  * settings screen and "Sugerir cortes" use.
  */
-export function AiChoicePicker({ disabled = false }: Props) {
+export function AiChoicePicker({ disabled = false, placement = 'above' }: Props) {
   const ai = useSyncExternalStore(aiSettings.subscribe, aiSettings.getState)
   const current = currentAiChoice(ai)
   const [open, setOpen] = useState(false)
@@ -74,7 +76,7 @@ export function AiChoicePicker({ disabled = false }: Props) {
       </button>
 
       {open && (
-        <div className="ai-popover" role="dialog" aria-label="Ferramenta de IA">
+        <div className="ai-popover" data-placement={placement} role="dialog" aria-label="Ferramenta de IA">
           <div className="ai-tabs" role="tablist">
             {ready.map((candidate) => (
               <button

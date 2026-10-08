@@ -34,8 +34,8 @@ export const AI_PROVIDER_SPECS: Record<AiProviderId, AiProviderSpec> = {
     defaultEffort: 'medium'
   },
   agy: {
-    label: 'Antigravity',
-    toolName: 'Antigravity CLI',
+    label: 'Gemini',
+    toolName: 'Antigravity CLI (Gemini)',
     binary: 'agy',
     installer: 'https://antigravity.google/cli/install.sh',
     login: null,
