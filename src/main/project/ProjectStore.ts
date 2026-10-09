@@ -6,6 +6,7 @@ import { SESSION_FILES } from '@shared/config/recording'
 import { parseTranscript } from '@shared/models/captions'
 import type { EditorSession } from '@shared/models/editor'
 import type { DubTrack } from '@shared/models/dub'
+import type { FilterTrack } from '@shared/models/filters'
 import { DUB_TRACKS, trackUrl } from '@shared/models/media'
 import type { Project } from '@shared/models/project'
 import { CAPTION_LANGUAGES, createProject, parseProject } from '@shared/models/project'
@@ -92,6 +93,7 @@ export class ProjectStore {
       cursor: parseCursorSamples(await this.readJson(sessionId, SESSION_FILES.cursor)),
       track: parseObjectTrack(await this.readJson(sessionId, SESSION_FILES.track)),
       dubs: await this.dubsOf(sessionId),
+      filterTrack: await this.filterTrackOf(sessionId),
       // A transcript that does not parse is simply absent: it can be generated again.
       transcript: parseTranscript(await this.readJson(sessionId, SESSION_FILES.transcript)),
       project
@@ -108,6 +110,20 @@ export class ProjectStore {
     const project = parseProject(raw, sessionId)
     if (!project) this.logger.warn('ignoring invalid project file', { sessionId })
     return project
+  }
+
+  /** The screen track with rendered effects, when the session has one and its description is readable. */
+  private async filterTrackOf(sessionId: string): Promise<FilterTrack | null> {
+    const info = await this.readJson(sessionId, SESSION_FILES.screenFxInfo)
+    if (typeof info !== 'object' || info === null) return null
+    const { schemaVersion, key } = info as { schemaVersion?: unknown; key?: unknown }
+    if (schemaVersion !== 1 || typeof key !== 'string') return null
+    try {
+      await access(this.sessions.trackPathOf(sessionId, 'screenFx'))
+    } catch {
+      return null
+    }
+    return { url: trackUrl(sessionId, 'screenFx'), key }
   }
 
   /** The dubbing tracks that exist on disk for a session. */
