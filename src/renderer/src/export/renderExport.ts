@@ -92,6 +92,7 @@ export async function renderExport(
         pointer: cursorPath.length > 0 ? pointerAt(cursorPath, sourceMs) : null,
         object: objectPath.length > 0 ? pointerAt(objectPath, sourceMs) : null,
         background: project.background,
+        color: project.filters.color,
         caption: caption === null ? null : { text: caption, style: captions.style },
         texts: textsAt(project.texts, sourceMs)
       })

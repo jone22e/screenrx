@@ -1,11 +1,13 @@
 import { CAPTION_LAYOUT } from '@engine/captions/captionConfig'
 import { captionFontCss, captionFontPx, layoutCaption } from '@engine/captions/captionLayout'
+import { canvasColorFilter } from '@engine/filters/filterChain'
 import { findBackgroundPreset } from '@engine/rendering/backgrounds'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import type { NormalizedRect } from '@engine/rendering/frameLayout'
 import { centeredSquare, layoutFrame, layoutWebcam, sourceCrop } from '@engine/rendering/frameLayout'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { viewToSource, visibleRect } from '@engine/zoom/zoomCamera'
+import type { ColorSettings } from '@shared/models/filters'
 import type { BackgroundSettings, CaptionStyle, NormalizedPoint, WebcamSettings } from '@shared/models/project'
 
 export interface FrameInput {
@@ -19,6 +21,8 @@ export interface FrameInput {
   /** Where the marked object is at this instant (smoothed), for the frame that follows it; `null` when none was tracked. */
   object: NormalizedPoint | null
   background: BackgroundSettings
+  /** Colour applied to the recording's picture (not to the backdrop, webcam or texts); `null` for as recorded. */
+  color: ColorSettings | null
   /** The caption on screen at this instant, when there is one and captions are shown. */
   caption: { text: string; style: CaptionStyle } | null
   /** The user's texts on screen at this instant, drawn over the caption in this order. */
@@ -42,7 +46,7 @@ function withAlpha(hex: string, alpha: number): string {
 }
 
 /** Draws a caption over the finished frame and returns the block it occupies. */
-function drawCaption(context: Context, output: Size, text: string, style: CaptionStyle): Rect | null {
+export function drawCaption(context: Context, output: Size, text: string, style: CaptionStyle): Rect | null {
   context.save()
   context.font = captionFontCss(style, captionFontPx(style, output))
   context.textAlign = 'center'
@@ -135,6 +139,9 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
   context.save()
   framePath()
   context.clip()
+  // The colour effects: the same filter string in the preview and in the export.
+  const colorFilter = input.color ? canvasColorFilter(input.color) : ''
+  if (colorFilter) context.filter = colorFilter
   context.drawImage(
     input.screen,
     (crop.x + view.x * crop.width) * input.screenSize.width,
