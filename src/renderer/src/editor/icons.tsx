@@ -137,6 +137,12 @@ export const SparklesIcon = () => (
   </Icon>
 )
 
+export const WandIcon = () => (
+  <Icon>
+    <path d="m4 20 10-10M12.5 8.5 15 6M15 6l3 3M9 4v2M5 8h2M18 13v2M19 4l1 1" />
+  </Icon>
+)
+
 export const GearIcon = () => (
   <Icon>
     <circle cx="12" cy="12" r="3" />

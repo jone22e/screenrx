@@ -13,6 +13,8 @@ import type { TimeSpan } from '@engine/zoom/zoomEditing'
 import { clampScale, spanForNewZoom } from '@engine/zoom/zoomEditing'
 import type { Transcript, TranscriptionRequest, TranscriptionStage } from '@shared/models/captions'
 import type { DubProgress, DubRequest, DubTrack } from '@shared/models/dub'
+import type { ColorSettings, FilterRenderRequest, FilterSettings, FilterTrack, RenderedFilter, RenderedFilterName } from '@shared/models/filters'
+import { COLOR_LIMITS, DEFAULT_COLOR, needsRenderedTrack, renderKey } from '@shared/models/filters'
 import type { ObjectTrack, ObjectTrackRequest } from '@shared/models/telemetry'
 import type { EditorSession } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
@@ -80,6 +82,17 @@ export interface EditorState {
   /** UI state: the dubbing being generated, if any. */
   dubbing: (DubProgress & { language: CaptionLanguage }) | null
   dubNotice: string | null
+  /** Effects on the picture. */
+  filters: FilterSettings
+  /** The rendered-effects track on disk and what it was made from; not part of the project. */
+  filterTrack: FilterTrack | null
+  /** UI state: the rendering in progress, if any, 0…1. */
+  filtering: { fraction: number } | null
+  filterNotice: string | null
+  /** The screen track the preview shows: the recording, or the rendered-effects track when it is in use and current. */
+  screenUrl: string
+  /** Which picture an object is tracked in, so the track matches what is shown. */
+  trackingSource: 'screen' | 'screenFx'
   exportSettings: ExportSettings
   /** The words the captions are built from; not part of the project. `null` until transcribed. */
   transcript: Transcript | null
@@ -120,6 +133,7 @@ type TranslateCaptions = (
   sourceLocale: string
 ) => Promise<IpcResult<Record<string, string>>>
 type GenerateDub = (sessionId: string, request: DubRequest) => Promise<IpcResult<DubTrack>>
+type RenderFilters = (sessionId: string, request: FilterRenderRequest) => Promise<IpcResult<FilterTrack>>
 type SuggestCuts = (sessionId: string, choice: AiChoice) => Promise<IpcResult<CutSuggestionResult>>
 
 const NO_SPEECH_NOTICE = 'Nenhuma fala foi encontrada nesta trilha de áudio.'
@@ -146,6 +160,22 @@ const clamp = (value: number, min: number, max: number): number => Math.min(Math
  * effect — the recorded media is never touched — and is saved automatically
  * a moment later. Edits can be undone and redone.
  */
+/** Marking this close to the end of the recording leaves no frame to track. */
+const LAST_FRAME_GRACE_MS = 100
+const END_OF_VIDEO_NOTICE =
+  'Esse instante é o fim do vídeo e não há o que rastrear depois dele. Vá até o momento em que o objeto aparece e marque de novo.'
+
+/** What to tell the user when the tracker could not follow the object. */
+function trackingNotice(error: { message: string; detail?: string } | null): string {
+  const detail = error?.detail ?? ''
+  if (detail.includes('not seen')) return 'O objeto não foi reconhecido. Marque um retângulo mais justo em volta dele.'
+  if (detail.includes('nothing to track')) return END_OF_VIDEO_NOTICE
+  if (detail.includes('bounding box size')) {
+    return 'O rastreador não aceitou esse retângulo. Marque um retângulo menor, só em volta do objeto, e tente de novo.'
+  }
+  return error?.message ?? 'Não foi possível rastrear o objeto.'
+}
+
 export class EditorStore {
   private project: Project
   private transcript: Transcript | null
@@ -159,6 +189,11 @@ export class EditorStore {
   private markingObject = false
   private dubbing: (DubProgress & { language: CaptionLanguage }) | null = null
   private dubNotice: string | null = null
+  private filterTrack: FilterTrack | null
+  private filtering: { fraction: number } | null = null
+  private filterNotice: string | null = null
+  /** The rendering under way: what it is making, and when it is over. */
+  private filterRun: { key: string; promise: Promise<void> } | null = null
   /** Every suggestion received and not rejected; the pending ones are those no cut covers yet. */
   private allSuggestions: CutSuggestion[] = []
   private suggesting = false
@@ -181,6 +216,7 @@ export class EditorStore {
     this.project = session.project
     this.transcript = session.transcript
     this.dubs = [...session.dubs]
+    this.filterTrack = session.filterTrack
     this.objectTrack = session.track
     this.state = this.derive(NOTHING_SELECTED, 'saved')
   }
@@ -838,8 +874,14 @@ export class EditorStore {
   ): Promise<void> {
     if (this.tracking) return
     this.markingObject = false
-    this.tracking = { fraction: 0 }
     this.trackNotice = null
+    // Tracking goes forward from the marked instant: at the very end there is nothing to follow.
+    if (request.startMs >= this.session.durationMs - LAST_FRAME_GRACE_MS) {
+      this.trackNotice = END_OF_VIDEO_NOTICE
+      this.refreshTracking()
+      return
+    }
+    this.tracking = { fraction: 0 }
     this.refreshTracking()
     const result = await track(this.session.sessionId, request).catch(() => null)
     this.tracking = null
@@ -848,9 +890,7 @@ export class EditorStore {
     } else if (result?.error.detail?.includes('cancelled')) {
       this.trackNotice = null
     } else {
-      this.trackNotice = result?.error.detail?.includes('not seen')
-        ? 'O objeto não foi reconhecido. Marque um retângulo mais justo em volta dele.'
-        : (result?.error.message ?? 'Não foi possível rastrear o objeto.')
+      this.trackNotice = trackingNotice(result?.error ?? null)
     }
     this.refreshTracking()
   }
@@ -872,6 +912,103 @@ export class EditorStore {
       tracking: this.tracking,
       trackNotice: this.trackNotice,
       markingObject: this.markingObject
+    }
+    this.emit()
+  }
+
+  // --- effects ----------------------------------------------------------------
+
+  /** Turns one of the rendered effects on or off, or changes its strength. */
+  setRenderedFilter(name: RenderedFilterName, change: Partial<RenderedFilter>): void {
+    const filters = { ...this.project.filters, [name]: { ...this.project.filters[name], ...change } }
+    this.commit({ ...this.project, filters }, this.selected(), null)
+  }
+
+  setColor(change: Partial<ColorSettings>, gestureKey: string | null = null): void {
+    const merged = { ...this.project.filters.color, ...change }
+    const color: ColorSettings = {
+      brightness: clamp(merged.brightness, COLOR_LIMITS.brightness.min, COLOR_LIMITS.brightness.max),
+      contrast: clamp(merged.contrast, COLOR_LIMITS.contrast.min, COLOR_LIMITS.contrast.max),
+      saturation: clamp(merged.saturation, COLOR_LIMITS.saturation.min, COLOR_LIMITS.saturation.max)
+    }
+    this.commit({ ...this.project, filters: { ...this.project.filters, color } }, this.selected(), gestureKey)
+  }
+
+  resetColor(): void {
+    this.setColor({ ...DEFAULT_COLOR })
+  }
+
+  /** The screen track to show: the rendered one when it is wanted and matches the settings. */
+  private screenUrl(): string {
+    const { filters } = this.project
+    return needsRenderedTrack(filters) && this.filterTrack?.key === renderKey(filters)
+      ? this.filterTrack.url
+      : this.session.video.url
+  }
+
+  /**
+   * Keeps the rendered-effects track in step with the settings: renders it
+   * when the settings ask for effects the track does not have yet, and
+   * stops a rendering that no longer matches. Called whenever the project
+   * changes; it is a no-op when nothing has to be done.
+   */
+  async renderFilters(render: RenderFilters, cancel: () => void): Promise<void> {
+    const { filters } = this.project
+    const key = renderKey(filters)
+    const wanted = needsRenderedTrack(filters) && this.filterTrack?.key !== key
+    if (this.filterRun) {
+      if (this.filterRun.key === key && wanted) return
+      // Something else is wanted now: let the old rendering go.
+      cancel()
+      await this.filterRun.promise
+      if (renderKey(this.project.filters) !== key) return
+    }
+    if (!wanted) return
+    const request: FilterRenderRequest = {
+      stabilization: filters.stabilization,
+      denoise: filters.denoise,
+      sharpen: filters.sharpen
+    }
+    this.filtering = { fraction: 0 }
+    this.filterNotice = null
+    this.refreshFilters()
+    const promise = render(this.session.sessionId, request).then(
+      (result) => {
+        if (result.ok) {
+          // The track's address does not change when it is rendered again: the stamp makes the player reload it.
+          this.filterTrack = { url: `${result.value.url}?v=${Date.now()}`, key: result.value.key }
+        } else if (result.error.code !== 'filters-cancelled') {
+          this.filterNotice = result.error.message
+        }
+      },
+      () => {
+        this.filterNotice = 'Não foi possível aplicar os efeitos ao vídeo.'
+      }
+    )
+    const run = { key, promise }
+    this.filterRun = run
+    await promise
+    if (this.filterRun === run) {
+      this.filterRun = null
+      this.filtering = null
+    }
+    this.refreshFilters()
+  }
+
+  setFilterProgress(fraction: number): void {
+    if (!this.filtering) return
+    this.filtering = { fraction }
+    this.refreshFilters()
+  }
+
+  private refreshFilters(): void {
+    this.state = {
+      ...this.state,
+      filterTrack: this.filterTrack,
+      filtering: this.filtering,
+      filterNotice: this.filterNotice,
+      screenUrl: this.screenUrl(),
+      trackingSource: this.screenUrl() === this.session.video.url ? 'screen' : 'screenFx'
     }
     this.emit()
   }
@@ -1134,6 +1271,12 @@ export class EditorStore {
       markingObject: this.markingObject,
       dubbing: this.dubbing,
       dubNotice: this.dubNotice,
+      filters: this.project.filters,
+      filterTrack: this.filterTrack,
+      filtering: this.filtering,
+      filterNotice: this.filterNotice,
+      screenUrl: this.screenUrl(),
+      trackingSource: this.screenUrl() === this.session.video.url ? 'screen' : 'screenFx',
       exportSettings: this.project.export,
       transcript: this.transcript,
       transcription: this.transcription,

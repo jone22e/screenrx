@@ -160,6 +160,30 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
     }
   }, [session, store])
 
+  // The rendered effects (stabilization and the like) are a derived track made by FFmpeg in the
+  // main process: whenever their settings change, the track is made again after a short pause.
+  useEffect(() => {
+    const render = (sessionId: string, request: Parameters<typeof window.screenrx.filters.render>[1]) =>
+      window.screenrx.filters.render(sessionId, request)
+    const cancel = (): void => void window.screenrx.filters.cancel()
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const schedule = (): void => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => void store.renderFilters(render, cancel), 400)
+    }
+    schedule()
+    const unsubscribe = store.subscribe(schedule)
+    const stopProgress = window.screenrx.filters.onProgress((progress) => {
+      if (progress.sessionId === session.sessionId) store.setFilterProgress(progress.fraction)
+    })
+    return () => {
+      unsubscribe()
+      stopProgress()
+      if (timer) clearTimeout(timer)
+      if (store.getState().filtering) cancel()
+    }
+  }, [session, store])
+
   // So does dubbing: it runs in the main process and its helper.
   useEffect(() => {
     const unsubscribe = window.screenrx.dub.onProgress((progress) => store.setDubProgress(progress))

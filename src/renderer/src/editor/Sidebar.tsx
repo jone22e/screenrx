@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useState, useSyncExternalStore } from 'react'
 import { BACKGROUND_PRESETS } from '@engine/rendering/backgrounds'
+import { nextKeptSourceTime } from '@engine/time/timeMapping'
 import { ZOOM_LIMITS } from '@engine/zoom/zoomConfig'
 import { formatTimecode } from '@shared/format'
 import type { EditorSession } from '@shared/models/editor'
@@ -9,6 +10,7 @@ import { BACKGROUND_LIMITS, FRAME_LIMITS, WEBCAM_LIMITS } from '@shared/models/p
 import { AssistantPanel } from './AssistantPanel'
 import { CaptionsPanel } from './CaptionsPanel'
 import { DubbingPanel } from './DubbingSection'
+import { EffectsPanel } from './EffectsPanel'
 import type { EditorStore } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
 import { SuggestionsPanel } from './SuggestionsPanel'
@@ -30,6 +32,7 @@ import {
   TextIcon,
   TrashIcon,
   UndoIcon,
+  WandIcon,
   ZoomIcon
 } from './icons'
 
@@ -39,7 +42,7 @@ interface Props {
   player: PreviewPlayer | null
 }
 
-type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'dub' | 'format' | 'background' | 'webcam'
+type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'dub' | 'format' | 'effects' | 'background' | 'webcam'
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
 const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
@@ -71,6 +74,7 @@ export function Sidebar({ session, store, player }: Props) {
     { id: 'text', label: 'Texto', icon: <TextIcon /> },
     { id: 'dub', label: 'Dublagem', icon: <VoiceIcon /> },
     { id: 'format', label: 'Formato', icon: <FormatIcon /> },
+    { id: 'effects', label: 'Efeitos', icon: <WandIcon /> },
     { id: 'background', label: 'Fundo', icon: <BackdropIcon /> },
     ...(session.webcam ? [{ id: 'webcam' as const, label: 'Câmera', icon: <CameraIcon /> }] : [])
   ]
@@ -100,7 +104,8 @@ export function Sidebar({ session, store, player }: Props) {
         {tab === 'captions' && <CaptionsPanel session={session} store={store} player={player} />}
         {tab === 'text' && <TextPanel store={store} player={player} />}
         {tab === 'dub' && <DubbingPanel store={store} onOpenCaptions={() => choose('captions')} />}
-        {tab === 'format' && <FormatPanel session={session} store={store} onOpenBackground={() => choose('background')} />}
+        {tab === 'format' && <FormatPanel session={session} store={store} player={player} onOpenBackground={() => choose('background')} />}
+        {tab === 'effects' && <EffectsPanel store={store} />}
         {tab === 'background' && <BackgroundPanel store={store} />}
         {tab === 'webcam' && <WebcamPanel store={store} />}
         </div>
@@ -253,7 +258,7 @@ function ZoomPanel({ session, store, player }: Props) {
 
 /** The shape of the finished video, and how the recording goes into a vertical one. */
 /** The shape of the finished video, how the recording goes into it, and where the apps' interface will cover it. */
-function FormatPanel({ session, store, onOpenBackground }: { session: EditorSession; store: EditorStore; onOpenBackground: () => void }) {
+function FormatPanel({ session, store, player, onOpenBackground }: Props & { onOpenBackground: () => void }) {
   const { background, timeMap, exportSettings, objectTrack, tracking, trackNotice, markingObject } = useSyncExternalStore(store.subscribe, store.getState)
   const safe = useSafeAreas()
   const source = { width: session.video.widthPx, height: session.video.heightPx }
@@ -341,7 +346,17 @@ function FormatPanel({ session, store, onOpenBackground }: { session: EditorSess
                       ? `Objeto rastreado de ${formatTimecode(objectTrack.startMs)} a ${formatTimecode(objectTrack.endMs)}.`
                       : 'Nenhum objeto marcado ainda.'}
                   </p>
-                  <button className="panel-button panel-button-primary" onClick={() => store.setMarkingObject(true)}>
+                  <button
+                    className="panel-button panel-button-primary"
+                    onClick={() => {
+                      // Tracking goes forward from the marked frame; at the end of the video there is none to mark on.
+                      if (player && player.currentTimeMs >= session.durationMs - 100) {
+                        player.pause()
+                        player.seek(nextKeptSourceTime(timeMap, 0) ?? 0)
+                      }
+                      store.setMarkingObject(true)
+                    }}
+                  >
                     {objectTrack ? 'Marcar de novo' : 'Marcar objeto'}
                   </button>
                 </>
@@ -381,7 +396,10 @@ function FormatPanel({ session, store, onOpenBackground }: { session: EditorSess
           <label className="switch-row">
             <span className="switch-row-text">
               <strong>Mostrar áreas seguras</strong>
-              <span>Marca no preview onde os botões do app cobrem o vídeo. Não sai na exportação.</span>
+              <span>
+                Desenha no preview, só como guia, as faixas que Reels, TikTok e Shorts cobrem com os próprios botões
+                e legendas. Não sai na exportação.
+              </span>
             </span>
             <input type="checkbox" role="switch" checked={safe} onChange={(event) => safeAreas.set(event.target.checked)} />
           </label>
