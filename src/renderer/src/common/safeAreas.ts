@@ -4,8 +4,9 @@ const KEY = 'screenrx.preview.safe-areas'
 
 /**
  * Whether the preview marks the parts of a vertical video that the social
- * apps' own buttons and captions cover. A preference of this Mac, not of
- * any project; the export never draws it.
+ * apps' own buttons and captions cover. Off until asked for: unexplained
+ * marks over the picture read as a flaw in the video. A preference of this
+ * Mac, not of any project; the export never draws it.
  */
 class SafeAreasStore {
   private shown: boolean
@@ -13,9 +14,9 @@ class SafeAreasStore {
 
   constructor() {
     try {
-      this.shown = window.localStorage.getItem(KEY) !== 'off'
+      this.shown = window.localStorage.getItem(KEY) === 'on'
     } catch {
-      this.shown = true
+      this.shown = false
     }
   }
 
@@ -44,10 +45,11 @@ export const useSafeAreas = (): boolean => useSyncExternalStore(safeAreas.subscr
 /**
  * Where the apps' interface sits over a 9:16 video, as shares of the output:
  * the status bar and title at the top, the caption and music at the bottom,
- * the column of buttons on the right.
+ * the column of buttons on the right. Each is named, so the marks explain
+ * themselves on the preview.
  */
-export const SAFE_AREA_BANDS: ReadonlyArray<{ x: number; y: number; width: number; height: number }> = [
-  { x: 0, y: 0, width: 1, height: 0.1 },
-  { x: 0, y: 0.8, width: 1, height: 0.2 },
-  { x: 0.84, y: 0.35, width: 0.16, height: 0.45 }
+export const SAFE_AREA_BANDS: ReadonlyArray<{ x: number; y: number; width: number; height: number; label: string }> = [
+  { x: 0, y: 0, width: 1, height: 0.1, label: 'Topo do app' },
+  { x: 0, y: 0.8, width: 1, height: 0.2, label: 'Legenda e música do app' },
+  { x: 0.84, y: 0.35, width: 0.16, height: 0.45, label: 'Botões' }
 ]
