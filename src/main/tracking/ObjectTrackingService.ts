@@ -45,7 +45,7 @@ export class ObjectTrackingService {
     if (!manifest?.assets.screen) throw new ObjectTrackingError(appError('invalid-state', 'session has no screen track'))
 
     const startedAt = Date.now()
-    const samples = await this.run(binaryPath, sessionId, sessions.trackPathOf(sessionId, 'screen'), request)
+    const samples = await this.run(binaryPath, sessionId, sessions.trackPathOf(sessionId, request.source), request)
     if (samples.length === 0) throw new ObjectTrackingError(appError('unknown', 'the object was not seen at all'))
     const track: ObjectTrack = {
       schemaVersion: OBJECT_TRACK_SCHEMA_VERSION,

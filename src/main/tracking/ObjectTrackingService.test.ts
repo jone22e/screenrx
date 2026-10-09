@@ -46,7 +46,7 @@ describe('ObjectTrackingService', () => {
       '{"type":"done"}'
     ])
     const { service, progress } = createService(binary)
-    const track = await service.track(SESSION_ID, { startMs: 1000, rect: { x: 0.45, y: 0.35, width: 0.1, height: 0.1 } })
+    const track = await service.track(SESSION_ID, { startMs: 1000, rect: { x: 0.45, y: 0.35, width: 0.1, height: 0.1 }, source: 'screen' })
     expect(track.samples).toEqual([
       { timeMs: 1000, x: 0.5, y: 0.4 },
       { timeMs: 1033, x: 0.52, y: 0.41 }
@@ -61,14 +61,14 @@ describe('ObjectTrackingService', () => {
   it('reports what the tracker reports, and an object never seen', async () => {
     const failing = await fakeTracker(['{"type":"error","code":"unreadable-video","detail":"no video"}'], 'exit 1')
     const { service } = createService(failing)
-    await expect(service.track(SESSION_ID, { startMs: 0, rect: { x: 0, y: 0, width: 0.1, height: 0.1 } })).rejects.toBeInstanceOf(ObjectTrackingError)
+    await expect(service.track(SESSION_ID, { startMs: 0, rect: { x: 0, y: 0, width: 0.1, height: 0.1 }, source: 'screen' })).rejects.toBeInstanceOf(ObjectTrackingError)
     const empty = await fakeTracker(['{"type":"done"}'])
     const { service: other } = createService(empty)
-    await expect(other.track(SESSION_ID, { startMs: 0, rect: { x: 0, y: 0, width: 0.1, height: 0.1 } })).rejects.toThrow(/not seen/)
+    await expect(other.track(SESSION_ID, { startMs: 0, rect: { x: 0, y: 0, width: 0.1, height: 0.1 }, source: 'screen' })).rejects.toThrow(/not seen/)
   })
 
   it('has no tracker on other platforms', async () => {
     const { service } = createService(null)
-    await expect(service.track(SESSION_ID, { startMs: 0, rect: { x: 0, y: 0, width: 0.1, height: 0.1 } })).rejects.toThrow(/no tracker/)
+    await expect(service.track(SESSION_ID, { startMs: 0, rect: { x: 0, y: 0, width: 0.1, height: 0.1 }, source: 'screen' })).rejects.toThrow(/no tracker/)
   })
 })

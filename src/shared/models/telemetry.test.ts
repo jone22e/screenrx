@@ -26,8 +26,10 @@ describe('parseObjectTrackRequest', () => {
   it('accepts a rectangle inside the frame and nothing else', () => {
     expect(parseObjectTrackRequest({ startMs: 1200, rect: { x: 0.4, y: 0.4, width: 0.2, height: 0.1 } })).toEqual({
       startMs: 1200,
-      rect: { x: 0.4, y: 0.4, width: 0.2, height: 0.1 }
+      rect: { x: 0.4, y: 0.4, width: 0.2, height: 0.1 },
+      source: 'screen'
     })
+    expect(parseObjectTrackRequest({ startMs: 0, rect: { x: 0.4, y: 0.4, width: 0.2, height: 0.1 }, source: 'screenFx' })?.source).toBe('screenFx')
     expect(parseObjectTrackRequest({ startMs: 0, rect: { x: 0.4, y: 0.4, width: 0, height: 0.1 } })).toBe(null)
     expect(parseObjectTrackRequest({ startMs: 0, rect: { x: 1.2, y: 0.4, width: 0.2, height: 0.1 } })).toBe(null)
     expect(parseObjectTrackRequest({ startMs: -5, rect: { x: 0.4, y: 0.4, width: 0.2, height: 0.1 } })?.startMs).toBe(0)

@@ -113,6 +113,8 @@ export function parseObjectTrack(value: unknown): ObjectTrack | null {
 export interface ObjectTrackRequest {
   startMs: number
   rect: { x: number; y: number; width: number; height: number }
+  /** Which picture to follow the object in: the recording, or the one with rendered effects (stabilized). */
+  source: 'screen' | 'screenFx'
 }
 
 export function parseObjectTrackRequest(value: unknown): ObjectTrackRequest | null {
@@ -122,5 +124,9 @@ export function parseObjectTrackRequest(value: unknown): ObjectTrackRequest | nu
   if (!Number.isFinite(request.startMs) || typeof rect !== 'object' || rect === null) return null
   const within = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1
   if (!within(rect.x) || !within(rect.y) || !within(rect.width) || !within(rect.height) || rect.width <= 0 || rect.height <= 0) return null
-  return { startMs: Math.max(0, request.startMs as number), rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } }
+  return {
+    startMs: Math.max(0, request.startMs as number),
+    rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+    source: request.source === 'screenFx' ? 'screenFx' : 'screen'
+  }
 }
