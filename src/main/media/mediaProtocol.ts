@@ -16,6 +16,7 @@ const CONTENT_TYPES: Record<MediaTrack, string> = {
   dubZh: 'audio/mp4',
   dubPt: 'audio/mp4',
   screen: 'video/mp4',
+  screenFx: 'video/mp4',
   webcam: 'video/mp4',
   microphone: 'audio/mp4',
   systemAudio: 'audio/mp4'
