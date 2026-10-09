@@ -12,8 +12,11 @@ const silentLogger: Logger = { debug() {}, info() {}, warn() {}, error() {} }
 
 describe('canCopyVideo', () => {
   it('copies 8-bit 4:2:0 H.264 and re-encodes everything else', () => {
-    const video = { codec: 'h264', pixelFormat: 'yuv420p', widthPx: 1920, heightPx: 1080, fps: 30 }
+    const video = { codec: 'h264', pixelFormat: 'yuv420p', widthPx: 1920, heightPx: 1080, fps: 30, rotationDeg: 0 }
     expect(canCopyVideo(video)).toBe(true)
+    // A phone video asks to be shown rotated: it is re-encoded upright, so the file needs no rotating.
+    expect(canCopyVideo({ ...video, rotationDeg: 90 })).toBe(false)
+    expect(canCopyVideo({ ...video, rotationDeg: 270 })).toBe(false)
     expect(canCopyVideo({ ...video, pixelFormat: 'yuvj420p' })).toBe(true)
     expect(canCopyVideo({ ...video, pixelFormat: 'yuv420p10le' })).toBe(false)
     expect(canCopyVideo({ ...video, pixelFormat: null })).toBe(false)
@@ -113,6 +116,20 @@ describe('VideoImporter', () => {
     const sessionId = await importer.import(file)
 
     expect((await sessions.read(sessionId))?.assets.screen).toMatchObject({ widthPx: 320, heightPx: 240 })
+  })
+
+  it('bakes in the rotation a phone video asks for, so the stored frames are upright', async () => {
+    // A display matrix, as phones write it: set on the way in and kept by the stream copy.
+    const plain = makeVideo('plain.mp4', ['-c:v', 'libx264', '-pix_fmt', 'yuv420p'], false)
+    const file = path.join(directory, 'phone.mp4')
+    run(binaries.ffmpeg, ['-v', 'error', '-y', '-display_rotation', '90', '-i', plain, '-c:v', 'copy', file])
+    expect((await ffmpeg.probeMedia(file)).video?.rotationDeg).not.toBe(0)
+
+    const sessionId = await importer.import(file)
+
+    const screen = sessions.trackPathOf(sessionId, 'screen')
+    expect((await sessions.read(sessionId))?.assets.screen).toMatchObject({ widthPx: 240, heightPx: 320 })
+    expect((await ffmpeg.probeMedia(screen)).video).toMatchObject({ widthPx: 240, heightPx: 320, rotationDeg: 0 })
   })
 
   it('rejects a file without video and leaves nothing behind', async () => {

@@ -57,7 +57,8 @@ export class VideoImporter {
       file: filePath,
       codec: video.codec,
       audio: probe.audio?.codec ?? null,
-      size: `${video.widthPx}x${video.heightPx}`
+      size: `${video.widthPx}x${video.heightPx}`,
+      rotationDeg: video.rotationDeg
     })
 
     try {
@@ -146,9 +147,19 @@ export class VideoImporter {
 /** Pixel formats WebCodecs decodes everywhere; anything else (10-bit, 4:4:4) is re-encoded. */
 const COPYABLE_PIXEL_FORMATS = new Set(['yuv420p', 'yuvj420p'])
 
-/** H.264 in a common pixel format goes in as is; everything else is re-encoded. */
+/**
+ * H.264 in a common pixel format goes in as is; everything else is re-encoded.
+ * So is a file that asks to be shown rotated (a phone video): players honour
+ * that, frame decoders and the object tracker do not, and the frames must mean
+ * the same thing to all of them. Re-encoding bakes the rotation in.
+ */
 export function canCopyVideo(video: NonNullable<MediaProbe['video']>): boolean {
-  return video.codec === 'h264' && video.pixelFormat !== null && COPYABLE_PIXEL_FORMATS.has(video.pixelFormat)
+  return (
+    video.codec === 'h264' &&
+    video.pixelFormat !== null &&
+    COPYABLE_PIXEL_FORMATS.has(video.pixelFormat) &&
+    video.rotationDeg === 0
+  )
 }
 
 /** Same rule as the export: bits proportional to pixels per second, within the export's bounds. */

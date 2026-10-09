@@ -101,16 +101,24 @@ describe('parseMediaProbe', () => {
     const json = JSON.stringify({
       streams: [
         { codec_type: 'audio', codec_name: 'aac' },
-        { codec_type: 'video', codec_name: 'h264', pix_fmt: 'yuv420p', width: 1920, height: 1080, avg_frame_rate: '30000/1001' },
+        { codec_type: 'video', codec_name: 'h264', pix_fmt: 'yuv420p', width: 1920, height: 1080, avg_frame_rate: '30000/1001', side_data_list: [{ side_data_type: 'Display Matrix', rotation: -90 }] },
         { codec_type: 'video', codec_name: 'mjpeg', width: 100, height: 100, avg_frame_rate: '0/0' }
       ],
       format: { duration: '12.345' }
     })
     expect(parseMediaProbe(json)).toEqual({
       durationMs: 12_345,
-      video: { codec: 'h264', pixelFormat: 'yuv420p', widthPx: 1920, heightPx: 1080, fps: 29.97 },
+      video: { codec: 'h264', pixelFormat: 'yuv420p', widthPx: 1920, heightPx: 1080, fps: 29.97, rotationDeg: 270 },
       audio: { codec: 'aac' }
     })
+  })
+
+  it('reads the rotation from the rotate tag when a file has no display matrix', () => {
+    const json = JSON.stringify({
+      streams: [{ codec_type: 'video', codec_name: 'h264', width: 1280, height: 720, avg_frame_rate: '30/1', tags: { rotate: '90' } }],
+      format: { duration: '1' }
+    })
+    expect(parseMediaProbe(json)?.video?.rotationDeg).toBe(90)
   })
 
   it('reports a file without video, an unknown frame rate and a missing duration', () => {
@@ -120,7 +128,7 @@ describe('parseMediaProbe', () => {
     })
     expect(parseMediaProbe(json)).toEqual({
       durationMs: 0,
-      video: { codec: 'vp9', pixelFormat: null, widthPx: 640, heightPx: 360, fps: 0 },
+      video: { codec: 'vp9', pixelFormat: null, widthPx: 640, heightPx: 360, fps: 0, rotationDeg: 0 },
       audio: null
     })
     expect(parseMediaProbe(JSON.stringify({ streams: [{ codec_type: 'audio', codec_name: 'mp3' }], format: {} }))).toEqual({

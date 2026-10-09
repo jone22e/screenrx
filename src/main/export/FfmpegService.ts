@@ -60,6 +60,12 @@ export interface MediaProbe {
     heightPx: number
     /** Average frame rate; 0 when the file does not say. */
     fps: number
+    /**
+     * Rotation the file asks players to apply (phone videos carry one), in
+     * degrees; 0 when none. The stored frames are not rotated: `widthPx` and
+     * `heightPx` are theirs, not the picture's as shown.
+     */
+    rotationDeg: number
   } | null
   audio: { codec: string } | null
 }
@@ -218,7 +224,8 @@ export class FfmpegService {
   async probeMedia(filePath: string): Promise<MediaProbe> {
     const output = await this.run(this.binaries.ffprobe, [
       '-v', 'error',
-      '-show_entries', 'stream=codec_type,codec_name,pix_fmt,width,height,avg_frame_rate:format=duration',
+      // Whole stream sections: the rotation sits in side data the bundled FFprobe cannot be asked for by name.
+      '-show_entries', 'stream:format=duration',
       '-of', 'json',
       filePath
     ])
@@ -253,6 +260,57 @@ export class FfmpegService {
       '-f', 'mp4',
       outputPath
     ])
+  }
+
+  /**
+   * Runs one FFmpeg pass over a video with a filter graph: to `outputPath`
+   * as H.264 (hardware when available) at `bitrate`, or to nowhere when
+   * `outputPath` is `null` (an analysis pass, whose filters write their own
+   * result). `onProgress` is told how far into the video FFmpeg is, 0…1.
+   * Resolves when FFmpeg is done; `cancel` kills it and rejects with
+   * `FfmpegCancelledError`.
+   */
+  filterVideo(
+    inputPath: string,
+    outputPath: string | null,
+    options: { filters: string; bitrate: number; durationMs: number; onProgress: (fraction: number) => void }
+  ): { done: Promise<void>; cancel: () => void } {
+    const encode = async (): Promise<string[]> =>
+      outputPath === null
+        ? ['-f', 'null', '-']
+        : [
+            ...((await this.selectH264Encoder()) === 'h264_videotoolbox'
+              ? ['-c:v', 'h264_videotoolbox', '-b:v', String(options.bitrate), '-profile:v', 'high', '-allow_sw', '1']
+              : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-profile:v', 'high']),
+            '-movflags', '+faststart',
+            '-f', 'mp4',
+            outputPath
+          ]
+    let process: FfmpegProcess | null = null
+    let cancelled = false
+    const done = (async () => {
+      const output = await encode()
+      if (cancelled) throw new FfmpegCancelledError()
+      process = this.spawn(
+        ['-v', 'error', '-y', '-nostats', '-progress', 'pipe:1', '-i', inputPath, '-map', '0:v:0', '-an', '-sn', '-dn', '-vf', options.filters, ...output],
+        (line) => {
+          // FFmpeg's progress report: `out_time_us=<microseconds>` once per update.
+          const match = /^out_time_us=(\d+)/.exec(line)
+          if (match && options.durationMs > 0) {
+            options.onProgress(Math.min(1, Number(match[1]) / 1000 / options.durationMs))
+          }
+        }
+      )
+      await process.done
+    })()
+    done.catch(() => undefined)
+    return {
+      done,
+      cancel: () => {
+        cancelled = true
+        process?.cancel()
+      }
+    }
   }
 
   /**
@@ -340,12 +398,21 @@ export class FfmpegService {
   }
 
   /** Starts FFmpeg with `args`, to be fed through its stdin. */
-  spawn(args: string[]): FfmpegProcess {
-    const child = spawn(this.binaries.ffmpeg, args, { stdio: ['pipe', 'ignore', 'pipe'] })
+  spawn(args: string[], onStdoutLine?: (line: string) => void): FfmpegProcess {
+    const child = spawn(this.binaries.ffmpeg, args, { stdio: ['pipe', 'pipe', 'pipe'] })
     let stderrTail = ''
     let cancelled = false
     child.stderr.on('data', (chunk: Buffer) => {
       stderrTail = (stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_BYTES)
+    })
+    // Stdout carries nothing unless asked for a progress report; either way it is drained.
+    let pending = ''
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (!onStdoutLine) return
+      pending += chunk.toString('utf8')
+      const lines = pending.split('\n')
+      pending = lines.pop() ?? ''
+      for (const line of lines) onStdoutLine(line)
     })
     // A failed FFmpeg closes its stdin; the exit handler below reports why.
     child.stdin.on('error', () => undefined)
@@ -445,11 +512,29 @@ export function parseMediaProbe(json: string): MediaProbe | null {
             pixelFormat: text(video?.['pix_fmt']),
             widthPx,
             heightPx,
-            fps: parseFrameRate(video?.['avg_frame_rate'])
+            fps: parseFrameRate(video?.['avg_frame_rate']),
+            rotationDeg: parseRotation(video?.['side_data_list'], video?.['tags'])
           }
         : null,
     audio: audioCodec ? { codec: audioCodec } : null
   }
+}
+
+/**
+ * The rotation a stream asks for, normalized to 0, 90, 180 or 270: from its
+ * display matrix (side data), or from the older `rotate` tag when that is all
+ * the file has.
+ */
+function parseRotation(sideData: unknown, tags: unknown): number {
+  const normalize = (degrees: number): number => ((Math.round(degrees / 90) * 90) % 360 + 360) % 360
+  if (Array.isArray(sideData)) {
+    for (const entry of sideData as Array<Record<string, unknown>>) {
+      const rotation = Number(entry?.['rotation'])
+      if (Number.isFinite(rotation) && rotation !== 0) return normalize(rotation)
+    }
+  }
+  const tagged = Number((tags as Record<string, unknown> | undefined)?.['rotate'])
+  return Number.isFinite(tagged) && tagged !== 0 ? normalize(tagged) : 0
 }
 
 /** FFprobe writes frame rates as a fraction, e.g. `30000/1001`; `0/0` means unknown. */
