@@ -7,6 +7,9 @@
  * `<session>/project.json`; ephemeral UI state never goes here.
  */
 
+import type { FilterSettings } from './filters'
+import { createFilterSettings, parseFilterSettings } from './filters'
+
 /** Position in the original recording, as stored in the session's tracks. */
 export type SourceMs = number & { readonly __timeSpace: 'source' }
 /** Position in the edited timeline: source time after trims and speed regions. */
@@ -241,6 +244,8 @@ export interface Project {
   texts: TextOverlay[]
   audio: AudioSettings
   dub: DubSettings
+  /** Effects on the picture: stabilization, noise reduction, sharpening, colour. */
+  filters: FilterSettings
   export: ExportSettings
 }
 
@@ -334,6 +339,7 @@ export function createProject(sessionId: string, effects: TimelineEffect[] = [])
     texts: [],
     audio: createAudioSettings(),
     dub: { language: null },
+    filters: createFilterSettings(),
     export: { ...DEFAULT_EXPORT_SETTINGS }
   }
 }
@@ -595,6 +601,7 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
       language:
         isRecord(value.dub) && includes(CAPTION_LANGUAGES, value.dub.language) ? value.dub.language : null
     },
+    filters: parseFilterSettings(value.filters),
     export: {
       format: 'mp4',
       quality: settings.quality === 'standard' ? 'standard' : 'high',

@@ -26,6 +26,10 @@ export type AppErrorCode =
   | 'ai-busy'
   | 'ai-no-transcript'
   | 'ai-install-failed'
+  | 'filters-failed'
+  | 'filters-cancelled'
+  | 'filters-busy'
+  | 'filters-not-applied'
   | 'dub-unavailable'
   | 'dub-model-missing'
   | 'dub-download-failed'
@@ -89,6 +93,10 @@ const MESSAGES: Record<AppErrorCode, string> = {
     'A IA não respondeu como esperado. Confira se o login da ferramenta está ativo e tente de novo.',
   'ai-cancelled': 'A análise foi cancelada.',
   'ai-busy': 'Já existe uma análise em andamento.',
+  'filters-failed': 'Não foi possível aplicar os efeitos ao vídeo.',
+  'filters-cancelled': 'A aplicação dos efeitos foi cancelada.',
+  'filters-busy': 'Os efeitos já estão sendo aplicados. Aguarde terminar.',
+  'filters-not-applied': 'Os efeitos ainda não foram aplicados ao vídeo. Aguarde terminar na aba Efeitos e exporte de novo.',
   'dub-unavailable': 'A dublagem não está disponível nesta versão do app (ela precisa de um Mac com Apple Silicon).',
   'dub-model-missing': 'O modelo de voz ainda não foi baixado. Baixe-o para gerar a dublagem.',
   'dub-download-failed': 'Não foi possível baixar o modelo de voz. Confira a conexão e tente de novo.',

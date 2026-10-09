@@ -1,5 +1,6 @@
 import type { Transcript } from './captions'
 import type { DubTrack } from './dub'
+import type { FilterTrack } from './filters'
 import type { Project } from './project'
 import type { CursorSample, InteractionEvent, ObjectTrack } from './telemetry'
 
@@ -27,6 +28,8 @@ export interface EditorSession {
   track: ObjectTrack | null
   /** Dubbing tracks already generated for this session, one per language. */
   dubs: DubTrack[]
+  /** The screen track with rendered effects, when one has been made, and what it was made from. */
+  filterTrack: FilterTrack | null
   /** Speech-to-text of the session's audio, when it has been transcribed. */
   transcript: Transcript | null
   project: Project

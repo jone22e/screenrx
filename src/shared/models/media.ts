@@ -3,6 +3,8 @@ export const MEDIA_SCHEME = 'screenrx-media'
 
 export const MEDIA_TRACKS = [
   'screen',
+  /** The screen track with the rendered effects applied; derived, made again whenever they change. */
+  'screenFx',
   'webcam',
   'microphone',
   'systemAudio',
