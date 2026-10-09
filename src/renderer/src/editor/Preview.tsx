@@ -30,6 +30,20 @@ type Press =
   /** Drawing the rectangle around the object to follow, in output pixels. */
   | { kind: 'mark'; startX: number; startY: number }
 
+/** Within this distance of the output's centre (as a share of it), a dragged object snaps to the centre. */
+const CENTRE_SNAP = 0.015
+
+/**
+ * Snaps a dragged object's centre to the output's centre lines when it comes
+ * close, and shows the lines it snapped to, as drawing apps do.
+ */
+function snapToCentre(player: PreviewPlayer, x: number, y: number): { x: number; y: number } {
+  const vertical = Math.abs(x - 0.5) < CENTRE_SNAP
+  const horizontal = Math.abs(y - 0.5) < CENTRE_SNAP
+  player.setGuides({ vertical, horizontal })
+  return { x: vertical ? 0.5 : x, y: horizontal ? 0.5 : y }
+}
+
 const settingsOf = (state: EditorState): PreviewSettings => ({
   timeMap: state.timeMap,
   zooms: state.zooms,
@@ -42,7 +56,9 @@ const settingsOf = (state: EditorState): PreviewSettings => ({
   objectTrack: state.objectTrack,
   audio: state.audio,
   dubUrl: state.dubs.find((dub) => dub.language === state.dub.language)?.url ?? null,
-  speed: state.exportSettings.speed
+  speed: state.exportSettings.speed,
+  screenUrl: state.screenUrl,
+  color: state.filters.color
 })
 
 /**
@@ -141,6 +157,8 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       return
     }
     if (at.text) store.selectText(at.text.id)
+    // A press anywhere else lets go of the selected text: its frame and panel are gone.
+    else if (!at.handle && store.getState().selectedTextId) store.selectText(null)
     press.current = at.text
       ? { kind: 'text', id: at.text.id, grabX: at.x - (at.text.box.x + at.text.box.width / 2), grabY: at.y - (at.text.box.y + at.text.box.height / 2) }
       : grabbed
@@ -162,16 +180,8 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     const current = press.current
     if (current?.kind === 'webcam') {
       // Dragging frees the webcam from its corner.
-      store.setWebcam(
-        {
-          corner: null,
-          position: {
-            x: (at.x - current.grabX) / at.output.width,
-            y: (at.y - current.grabY) / at.output.height
-          }
-        },
-        'webcam-move'
-      )
+      const position = snapToCentre(at.instance, (at.x - current.grabX) / at.output.width, (at.y - current.grabY) / at.output.height)
+      store.setWebcam({ corner: null, position }, 'webcam-move')
       return
     }
     if (current?.kind === 'crop') {
@@ -211,23 +221,13 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       return
     }
     if (current?.kind === 'text') {
-      store.setTextStyle(
-        current.id,
-        { position: { x: (at.x - current.grabX) / at.output.width, y: (at.y - current.grabY) / at.output.height } },
-        'text-move'
-      )
+      const position = snapToCentre(at.instance, (at.x - current.grabX) / at.output.width, (at.y - current.grabY) / at.output.height)
+      store.setTextStyle(current.id, { position }, 'text-move')
       return
     }
     if (current?.kind === 'caption') {
-      store.setCaptionStyle(
-        {
-          position: {
-            x: (at.x - current.grabX) / at.output.width,
-            y: (at.y - current.grabY) / at.output.height
-          }
-        },
-        'caption-move'
-      )
+      const position = snapToCentre(at.instance, (at.x - current.grabX) / at.output.width, (at.y - current.grabY) / at.output.height)
+      store.setCaptionStyle({ position }, 'caption-move')
       return
     }
     const { background, selectedZoomId } = store.getState()
@@ -263,7 +263,12 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       const b = corner(Math.max(current.startX, at.x), Math.max(current.startY, at.y))
       if (!a || !b || b.x - a.x < 0.01 || b.y - a.y < 0.01) return
       void store.startObjectTracking(
-        { startMs: at.instance.currentTimeMs, rect: { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y } },
+        {
+          startMs: at.instance.currentTimeMs,
+          rect: { x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y },
+          // Followed in the picture being shown, so the track matches it.
+          source: store.getState().trackingSource
+        },
         (sessionId, request) => window.screenrx.track.start(sessionId, request)
       )
       return
@@ -275,6 +280,7 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       current?.kind === 'text-resize' ||
       current?.kind === 'crop'
     ) {
+      player.current?.setGuides({ vertical: false, horizontal: false })
       store.endGesture()
       return
     }

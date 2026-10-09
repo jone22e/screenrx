@@ -3,6 +3,7 @@ import { textsAt } from '@engine/captions/textOverlays'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import { outputSizeFor } from '@engine/rendering/frameLayout'
 import { SAFE_AREA_BANDS } from '../common/safeAreas'
+import type { ColorSettings } from '@shared/models/filters'
 import type { TimeMap } from '@engine/time/timeMapping'
 import { keptSourceTime, nextKeptSourceTime } from '@engine/time/timeMapping'
 import { correctTrack } from '@engine/time/trackSync'
@@ -18,9 +19,10 @@ import type {
   NormalizedPoint,
   TextOverlay,
   WebcamSettings,
-  ZoomEffect
+  ZoomEffect,
+  CaptionStyle
 } from '@shared/models/project'
-import { composeFrame } from '../rendering/composeFrame'
+import { composeFrame, drawCaption } from '../rendering/composeFrame'
 
 /** The preview canvas never needs more pixels than this, whatever the recording's size. */
 const MAX_PREVIEW_WIDTH_PX = 1920
@@ -28,10 +30,12 @@ const MAX_PREVIEW_WIDTH_PX = 1920
 /** The frame around the selected text: dashed, with a square handle at each corner to resize it. */
 export const TEXT_SELECTION = {
   /** Side of a corner handle, as a share of the output width (never under the minimum). */
-  handleRatio: 0.012,
-  minHandlePx: 9,
+  handleRatio: 0.018,
+  minHandlePx: 12,
   /** Room left around the text's block. */
-  paddingRatio: 0.012
+  paddingRatio: 0.02,
+  /** How far the frosted panel behind a selected text blurs what is under it, as a share of the output width. */
+  blurRatio: 0.008
 } as const
 
 /** The handle size and the padded box of the selection, in output pixels. */
@@ -76,6 +80,10 @@ export interface PreviewSettings {
   dubUrl: string | null
   /** Global speed of the finished video: the preview plays at it, as the exported file will. */
   speed: number
+  /** The screen track to show: the recording, or the one with rendered effects. */
+  screenUrl: string
+  /** Colour applied to the picture while drawing, as the export does. */
+  color: ColorSettings
 }
 
 /**
@@ -149,9 +157,36 @@ export class PreviewPlayer {
       return { kind: track.kind, element }
     })
     this.companions = [...(this.webcam ? [this.webcam] : []), ...this.audioTracks.map((track) => track.element)]
+    this.screenUrl = session.video.url
+    this.applyScreenSource()
     this.applyDub()
     this.applyMutes()
     this.applySpeed()
+  }
+
+  /** Which file the screen element is showing. */
+  private screenUrl: string
+
+  /**
+   * Switches the screen track to the one the settings name (the recording,
+   * or the rendered-effects track), staying at the same instant and in the
+   * same state of play. The other tracks are not touched: they follow the
+   * screen track as they always do.
+   */
+  private applyScreenSource(): void {
+    const url = this.settings.screenUrl
+    if (url === this.screenUrl) return
+    this.screenUrl = url
+    const timeS = this.video.currentTime
+    const wasPlaying = this.playing
+    const resume = (): void => {
+      this.video.removeEventListener('loadedmetadata', resume)
+      this.video.currentTime = timeS
+      if (wasPlaying) void this.video.play().catch(() => undefined)
+    }
+    this.video.addEventListener('loadedmetadata', resume)
+    this.video.src = url
+    this.video.load()
   }
 
   get currentTimeMs(): number {
@@ -204,6 +239,7 @@ export class PreviewPlayer {
   update(settings: PreviewSettings): void {
     const cutsChanged = settings.timeMap !== this.settings.timeMap
     this.settings = settings
+    this.applyScreenSource()
     // A paused playhead never stays on a cut stretch: a cut made around it moves it to what is kept.
     if (cutsChanged && !this.playing) this.leaveCuts()
     const output = this.outputFor(settings)
@@ -380,6 +416,7 @@ export class PreviewPlayer {
       pointer: this.cursorPath.length > 0 ? pointerAt(this.cursorPath, timeMs) : null,
       object: this.objectPointAt(timeMs),
       background: this.settings.background,
+      color: this.settings.color,
       caption: caption === null ? null : { text: caption, style: captions.style },
       texts: textsAt(this.settings.texts, timeMs)
     })
@@ -387,44 +424,163 @@ export class PreviewPlayer {
     this.drawnTexts = regions.texts
     if (this.settings.safeAreas && this.settings.background.aspect === '9:16') this.drawSafeAreas()
     const selected = regions.texts.find((text) => text.id === this.settings.selectedTextId)
-    if (selected) this.drawTextSelection(selected.box)
+    const selectedText = selected ? textsAt(this.settings.texts, timeMs).find((text) => text.id === selected.id) : null
+    if (selected && selectedText) this.drawTextSelection(selected.box, selectedText)
+    if (this.guides.vertical || this.guides.horizontal) this.drawGuides()
     for (const listener of this.timeListeners) listener(timeMs)
   }
 
-  /** Shades where the social apps' interface covers a vertical video — on the preview only. */
+  /**
+   * Marks where the social apps' interface covers a vertical video — on the
+   * preview only. Hatched, outlined and named, so they read as guides laid
+   * over the picture, not as something wrong with it.
+   */
   private drawSafeAreas(): void {
     const context = this.context
     const { width, height } = this.output
-    context.save()
-    context.fillStyle = 'rgba(255, 80, 80, 0.18)'
-    context.strokeStyle = 'rgba(255, 120, 120, 0.6)'
-    context.lineWidth = Math.max(1, width / 1080)
-    context.setLineDash([6 * context.lineWidth, 4 * context.lineWidth])
+    const line = Math.max(1, width / 1080)
+    const fontPx = Math.max(11, Math.round(width / 40))
     for (const band of SAFE_AREA_BANDS) {
-      context.fillRect(band.x * width, band.y * height, band.width * width, band.height * height)
-      context.strokeRect(band.x * width, band.y * height, band.width * width, band.height * height)
+      const rect = { x: band.x * width, y: band.y * height, width: band.width * width, height: band.height * height }
+      context.save()
+      context.beginPath()
+      context.rect(rect.x, rect.y, rect.width, rect.height)
+      context.clip()
+      context.fillStyle = 'rgba(0, 0, 0, 0.12)'
+      context.fillRect(rect.x, rect.y, rect.width, rect.height)
+      // Diagonal hatching, the usual mark for "covered".
+      context.strokeStyle = 'rgba(255, 255, 255, 0.28)'
+      context.lineWidth = line
+      const step = 14 * line
+      context.beginPath()
+      for (let offset = -rect.height; offset < rect.width + rect.height; offset += step) {
+        context.moveTo(rect.x + offset, rect.y + rect.height)
+        context.lineTo(rect.x + offset + rect.height, rect.y)
+      }
+      context.stroke()
+      context.restore()
+
+      context.save()
+      context.strokeStyle = 'rgba(255, 255, 255, 0.75)'
+      context.lineWidth = line
+      context.setLineDash([6 * line, 4 * line])
+      context.strokeRect(rect.x + line / 2, rect.y + line / 2, rect.width - line, rect.height - line)
+      context.restore()
+
+      // The name, at the band's top left, over a small plate so it stays readable on any picture.
+      context.save()
+      context.font = `600 ${fontPx}px -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif`
+      context.textBaseline = 'middle'
+      const padding = fontPx * 0.5
+      const textWidth = context.measureText(band.label).width
+      const plate = { x: rect.x + padding, y: rect.y + padding, width: textWidth + padding * 1.5, height: fontPx * 1.6 }
+      if (plate.width <= rect.width - padding && plate.height <= rect.height - padding) {
+        context.fillStyle = 'rgba(0, 0, 0, 0.55)'
+        context.beginPath()
+        context.roundRect(plate.x, plate.y, plate.width, plate.height, fontPx * 0.35)
+        context.fill()
+        context.fillStyle = '#fff'
+        context.fillText(band.label, plate.x + padding * 0.75, plate.y + plate.height / 2)
+      }
+      context.restore()
     }
-    context.restore()
   }
 
   /** The dashed frame and corner handles around the selected text — on the preview only. */
-  private drawTextSelection(box: Rect): void {
+  /** Centre lines shown while something dragged is snapped to them. */
+  private guides = { vertical: false, horizontal: false }
+
+  setGuides(guides: { vertical: boolean; horizontal: boolean }): void {
+    if (guides.vertical === this.guides.vertical && guides.horizontal === this.guides.horizontal) return
+    this.guides = guides
+    this.render()
+  }
+
+  /** The output's centre lines, over everything — on the preview only. */
+  private drawGuides(): void {
+    const context = this.context
+    const { width, height } = this.output
+    const line = Math.max(1, width / 960)
+    context.save()
+    context.lineWidth = line
+    context.strokeStyle = 'rgba(255, 80, 200, 0.95)'
+    context.shadowColor = 'rgba(0, 0, 0, 0.5)'
+    context.shadowBlur = 2 * line
+    context.beginPath()
+    if (this.guides.vertical) {
+      context.moveTo(width / 2, 0)
+      context.lineTo(width / 2, height)
+    }
+    if (this.guides.horizontal) {
+      context.moveTo(0, height / 2)
+      context.lineTo(width, height / 2)
+    }
+    context.stroke()
+    context.restore()
+  }
+
+  /** Scratch canvas for the frosted panel behind a selected text; sized as needed. */
+  private scratch: OffscreenCanvas | null = null
+
+  /**
+   * The selected text sits on a frosted panel — what is under it blurred and
+   * lightened — inside a dashed frame with a handle at each corner, so it
+   * reads as the thing being edited. On the preview only: the export never
+   * draws it, and it goes as soon as the text is no longer selected.
+   */
+  private drawTextSelection(box: Rect, text: { text: string; style: CaptionStyle }): void {
     const context = this.context
     const { frame, handle } = textSelectionFrame(box, this.output)
     const line = Math.max(1, this.output.width / 960)
+    const blur = Math.max(2, this.output.width * TEXT_SELECTION.blurRatio)
+    // A plain rectangle, as the user asked: no rounded corners.
+    const panelPath = (): void => {
+      context.beginPath()
+      context.rect(frame.x, frame.y, frame.width, frame.height)
+    }
+
+    // The frosted panel: the picture under the frame, blurred. The blur reads a margin around the
+    // frame so its edges are blurred too, and only the frame itself is put back.
+    const margin = Math.ceil(blur * 3)
+    const sx = Math.max(0, Math.floor(frame.x - margin))
+    const sy = Math.max(0, Math.floor(frame.y - margin))
+    const sw = Math.min(this.output.width - sx, Math.ceil(frame.width + 2 * margin))
+    const sh = Math.min(this.output.height - sy, Math.ceil(frame.height + 2 * margin))
+    if (sw > 0 && sh > 0) {
+      if (!this.scratch || this.scratch.width < sw || this.scratch.height < sh) this.scratch = new OffscreenCanvas(sw, sh)
+      const scratch = this.scratch.getContext('2d')
+      if (scratch) {
+        scratch.clearRect(0, 0, sw, sh)
+        scratch.filter = `blur(${blur}px)`
+        scratch.drawImage(this.canvas, sx, sy, sw, sh, 0, 0, sw, sh)
+        scratch.filter = 'none'
+        context.save()
+        panelPath()
+        context.clip()
+        context.drawImage(this.scratch, 0, 0, sw, sh, sx, sy, sw, sh)
+        // A grey veil: what is dark under it comes up a little, what is bright comes down.
+        context.fillStyle = 'rgba(128, 128, 128, 0.4)'
+        context.fillRect(frame.x, frame.y, frame.width, frame.height)
+        context.restore()
+        // The text itself, drawn again over the panel, since the blur took it along.
+        drawCaption(context, this.output, text.text, text.style)
+      }
+    }
+
     context.save()
     context.lineWidth = line
     context.setLineDash([4 * line, 4 * line])
-    context.strokeStyle = 'rgba(255, 255, 255, 0.9)'
-    context.shadowColor = 'rgba(0, 0, 0, 0.6)'
-    context.shadowBlur = 2 * line
-    context.strokeRect(frame.x, frame.y, frame.width, frame.height)
+    context.strokeStyle = 'rgba(255, 255, 255, 0.7)'
+    panelPath()
+    context.stroke()
     context.setLineDash([])
     context.fillStyle = '#fff'
-    context.strokeStyle = 'rgba(0, 0, 0, 0.6)'
+    context.shadowColor = 'rgba(0, 0, 0, 0.5)'
+    context.shadowBlur = 4 * line
     for (const corner of frameCorners(frame)) {
-      context.fillRect(corner.x - handle / 2, corner.y - handle / 2, handle, handle)
-      context.strokeRect(corner.x - handle / 2, corner.y - handle / 2, handle, handle)
+      context.beginPath()
+      context.roundRect(corner.x - handle / 2, corner.y - handle / 2, handle, handle, handle * 0.25)
+      context.fill()
     }
     context.restore()
   }
