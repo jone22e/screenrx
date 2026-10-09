@@ -7,6 +7,7 @@ import type { ExportPlan } from '@engine/export/exportPlan'
 import { createExportPlan } from '@engine/export/exportPlan'
 import { buildTimeMap } from '@engine/time/timeMapping'
 import type { AppError } from '@shared/models/errors'
+import { needsRenderedTrack, renderKey } from '@shared/models/filters'
 import { appError } from '@shared/models/errors'
 import type { ExportJob, ExportResult, ExportTrack, ExportTrackName } from '@shared/models/export'
 import { DUB_TRACKS } from '@shared/models/media'
@@ -89,7 +90,12 @@ export class ExportService {
 
     const files: ActiveExport['files'] = {}
     try {
-      const screenPath = sessions.trackPathOf(sessionId, 'screen')
+      // Rendered effects live in a derived track; the export must not go out without them.
+      const needsFx = needsRenderedTrack(project.filters)
+      if (needsFx && session.filterTrack?.key !== renderKey(project.filters)) {
+        throw new ExportError(appError('filters-not-applied'))
+      }
+      const screenPath = sessions.trackPathOf(sessionId, needsFx ? 'screenFx' : 'screen')
       const screen = await this.describeTrack(screenPath, session.video)
       files.screen = await openTrack(screenPath)
 
