@@ -10,6 +10,7 @@ import type {
 } from '../models/captions'
 import type { CaptureDevices } from '../models/devices'
 import type { DubProgress, DubRequest, DubStatus, DubTrack } from '../models/dub'
+import type { FilterRenderProgress, FilterRenderRequest, FilterTrack } from '../models/filters'
 import type { EditorSession } from '../models/editor'
 import type { IpcResult } from '../models/errors'
 import type { ExportJob, ExportResult, ExportTrackName } from '../models/export'
@@ -78,6 +79,8 @@ export interface IpcInvokeContract {
   'dub:remove-model': { args: []; result: IpcResult<DubStatus> }
   'dub:generate': { args: [sessionId: string, request: DubRequest]; result: IpcResult<DubTrack> }
   'dub:cancel': { args: []; result: void }
+  'filters:render': { args: [sessionId: string, request: FilterRenderRequest]; result: IpcResult<FilterTrack> }
+  'filters:cancel': { args: []; result: void }
 
   'ai:providers': { args: [refresh: boolean]; result: AiProvider[] }
   'ai:install': { args: [provider: AiProviderId]; result: IpcResult<AiProvider[]> }
@@ -133,6 +136,7 @@ export interface IpcEventContract {
   'library:changed': null
   'captions:progress': TranscriptionProgress
   'dub:progress': DubProgress
+  'filters:progress': FilterRenderProgress
   'update:state-changed': UpdateState
   'track:progress': { sessionId: string; fraction: number }
 }
@@ -278,6 +282,15 @@ export interface ScreenRxApi {
      * window with its audio. The recording bar comes up as for any recording.
      */
     record(code: string): Promise<IpcResult<null>>
+  }
+  filters: {
+    /**
+     * Renders the screen track with the rendered effects (stabilization, noise reduction, sharpening)
+     * applied, as a derived track of the session, with FFmpeg on this Mac. `cancel` stops it.
+     */
+    render(sessionId: string, request: FilterRenderRequest): Promise<IpcResult<FilterTrack>>
+    cancel(): Promise<void>
+    onProgress(listener: (progress: FilterRenderProgress) => void): Unsubscribe
   }
   track: {
     /**

@@ -29,6 +29,9 @@ export const SESSION_FILES = {
   cursor: 'cursor.json',
   interactions: 'interactions.json',
   project: 'project.json',
+  /** The screen track with the rendered effects applied, and what it was made from. Derived. */
+  screenFx: 'screen-fx.mp4',
+  screenFxInfo: 'screen-fx.json',
   /** Derived from an audio track; can be regenerated at any time. */
   transcript: 'transcript.json',
   /** Where an object the user marked goes through the video; derived, made again at any time. */

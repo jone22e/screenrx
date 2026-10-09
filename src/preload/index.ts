@@ -118,6 +118,11 @@ const api: ScreenRxApi = {
     listRooms: () => invoke('meet:list-rooms'),
     record: (code) => invoke('meet:record', code)
   },
+  filters: {
+    render: (sessionId, request) => invoke('filters:render', sessionId, request),
+    cancel: () => invoke('filters:cancel'),
+    onProgress: (listener) => subscribe('filters:progress', listener)
+  },
   track: {
     start: (sessionId, request) => invoke('track:start', sessionId, request),
     cancel: () => invoke('track:cancel'),

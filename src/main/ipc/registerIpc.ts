@@ -10,6 +10,7 @@ import type { CaptureSourceCatalog } from '@shared/models/capture'
 import { isDeviceId } from '@shared/models/devices'
 import { parseDubRequest } from '@shared/models/dub'
 import type { AppError, IpcResult } from '@shared/models/errors'
+import { parseFilterRenderRequest } from '@shared/models/filters'
 import { appError } from '@shared/models/errors'
 import { isPermissionKind } from '@shared/models/permissions'
 import { parseProject } from '@shared/models/project'
@@ -24,6 +25,8 @@ import type { AssistantService } from '../ai/AssistantService'
 import type { CaptionTranslationService } from '../ai/CaptionTranslationService'
 import type { CutSuggestionService } from '../ai/CutSuggestionService'
 import { DictationError } from '../captions/DictationService'
+import { FilterRenderError } from '../filters/FilterRenderService'
+import type { FilterRenderService } from '../filters/FilterRenderService'
 import { ObjectTrackingError } from '../tracking/ObjectTrackingService'
 import type { ObjectTrackingService } from '../tracking/ObjectTrackingService'
 import type { DictationService } from '../captions/DictationService'
@@ -65,6 +68,7 @@ export interface IpcDependencies {
   assistant: AssistantService
   translations: CaptionTranslationService
   dubbing: DubbingService
+  filters: FilterRenderService
   aiSetup: AiSetupService
   waveforms: WaveformService
   thumbnails: ThumbnailService
@@ -107,6 +111,7 @@ export function registerIpc(deps: IpcDependencies): void {
     assistant,
     translations,
     dubbing,
+    filters,
     aiSetup,
     waveforms,
     thumbnails,
@@ -411,6 +416,19 @@ export function registerIpc(deps: IpcDependencies): void {
     return dubResult(() => dubbing.generate(sessionId, request))
   })
   handle('dub:cancel', () => dubbing.cancel())
+
+  handle('filters:render', async ([sessionId, value]) => {
+    const request = parseFilterRenderRequest(value)
+    if (!isSessionId(sessionId) || !request) return { ok: false, error: appError('filters-failed', 'invalid effects request') }
+    try {
+      return { ok: true, value: await filters.render(sessionId, request) }
+    } catch (error) {
+      const failure = error instanceof FilterRenderError ? error.appError : appError('filters-failed', String(error))
+      if (failure.code !== 'filters-cancelled') logger.warn('effects failed', { sessionId, code: failure.code, detail: failure.detail })
+      return { ok: false, error: failure }
+    }
+  })
+  handle('filters:cancel', () => filters.cancel())
 
   handle('ai:providers', ([refresh]) => aiSetup.providers(refresh === true))
 

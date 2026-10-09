@@ -19,6 +19,7 @@ import { TranscriptionService } from './captions/TranscriptionService'
 import { ExportService } from './export/ExportService'
 import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
 import { DubbingService } from './dub/DubbingService'
+import { FilterRenderService } from './filters/FilterRenderService'
 import { registerIpc } from './ipc/registerIpc'
 import { VideoImporter } from './library/VideoImporter'
 import { addLogSink, consoleSink, createLogger, fileSink } from './logging/logger'
@@ -272,6 +273,12 @@ async function bootstrap(): Promise<void> {
       onProgress: (progress) => windows.broadcast('track:progress', progress)
     }),
     dubbing,
+    filters: new FilterRenderService({
+      ffmpeg,
+      sessions,
+      logger: createLogger('effects'),
+      onProgress: (progress) => windows.broadcast('filters:progress', progress)
+    }),
     suggestions: new CutSuggestionService(ai, sessions, createLogger('ai')),
     assistant: new AssistantService(ai, sessions, createLogger('ai')),
     translations: new CaptionTranslationService(ai, createLogger('ai')),
