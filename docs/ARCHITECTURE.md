@@ -90,6 +90,7 @@ src/
   tracking/ObjectTrackingService segue um objeto marcado pelo vídeo (helper screenrx-track, Vision) → track.json
   captions/TranscriptionService  executa o transcritor, grava transcript.json
     dub/DubbingService             executa o helper de voz, confere os trechos e monta a trilha
+    filters/FilterRenderService    aplica os efeitos de FFmpeg (estabilização, ruído, nitidez) → screen-fx.mp4
     ai/                            AiCliService (único lugar que pergunta algo a uma IA: CLI
                                    do Claude, do Codex ou do Antigravity), AiSetupService
                                    (situação, instalação e login das ferramentas), aiCatalog
@@ -159,6 +160,13 @@ não há `cursor.json` nem `interactions.json` (diagnóstico `telemetry-missing`
 nível info: sem zoom automático), e o manifesto é escrito com o que o FFprobe lê de
 volta dos arquivos gerados. Se a importação falha no meio, a pasta da sessão é
 removida inteira.
+
+Vídeo de celular costuma vir **girado por metadado** (matriz de exibição): os
+quadros são gravados deitados e o arquivo pede ao player que gire. O `<video>`
+obedece; o WebCodecs da exportação, o rastreador de objeto e as dimensões lidas
+pelo FFprobe não. Por isso o importador (`canCopyVideo`) nunca copia um arquivo
+com rotação: ele é reencodado em pé (o FFmpeg aplica a rotação ao transcodificar
+e descarta o metadado), e a sessão guarda o tamanho do que foi escrito.
 
 ### Projeto (`src/shared/models/project.ts`)
 
@@ -356,9 +364,11 @@ exercitadas. O zoom da câmera continua em coordenadas da
 gravação inteira: `cameraWithin` o leva para dentro da parte usada; `frameToSource`
 faz o inverso no clique de foco. "Fundo: Aurora · Alterar em Fundo" leva à
 ferramenta Fundo. **Áreas seguras** (só no 9:16): um interruptor, preferência do
-Mac (`common/safeAreas.ts`, localStorage), faz o `PreviewPlayer` sombrear no
-preview as faixas que a interface dos apps cobre (10% no topo, 20% embaixo, coluna
-de botões à direita); nunca sai na exportação. O rodapé mostra a saída
+Mac (`common/safeAreas.ts`, localStorage), **desligado até o usuário ligar**, faz
+o `PreviewPlayer` marcar no preview as faixas que a interface dos apps cobre (10%
+no topo, 20% embaixo, coluna de botões à direita) — hachuradas, tracejadas e com
+nome, porque uma tinta lisa sobre o vídeo foi lida como "manchas" no vídeo (Jone,
+2026-10-09); nunca sai na exportação. O rodapé mostra a saída
 ("1080 × 1920 · 30 fps", pelo plano de exportação). O preview redimensiona o canvas
 ao trocar o formato; a exportação limita o lado maior à qualidade escolhida. O
 assistente troca o formato ("format") e o enquadramento ("framing"). **Não
@@ -429,10 +439,17 @@ de origem, texto e um `CaptionStyle` próprio — fonte, tamanho, negrito, maiú
 cor, fundo, posição). Podem se sobrepor no tempo. Aba **Texto** do editor
 (`TextPanel`): "Adicionar texto" cria um na posição do play, com 3 s, "Seu texto",
 grande e com sombra no meio do quadro; o selecionado tem caixa de texto e os
-mesmos controles de estilo das legendas. No preview, o texto selecionado ganha uma
-moldura tracejada com uma alça quadrada em cada canto, desenhada pelo
-`PreviewPlayer` depois do `composeFrame` (só no preview; a exportação não passa por
-ali); arrastar uma alça muda o tamanho da fonte na proporção da distância ao centro
+mesmos controles de estilo das legendas. No preview, o texto selecionado ganha um
+painel fosco retangular (o que está embaixo, desfocado, sob um véu cinza),
+uma moldura tracejada e uma alça branca em cada canto, desenhados pelo
+`PreviewPlayer.drawTextSelection` depois do `composeFrame`: o quadro pronto é copiado
+para um `OffscreenCanvas` com `filter: blur`, recortado pelo painel e colado de
+volta, e o texto é desenhado de novo por cima (só no preview; a exportação não
+passa por ali). Clicar fora do texto, ou em outro objeto, desfaz a seleção e o
+painel some. Ao arrastar um texto, a legenda ou a câmera, o centro do objeto
+**encaixa nas linhas de centro** da saída quando chega a 1,5 % delas
+(`snapToCentre`, em `Preview.tsx`), e o `PreviewPlayer.drawGuides` mostra a linha
+em que encaixou enquanto o arrasto dura; arrastar uma alça muda o tamanho da fonte na proporção da distância ao centro
 do texto (`text-resize`, um passo de desfazer por arrasto). Arrastar um texto o posiciona
 (o desenhado por último fica por cima e é o que o clique pega); na linha do tempo
 há uma pista "Texto" com blocos que se movem e se redimensionam (mínimo 0,3 s).
@@ -761,6 +778,49 @@ aviso `track-missing`. Gravação de reunião **não tem barra de gravação**: 
 `RecordingBanner` com o tempo, Pausar/Retomar e Finalizar. Terminar a gravação fecha
 a janela da reunião; fechar a janela termina a gravação. No Meet, quem está na sala vê o aviso "Gravando" enquanto o
 gravador estiver dentro, e o gravador não conta como pessoa.
+
+### Efeitos (aba "Efeitos")
+
+```
+project.filters ──┬── estabilização / ruído / nitidez ──► FilterRenderService (FFmpeg, 1 ou 2 passagens)
+                  │                                        └► screen-fx.mp4 + screen-fx.json (chave)
+                  │        preview (PreviewPlayer troca o <video>) e exportação (ExportService) leem essa trilha
+                  └── cor (brilho, contraste, saturação) ──► canvas `filter` em composeFrame: preview e exportação
+```
+
+- **Dois tipos, pelo lugar em que são aplicados** (`src/shared/models/filters.ts`).
+  Os *renderizados* precisam do FFmpeg e viram uma trilha derivada da sessão,
+  `screen-fx.mp4`, com `screen-fx.json` dizendo de que configuração ela saiu
+  (`renderKey`: efeitos ligados e intensidades, numa ordem fixa). A *cor* é
+  aplicada ao desenhar cada quadro, na mesma função do preview e da exportação
+  (`canvasColorFilter` → `context.filter`), só na imagem da gravação, não no
+  fundo, na câmera ou nos textos. A gravação nunca é alterada.
+- **Cadeia FFmpeg** (`src/engine/filters/filterChain.ts`): `vidstabdetect`
+  (passagem de análise, grava `screen-fx.trf`, apagado no fim) e
+  `vidstabtransform` (suavização 10/30/60 quadros por Leve/Média/Forte,
+  `optzoom=1` aproxima o mínimo que esconde as bordas), `hqdn3d`, `unsharp`,
+  nessa ordem, terminando em `format=yuv420p`; H.264 pelo VideoToolbox quando
+  há, com a mesma regra de bitrate da importação. O FFmpeg empacotado tem o
+  vid.stab (GPL, como o resto da build). `FfmpegService.filterVideo` roda uma
+  passagem com `-progress pipe:1` para o progresso e pode ser cancelada.
+- **Quando renderiza.** O `Editor` observa o projeto: 400 ms depois de qualquer
+  mudança chama `EditorStore.renderFilters`, que é no-op se a trilha já
+  corresponde à chave, cancela uma renderização que ficou para trás e pede a
+  nova. Enquanto a trilha não corresponde, o preview mostra a gravação e a aba
+  avisa; pronta, `screenUrl` passa a ser a trilha (com `?v=` para o player
+  recarregar) e o `PreviewPlayer.applyScreenSource` troca o `src` do vídeo no
+  mesmo instante e estado de reprodução. A exportação recusa sair sem a trilha
+  atual (`filters-not-applied`), em vez de exportar sem os efeitos.
+- **Rastreamento de objeto** segue a imagem que está sendo mostrada
+  (`ObjectTrackRequest.source`): com estabilização em uso, rastreia na trilha
+  estabilizada, senão as posições não bateriam.
+- **Verificado em 2026-10-09** (vídeo de celular de 11 s, numa cópia do app):
+  estabilização forte renderizada em 2,8 s, re-renderização ao ligar nitidez,
+  preto e branco imediato no preview, rastreamento sobre a trilha estabilizada e
+  exportação com os efeitos. Não verificado: gravações longas (a renderização
+  leva cerca de 1 s por 10 s de vídeo neste Mac, em duas passagens), e o
+  resultado visual da estabilização só foi conferido por amostra lado a lado,
+  não em movimento no app.
 
 ## 7. Cortes, tempo e exportação
 
