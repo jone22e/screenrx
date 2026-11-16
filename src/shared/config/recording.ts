@@ -3,11 +3,12 @@ export const RECORDING_CONFIG = {
   /** Frame rate requested from the capture engine. */
   fps: 60,
   /**
-   * The system cursor is burned into the screen track for now. Once cursor
-   * telemetry and the editor's cursor renderer exist (phase 3+), this is
-   * turned off and the cursor is reconstructed from telemetry instead.
+   * The system cursor is left out of the screen track: the editor draws it
+   * from the telemetry (`cursor.json`), bigger, steadier and scaling with
+   * the zoom. The manifest's `capture.cursorInVideo` says which way a
+   * recording was made, so older ones keep their burned-in cursor.
    */
-  showCursor: true,
+  showCursor: false,
   /** Pointer position samples per second, independent of the video frame rate. */
   cursorSampleRateHz: 30,
   /** Frame rate requested from the webcam. */

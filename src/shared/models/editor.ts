@@ -29,6 +29,8 @@ export interface EditorSession {
   createdAt: string
   /** Length of the recording (source time). */
   durationMs: number
+  /** Whether the system cursor was burned into the screen track (older recordings, imported videos): then none is drawn. */
+  cursorInVideo: boolean
   video: {
     url: string
     widthPx: number

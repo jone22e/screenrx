@@ -24,6 +24,7 @@ import type { ObjectTrack, ObjectTrackRequest } from '@shared/models/telemetry'
 import type { EditorImage, EditorSession, MusicTrack } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
 import type {
+  CursorSettings,
   ImageLayer,
   Marker,
   SpeedEffect,
@@ -47,6 +48,7 @@ import type {
   ZoomEffect
 } from '@shared/models/project'
 import {
+  CURSOR_LIMITS,
   DEFAULT_IMAGE_LAYER,
   LAYER_LIMITS,
   MARKER_LIMITS,
@@ -92,6 +94,8 @@ export interface EditorState {
   layers: readonly ImageLayer[]
   /** The session's images; not part of the project. */
   images: readonly EditorImage[]
+  /** The drawn pointer. */
+  cursor: CursorSettings
   audio: AudioSettings
   /** How the music plays; `null` until music is brought in. */
   music: MusicSettings | null
@@ -409,6 +413,14 @@ export class EditorStore {
       this.state.selectedTextId === textId ? null : this.state.selectedTextId,
       null
     )
+  }
+
+  // --- drawn pointer --------------------------------------------------------------
+
+  setCursor(change: Partial<CursorSettings>, gestureKey: string | null = null): void {
+    const merged = { ...this.project.cursor, ...change }
+    const cursor: CursorSettings = { ...merged, sizeRatio: clamp(merged.sizeRatio, CURSOR_LIMITS.minSizeRatio, CURSOR_LIMITS.maxSizeRatio) }
+    this.commit({ ...this.project, cursor }, this.selected(), gestureKey)
   }
 
   // --- image layers -------------------------------------------------------------
@@ -1617,6 +1629,7 @@ export class EditorStore {
       texts: this.project.texts,
       layers: this.project.layers,
       images: this.images,
+      cursor: this.project.cursor,
       audio: this.project.audio,
       music: this.project.music,
       musicTrack: this.musicTrack,

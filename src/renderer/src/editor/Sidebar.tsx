@@ -10,6 +10,7 @@ import type { WebcamCorner, WebcamShape } from '@shared/models/project'
 import { BACKGROUND_LIMITS, FRAME_LIMITS, MARKER_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
 import { AssistantPanel } from './AssistantPanel'
 import { AudioPanel } from './AudioPanel'
+import { CursorPanel } from './CursorPanel'
 import { LayersPanel } from './LayersPanel'
 import { CaptionsPanel } from './CaptionsPanel'
 import { DubbingPanel } from './DubbingSection'
@@ -28,6 +29,7 @@ import {
   CameraIcon,
   FormatIcon,
   CaptionsIcon,
+  CursorIcon,
   FlagIcon,
   GaugeIcon,
   ImageIcon,
@@ -49,7 +51,7 @@ interface Props {
   player: PreviewPlayer | null
 }
 
-type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'layers' | 'audio' | 'dub' | 'format' | 'effects' | 'background' | 'webcam'
+type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'layers' | 'cursor' | 'audio' | 'dub' | 'format' | 'effects' | 'background' | 'webcam'
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
 const speedChip = (value: number): string => `${String(value).replace('.', ',')}×`
@@ -83,6 +85,7 @@ export function Sidebar({ session, store, player }: Props) {
     { id: 'captions', label: 'Legendas', icon: <CaptionsIcon /> },
     { id: 'text', label: 'Texto', icon: <TextIcon /> },
     { id: 'layers', label: 'Camadas', icon: <ImageIcon /> },
+    { id: 'cursor', label: 'Cursor', icon: <CursorIcon /> },
     { id: 'audio', label: 'Áudio', icon: <MusicIcon /> },
     { id: 'dub', label: 'Dublagem', icon: <VoiceIcon /> },
     { id: 'format', label: 'Formato', icon: <FormatIcon /> },
@@ -116,6 +119,7 @@ export function Sidebar({ session, store, player }: Props) {
         {tab === 'captions' && <CaptionsPanel session={session} store={store} player={player} />}
         {tab === 'text' && <TextPanel store={store} player={player} />}
         {tab === 'layers' && <LayersPanel session={session} store={store} player={player} />}
+        {tab === 'cursor' && <CursorPanel session={session} store={store} />}
         {tab === 'audio' && <AudioPanel session={session} store={store} />}
         {tab === 'dub' && <DubbingPanel store={store} onOpenCaptions={() => choose('captions')} />}
         {tab === 'format' && <FormatPanel session={session} store={store} player={player} onOpenBackground={() => choose('background')} />}

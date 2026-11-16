@@ -9,10 +9,12 @@ import type { Rect, Size } from '@engine/rendering/frameLayout'
 import type { NormalizedRect } from '@engine/rendering/frameLayout'
 import { centeredSquare, layoutFrame, layoutWebcam, sourceCrop } from '@engine/rendering/frameLayout'
 import { layoutImageLayer, rotatedBounds } from '@engine/rendering/layerLayout'
+import type { ClickRipple } from '@engine/rendering/cursorRender'
+import { ARROW_OUTLINE, CURSOR_DRAW } from '@engine/rendering/cursorRender'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { viewToSource, visibleRect } from '@engine/zoom/zoomCamera'
 import type { ColorSettings } from '@shared/models/filters'
-import type { BackgroundSettings, CaptionStyle, ImageLayer, NormalizedPoint, WebcamSettings } from '@shared/models/project'
+import type { BackgroundSettings, CaptionStyle, CursorSettings, ImageLayer, NormalizedPoint, WebcamSettings } from '@shared/models/project'
 
 export interface FrameInput {
   screen: CanvasImageSource
@@ -33,6 +35,8 @@ export interface FrameInput {
   texts: ReadonlyArray<{ id: string; text: string; style: CaptionStyle }>
   /** Images on screen at this instant, bottom first, each with its picture as loaded; one not loaded yet is left out. */
   layers: ReadonlyArray<{ layer: ImageLayer; image: CanvasImageSource; size: Size }>
+  /** The pointer to draw over the recording, with the clicks still rippling; `null` when none is drawn. */
+  cursor: { position: NormalizedPoint | null; settings: CursorSettings; ripples: readonly ClickRipple[] } | null
 }
 
 /** Where things ended up on the frame, for pointer interaction in the preview. */
@@ -220,6 +224,51 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
     frame.width,
     frame.height
   )
+  context.filter = 'none'
+
+  // The pointer, drawn where the telemetry put it, on the recording's own coordinates: it zooms with the picture.
+  if (input.cursor) {
+    const toOutput = (point: NormalizedPoint): { x: number; y: number } => ({
+      x: frame.x + ((point.x - crop.x - view.x * crop.width) / (view.width * crop.width)) * frame.width,
+      y: frame.y + ((point.y - crop.y - view.y * crop.height) / (view.height * crop.height)) * frame.height
+    })
+    // The arrow's height before the zoom is a share of the frame; the zoom makes it bigger, like everything else.
+    const cursorHeight = (input.cursor.settings.sizeRatio * frame.height) / view.height
+    if (input.cursor.settings.clickHighlight) {
+      for (const ripple of input.cursor.ripples) {
+        const at = toOutput(ripple)
+        const radius = cursorHeight * CURSOR_DRAW.rippleReach * (0.3 + 0.7 * ripple.progress)
+        context.beginPath()
+        context.arc(at.x, at.y, radius, 0, Math.PI * 2)
+        context.lineWidth = Math.max(1, cursorHeight * 0.12)
+        context.strokeStyle = `rgba(255, 196, 0, ${(1 - ripple.progress) * 0.9})`
+        context.stroke()
+        context.fillStyle = `rgba(255, 196, 0, ${(1 - ripple.progress) * 0.25})`
+        context.fill()
+      }
+    }
+    if (input.cursor.position) {
+      const tip = toOutput(input.cursor.position)
+      context.beginPath()
+      ARROW_OUTLINE.forEach((point, index) => {
+        const x = tip.x + point.x * cursorHeight
+        const y = tip.y + point.y * cursorHeight
+        if (index === 0) context.moveTo(x, y)
+        else context.lineTo(x, y)
+      })
+      context.closePath()
+      context.lineJoin = 'round'
+      context.shadowColor = 'rgba(0, 0, 0, 0.45)'
+      context.shadowBlur = cursorHeight * 0.18
+      context.shadowOffsetY = cursorHeight * 0.06
+      context.fillStyle = '#000'
+      context.fill()
+      context.shadowColor = 'transparent'
+      context.lineWidth = Math.max(1, cursorHeight * 0.07)
+      context.strokeStyle = '#fff'
+      context.stroke()
+    }
+  }
   context.restore()
 
   // Webcam: a square crop of the camera, in the chosen shape and place.

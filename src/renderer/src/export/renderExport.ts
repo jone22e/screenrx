@@ -3,6 +3,7 @@ import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
 import { textsAt } from '@engine/captions/textOverlays'
 import { frameSourceTimeMs } from '@engine/export/exportPlan'
 import { layersAt } from '@engine/rendering/layerLayout'
+import { clickRipplesAt, drawnCursorAt, drawnCursorPath } from '@engine/rendering/cursorRender'
 import { buildTimeMap } from '@engine/time/timeMapping'
 import { cameraAt } from '@engine/zoom/zoomCamera'
 import type { EditorSession } from '@shared/models/editor'
@@ -57,6 +58,11 @@ export async function renderExport(
   const output = { width: plan.width, height: plan.height }
   // Every image a layer shows, decoded once before the first frame.
   const pictures = await loadPictures(project.layers, session.images)
+  // The pointer as drawn, when the recording has none in the picture.
+  const drawnCursor =
+    project.cursor.visible && !session.cursorInVideo && session.cursor.length > 0
+      ? drawnCursorPath(session.cursor, session.durationMs, project.cursor.smoothing)
+      : null
 
   // Composited on the GPU, like the preview; each finished frame is then read back once.
   const canvas = new OffscreenCanvas(plan.width, plan.height)
@@ -101,7 +107,14 @@ export async function renderExport(
         layers: layersAt(project.layers, sourceMs).flatMap((layer) => {
           const picture = pictures.get(layer.file)
           return picture ? [{ layer, image: picture, size: { width: picture.naturalWidth, height: picture.naturalHeight } }] : []
-        })
+        }),
+        cursor: drawnCursor
+          ? {
+              position: drawnCursorAt(drawnCursor, sourceMs),
+              settings: project.cursor,
+              ripples: project.cursor.clickHighlight ? clickRipplesAt(session.interactions, sourceMs) : []
+            }
+          : null
       })
 
       const rendered = new VideoFrame(canvas, { timestamp: 0 })

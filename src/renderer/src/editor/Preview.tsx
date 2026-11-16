@@ -59,6 +59,7 @@ const settingsOf = (state: EditorState, store: EditorStore): PreviewSettings => 
   layers: state.layers,
   selectedLayerId: state.selectedLayerId,
   images: store.session.images,
+  cursor: state.cursor,
   safeAreas: safeAreas.getState(),
   objectTrack: state.objectTrack,
   audio: state.audio,

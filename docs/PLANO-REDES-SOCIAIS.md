@@ -216,7 +216,18 @@ UI: aba **Camadas** com lista ordenável; arrastar e redimensionar no preview
 
 Pronto quando: um logo no canto e um sticker de 3 s exportam idênticos ao preview.
 
-## Fase E — Cursor desenhado (M)
+## Fase E — Cursor desenhado (M) — FEITA em 2026-11-16
+
+O que entrou: gravações novas sem o cursor do sistema (`showCursor: false`; o
+helper já aceitava), `project.cursor` (mostrar, tamanho, suavização, destaque
+de clique), `engine/rendering/cursorRender.ts` (interpolação, suavização,
+anéis de clique), seta desenhada no `composeFrame` no sistema de coordenadas
+da gravação (cresce com o zoom), aba Cursor com aviso para gravações antigas.
+Verificado por testes e pelo harness (seta e anel, sem zoom e a 2×); nenhuma
+gravação nova foi feita com o app, então a captura sem cursor não foi vista
+de verdade. Detalhes em `docs/ARCHITECTURE.md`, "Telemetria do cursor".
+
+Plano original, para referência:
 
 O cursor hoje é queimado na captura. Para desenhar, a captura precisa parar de
 incluí-lo.

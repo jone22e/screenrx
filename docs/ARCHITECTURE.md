@@ -124,7 +124,6 @@ scripts/
   e2e-recording.mjs                validação de ponta a ponta com o app real
 ```
 
-Ainda previsto: renderer de cursor e regiões de velocidade na interface.
 
 ## 3. Modelos principais
 
@@ -274,6 +273,23 @@ capturada (0–1); valores fora desse intervalo indicam o cursor fora da gravaç
 `cursor.json` é uma lista de `{timeMs, x, y}`; `interactions.json`, de
 `{timeMs, type, x, y, button}` com `mouseDown`, `mouseUp` e o gesto concluído
 (`click`, `doubleClick`, `rightClick`, `middleClick`).
+
+**Cursor desenhado** (aba "Cursor", 2026-11-16). As gravações novas são feitas
+com `showsCursor = false` no ScreenCaptureKit (`RECORDING_CONFIG.showCursor`), e
+o manifesto diz como foi (`capture.cursorInVideo`, levado ao editor em
+`EditorSession.cursorInVideo`). O editor desenha a seta a partir de
+`cursor.json`: `engine/rendering/cursorRender.ts` interpola entre as amostras
+(30 Hz) a cada 16 ms e suaviza por uma janela de 0, 100 ou 260 ms
+(`project.cursor.smoothing`); fora de 0…1 o cursor saiu da gravação e não é
+desenhado. O `composeFrame` leva a posição (coordenadas da gravação) ao quadro
+pela mesma conta do recorte e do zoom, então a seta **cresce com o zoom** e fica
+presa ao recorte; a altura antes do zoom é `sizeRatio` do quadro (3,5% por
+padrão). Cliques (`click`, `doubleClick`, `rightClick`, `middleClick`) viram um
+anel âmbar que se abre e some em 450 ms (`clickRipplesAt`). Preview e exportação
+usam o mesmo caminho (`PreviewPlayer.cursorAt`, `renderExport`). A aba Cursor
+tem mostrar, tamanho, suavização e destaque de clique; em gravação com o cursor
+na imagem, ou sem telemetria, explica o motivo e não oferece nada. O
+`followPoint` do enquadramento continua usando o caminho de 600 ms.
 
 ## 6. Zoom
 
@@ -1139,8 +1155,10 @@ só o conteúdo daquela janela, mesmo coberta por outras.
    evolução possível.
 6. **Taxa de quadros variável.** O ScreenCaptureKit só entrega quadros quando a
    tela muda; preview e export devem trabalhar por timestamp, não por índice.
-7. **Cursor ainda queimado no vídeo** (`RECORDING_CONFIG.showCursor`). A telemetria
-   já existe; falta o renderer de cursor no editor para poder gravar sem ele.
+7. **Cursor desenhado, não gravado** (desde 2026-11-16, `RECORDING_CONFIG.showCursor`
+   = false): gravações anteriores e vídeos importados têm o cursor do sistema na
+   imagem (`capture.cursorInVideo`) e não ganham o desenhado. Uma gravação nova
+   sem telemetria (`telemetry-missing`) fica sem cursor nenhum.
 8. **Telemetria na captura de janela** é normalizada pela posição da janela no
    início da gravação; se a janela for movida, os focos ficam deslocados.
 9. **Pausa no áudio tem precisão de buffer, não de amostra.** Buffers inteiros são

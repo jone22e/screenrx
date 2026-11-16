@@ -78,6 +78,7 @@ export class ProjectStore {
       title: manifest.title ?? manifest.source.label,
       createdAt: manifest.createdAt,
       durationMs,
+      cursorInVideo: manifest.capture.cursorInVideo,
       video: {
         url: trackUrl(sessionId, 'screen'),
         widthPx: screen.widthPx,

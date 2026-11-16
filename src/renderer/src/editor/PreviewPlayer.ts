@@ -4,6 +4,7 @@ import type { Rect, Size } from '@engine/rendering/frameLayout'
 import { outputSizeFor } from '@engine/rendering/frameLayout'
 import { safeZones } from '@engine/rendering/safeZones'
 import { layersAt } from '@engine/rendering/layerLayout'
+import { clickRipplesAt, drawnCursorAt, drawnCursorPath } from '@engine/rendering/cursorRender'
 import type { ColorSettings } from '@shared/models/filters'
 import type { TimeMap } from '@engine/time/timeMapping'
 import { keptSourceTime, nextKeptSourceTime, outputDurationMs, sourceTimeToTimelineTime, timelineTimeToOutputTime } from '@engine/time/timeMapping'
@@ -17,6 +18,8 @@ import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
 import type { EditorSession } from '@shared/models/editor'
 import type { ObjectTrack } from '@shared/models/telemetry'
 import type {
+  CursorSettings,
+  CursorSmoothing,
   ImageLayer,
   SpeedEffect,
   MusicSettings,
@@ -85,6 +88,8 @@ export interface PreviewSettings {
   selectedLayerId: string | null
   /** Where each image of the session is served from, by file name. */
   images: ReadonlyArray<{ file: string; url: string }>
+  /** The drawn pointer's settings; drawn only for recordings made without the system cursor in the picture. */
+  cursor: CursorSettings
   /** Whether to shade where a vertical video is covered by the apps' interface; drawn only here. */
   safeAreas: boolean
   /** Where the marked object goes, for the frame that follows it. */
@@ -153,6 +158,8 @@ export class PreviewPlayer {
   private drawnLayers: Array<{ id: string; box: Rect }> = []
   /** The session's images as loaded; a file is fetched the first time a layer asks for it. */
   private readonly pictures = new Map<string, HTMLImageElement>()
+  /** The pointer's path as drawn, for the smoothing in use; computed again when that changes. */
+  private drawnCursor: { smoothing: CursorSmoothing; path: Array<NormalizedPoint | null> } | null = null
   private readonly timeListeners = new Set<(timeMs: number) => void>()
   private readonly playingListeners = new Set<(playing: boolean) => void>()
   private readonly errorListeners = new Set<() => void>()
@@ -540,7 +547,22 @@ export class PreviewPlayer {
       color: this.settings.color,
       caption: caption === null ? null : { text: caption.text, style: captions.style, timing: caption },
       texts: textsAt(this.settings.texts, timeMs),
-      layers: this.picturesFor(layersAt(this.settings.layers, timeMs))
+      layers: this.picturesFor(layersAt(this.settings.layers, timeMs)),
+      cursor: this.cursorAt(timeMs)
+    }
+  }
+
+  /** The drawn pointer at `timeMs`, or `null` for a recording that has the system cursor in the picture, or none at all. */
+  private cursorAt(timeMs: number): FrameInput['cursor'] {
+    const { cursor } = this.settings
+    if (!cursor.visible || this.session.cursorInVideo || this.session.cursor.length === 0) return null
+    if (!this.drawnCursor || this.drawnCursor.smoothing !== cursor.smoothing) {
+      this.drawnCursor = { smoothing: cursor.smoothing, path: drawnCursorPath(this.session.cursor, this.session.durationMs, cursor.smoothing) }
+    }
+    return {
+      position: drawnCursorAt(this.drawnCursor.path, timeMs),
+      settings: cursor,
+      ripples: cursor.clickHighlight ? clickRipplesAt(this.session.interactions, timeMs) : []
     }
   }
 

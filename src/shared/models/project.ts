@@ -317,6 +317,27 @@ export interface ImageLayer {
 
 export type Layer = ImageLayer
 
+/** How steady the drawn pointer's hand is. */
+export type CursorSmoothing = 'none' | 'light' | 'strong'
+export const CURSOR_SMOOTHINGS: readonly CursorSmoothing[] = ['none', 'light', 'strong']
+
+/**
+ * The pointer as drawn from its telemetry, for recordings made without the
+ * system cursor in the picture: an arrow that scales with the zoom, and a
+ * ring on every click.
+ */
+export interface CursorSettings {
+  visible: boolean
+  /** Height of the arrow as a ratio of the frame's height, before the zoom. */
+  sizeRatio: number
+  clickHighlight: boolean
+  smoothing: CursorSmoothing
+}
+
+export const CURSOR_LIMITS = { minSizeRatio: 0.015, maxSizeRatio: 0.1 } as const
+
+export const DEFAULT_CURSOR: CursorSettings = { visible: true, sizeRatio: 0.035, clickHighlight: true, smoothing: 'light' }
+
 export const LAYER_LIMITS = {
   maxLayers: 200,
   minSizeRatio: 0.02,
@@ -369,6 +390,8 @@ export interface Project {
   texts: TextOverlay[]
   /** Images over the video, bottom first. Empty in projects saved before them. */
   layers: Layer[]
+  /** The drawn pointer; ignored by recordings that have the system cursor in the picture. */
+  cursor: CursorSettings
   audio: AudioSettings
   /** How the session's music track plays; `null` until music is brought in (the file may still be there). */
   music: MusicSettings | null
@@ -482,6 +505,7 @@ export function createProject(sessionId: string, effects: TimelineEffect[] = [])
     captions: createCaptionSettings(),
     texts: [],
     layers: [],
+    cursor: { ...DEFAULT_CURSOR },
     audio: createAudioSettings(),
     music: null,
     markers: [],
@@ -704,6 +728,19 @@ function parseTexts(value: unknown): TextOverlay[] {
   return texts.sort((a, b) => a.startMs - b.startMs)
 }
 
+/** The drawn pointer's settings as saved; projects saved before them get the default. */
+function parseCursor(value: unknown): CursorSettings {
+  const settings = isRecord(value) ? value : {}
+  return {
+    visible: settings.visible !== false,
+    sizeRatio: isFiniteNumber(settings.sizeRatio)
+      ? Math.min(Math.max(settings.sizeRatio, CURSOR_LIMITS.minSizeRatio), CURSOR_LIMITS.maxSizeRatio)
+      : DEFAULT_CURSOR.sizeRatio,
+    clickHighlight: settings.clickHighlight !== false,
+    smoothing: includes(CURSOR_SMOOTHINGS, settings.smoothing) ? settings.smoothing : DEFAULT_CURSOR.smoothing
+  }
+}
+
 /** Image layers as saved, in their order; a malformed one is dropped. Projects saved before them have none. */
 function parseLayers(value: unknown): Layer[] {
   const layers: Layer[] = []
@@ -822,6 +859,7 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
     captions: parseCaptions(value.captions),
     texts: parseTexts(value.texts),
     layers: parseLayers(value.layers),
+    cursor: parseCursor(value.cursor),
     audio: parseAudio(value.audio),
     music: parseMusic(value.music),
     markers: parseMarkers(value.markers),

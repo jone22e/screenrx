@@ -290,3 +290,9 @@ export const ArrowDownIcon = () => (
     <path d="M12 5v14M5 12l7 7 7-7" />
   </Icon>
 )
+
+export const CursorIcon = () => (
+  <Icon>
+    <path d="M5 3l14 8-6 1.5L10 19z" />
+  </Icon>
+)
