@@ -1,4 +1,4 @@
-import type { PointerEvent, ReactNode } from 'react'
+import type { PointerEvent, ReactNode, RefObject } from 'react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { sourceTimeToTimelineTime } from '@engine/time/timeMapping'
 import { moveZoom, resizeZoom } from '@engine/zoom/zoomEditing'
@@ -11,6 +11,7 @@ import { Filmstrip } from './Filmstrip'
 import type { PreviewPlayer } from './PreviewPlayer'
 import { SUGGESTION_KIND_LABELS, previewSuggestion } from './SuggestionsPanel'
 import { Waveform } from './Waveform'
+import { useAgentCursors } from '../common/agentCursors'
 import {
   CameraIcon,
   CaptionsIcon,
@@ -1002,6 +1003,7 @@ export function Timeline({ session, store, player }: Props) {
               />
             </div>
           )}
+          <AgentCursorsLayer tracks={tracks} percent={percent} />
           <div className="playhead" ref={playhead}>
             <span className="playhead-time">00:00,0</span>
           </div>
@@ -1009,5 +1011,33 @@ export function Timeline({ session, store, player }: Props) {
         </div>
       </div>
     </section>
+  )
+}
+
+/**
+ * The agents' cursors over the tracks while their work is shown: one
+ * coloured arrow per agent, at the instant and on the lane of what it just
+ * did, with a word on it. Purely a show; the work is already applied.
+ */
+function AgentCursorsLayer({ tracks, percent }: { tracks: RefObject<HTMLDivElement | null>; percent: (timeMs: number) => string }) {
+  const cursors = useAgentCursors()
+  if (cursors.length === 0) return null
+  return (
+    <>
+      {cursors.map((cursor) => {
+        const lane = tracks.current?.querySelector<HTMLElement>(cursor.lane)
+        const top = lane ? lane.offsetTop + lane.offsetHeight / 2 : 8
+        return (
+          <div key={cursor.role} className="agent-cursor" style={{ left: percent(cursor.timeMs), top, color: cursor.color }} data-tick={cursor.tick}>
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path d="M5 3l14 8-6 1.5L10 19z" fill="currentColor" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+            <span className="agent-cursor-label" style={{ background: cursor.color }}>
+              {cursor.label}
+            </span>
+          </div>
+        )
+      })}
+    </>
   )
 }

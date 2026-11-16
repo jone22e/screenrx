@@ -6,6 +6,7 @@ import { autoUpdater } from 'electron-updater'
 import { DEFAULT_CAPTION_LOCALE } from '@shared/models/captions'
 import { appError } from '@shared/models/errors'
 import { AiCliService } from './ai/AiCliService'
+import { AutoEditService } from './ai/AutoEditService'
 import { AiSetupService } from './ai/AiSetupService'
 import { AssistantService } from './ai/AssistantService'
 import { CaptionTranslationService } from './ai/CaptionTranslationService'
@@ -286,6 +287,7 @@ async function bootstrap(): Promise<void> {
     }),
     suggestions: new CutSuggestionService(ai, sessions, createLogger('ai')),
     assistant: new AssistantService(ai, sessions, createLogger('ai')),
+    autoEdit: new AutoEditService({ ai, sessions, logger: createLogger('auto-edit'), onProgress: (progress) => windows.broadcast('ai:auto-edit-progress', progress) }),
     translations: new CaptionTranslationService(ai, createLogger('ai')),
     aiSetup,
     waveforms: new WaveformService(ffmpeg, sessions),

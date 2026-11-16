@@ -24,7 +24,7 @@ interface ChatEntry extends AssistantMessage {
 }
 
 /** The editor as it stands, in the terms the AI is told about. */
-function editStateOf(store: EditorStore): AssistantEditState {
+export function editStateOf(store: EditorStore): AssistantEditState {
   const state = store.getState()
   const { session } = store
   return {

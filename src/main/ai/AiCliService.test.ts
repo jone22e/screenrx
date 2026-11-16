@@ -27,12 +27,13 @@ async function install(name: 'claude' | 'codex' | 'agy', body: string): Promise<
   await chmod(file, 0o755)
 }
 
-const createService = (timeoutMs?: number): AiCliService =>
+const createService = (timeoutMs?: number, maxConcurrent?: number): AiCliService =>
   new AiCliService({
     logger,
     searchDirs: [directory],
     env: { PATH: '/usr/bin:/bin', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'outer', HOME: os.homedir() },
-    ...(timeoutMs === undefined ? {} : { timeoutMs })
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(maxConcurrent === undefined ? {} : { maxConcurrent })
   })
 
 const errorCodeOf = async (operation: Promise<unknown>): Promise<string> => {
@@ -165,14 +166,17 @@ describe('AiCliService', () => {
     expect(await errorCodeOf(createService(200).ask(choose('claude'), request))).toBe('ai-failed')
   })
 
-  it('can be cancelled, and answers one question at a time', async () => {
+  it('answers several questions at once up to its limit, and cancels them all', async () => {
     await install('claude', 'exec sleep 30')
-    const service = createService()
+    const service = createService(undefined, 2)
     const first = errorCodeOf(service.ask(choose('claude'), request))
-    await vi.waitFor(() => expect(service.busy).toBe(true))
+    const second = errorCodeOf(service.ask(choose('claude'), request))
+    await vi.waitFor(() => expect(service.inFlight).toBe(2))
+    // A third, over the limit, is refused at once rather than queued.
     expect(await errorCodeOf(service.ask(choose('claude'), request))).toBe('ai-busy')
     service.cancel()
     expect(await first).toBe('ai-cancelled')
+    expect(await second).toBe('ai-cancelled')
     expect(service.busy).toBe(false)
   })
 })

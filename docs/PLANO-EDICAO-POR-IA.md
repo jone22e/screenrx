@@ -196,7 +196,19 @@ custo estimado (número de chamadas) antes de começar.
   a capa e detectar o que está na tela. Fica desligado até o usuário ligar.
 - Tudo é desfazível; nada é exportado sem o usuário clicar em Exportar.
 
-## 6. Entregas
+## 6. Entregas — I1 a I4 FEITAS em 2026-11-16
+
+Implementado na mesma sessão em que o projeto foi escrito: pool no
+`AiCliService`, ficha da gravação, Diretor, cinco agentes com filtro de
+ações, montagem com regras de conflito, diálogo "Editar com IA" com
+progresso, lista por agente, cursores na linha do tempo, desfazer e refazer
+por agente. Padrões assumidos: 5 processos, Cortador e Legendista em esforço
+médio e os demais baixo, nenhum quadro sai do Mac. Não feito: a revisão
+opcional do Diretor (I4, parte) e o "Olho" (I5). Nenhuma chamada real às
+ferramentas foi feita ainda: a primeira rodada com uma gravação de verdade
+é o próximo passo, e vai calibrar prompts e limiares.
+
+Plano original, para referência:
 
 1. **I1 — Pool e Diretor (1 semana).** `AiCliService` em pool com limite;
    ficha da gravação; prompt e parse do plano; teste com os três CLIs em

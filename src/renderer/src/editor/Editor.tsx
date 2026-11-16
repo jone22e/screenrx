@@ -3,6 +3,7 @@ import type { EditorSession } from '@shared/models/editor'
 import type { AppError } from '@shared/models/errors'
 import { useSettingsOpen } from '../common/settingsScreen'
 import { EditorStore } from './EditorStore'
+import { AutoEditDialog } from './AutoEditDialog'
 import { ExportDialog } from './ExportDialog'
 import type { SaveStatus } from './EditorStore'
 import { Preview } from './Preview'
@@ -10,7 +11,8 @@ import type { PreviewPlayer } from './PreviewPlayer'
 import { Sidebar } from './Sidebar'
 import { Timeline } from './Timeline'
 import { Transport } from './Transport'
-import { BackIcon, ExportIcon, RedoIcon, UndoIcon } from './icons'
+import {
+  SparklesIcon, BackIcon, ExportIcon, RedoIcon, UndoIcon } from './icons'
 import './editor.css'
 
 interface Props {
@@ -72,6 +74,7 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
   const state = useSyncExternalStore(store.subscribe, store.getState)
   const [player, setPlayer] = useState<PreviewPlayer | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [autoEditing, setAutoEditing] = useState(false)
   // With the settings screen over the editor, the keyboard is not the editor's.
   const settingsOpen = useSettingsOpen()
 
@@ -87,7 +90,7 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (exporting || settingsOpen) return
+      if (exporting || autoEditing || settingsOpen) return
       const typing =
         (event.target instanceof HTMLInputElement && event.target.type !== 'range') ||
         event.target instanceof HTMLTextAreaElement ||
@@ -167,7 +170,7 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [player, store, exporting, settingsOpen])
+  }, [player, store, exporting, autoEditing, settingsOpen])
 
   useEffect(() => {
     if (settingsOpen) player?.pause()
@@ -250,6 +253,16 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
         <span className="editor-save" data-status={state.saveStatus}>
           {SAVE_LABELS[state.saveStatus]}
         </span>
+        <button
+          className="tool-button tool-button-ai"
+          title="Um Diretor planeja e uma equipe de agentes edita o vídeo inteiro ao mesmo tempo"
+          onClick={() => {
+            player?.pause()
+            setAutoEditing(true)
+          }}
+        >
+          <SparklesIcon /> Editar com IA
+        </button>
         <div className="tool-group">
           <button
             className="tool-button tool-icon"
@@ -283,6 +296,7 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
 
       {player && <Timeline session={session} store={store} player={player} />}
       {exporting && <ExportDialog store={store} onClose={() => setExporting(false)} />}
+      {autoEditing && <AutoEditDialog store={store} onClose={() => setAutoEditing(false)} />}
     </div>
   )
 }

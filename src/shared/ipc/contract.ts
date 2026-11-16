@@ -13,6 +13,7 @@ import type { CaptureDevices } from '../models/devices'
 import type { DubProgress, DubRequest, DubStatus, DubTrack } from '../models/dub'
 import type { FilterRenderProgress, FilterRenderRequest, FilterTrack } from '../models/filters'
 import type { ProjectTemplate } from '../models/template'
+import type { AutoEditProgress, AutoEditRequest, AutoEditRerunRequest, AutoEditResult, WorkerResult } from '../models/autoEdit'
 import type {
   EditorClip,
   EditorImage,
@@ -113,6 +114,8 @@ export interface IpcInvokeContract {
     result: IpcResult<CutSuggestionResult>
   }
   'ai:cancel': { args: []; result: void }
+  'ai:auto-edit': { args: [sessionId: string, request: AutoEditRequest, choice: AiChoice]; result: IpcResult<AutoEditResult> }
+  'ai:auto-edit-rerun': { args: [sessionId: string, request: AutoEditRerunRequest, choice: AiChoice]; result: IpcResult<WorkerResult> }
   'ai:assist': {
     args: [sessionId: string, request: AssistantRequest, choice: AiChoice]
     result: IpcResult<AssistantReply>
@@ -165,6 +168,7 @@ export interface IpcEventContract {
   'filters:progress': FilterRenderProgress
   'update:state-changed': UpdateState
   'track:progress': { sessionId: string; fraction: number }
+  'ai:auto-edit-progress': AutoEditProgress
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -311,6 +315,14 @@ export interface ScreenRxApi {
      */
     assist(sessionId: string, request: AssistantRequest, choice: AiChoice): Promise<IpcResult<AssistantReply>>
     cancel(): Promise<void>
+    /**
+     * The automatic edit: a director plans, the agents asked for edit in parallel, each on its own
+     * lanes; the answer is their work, assembled, for the editor to apply. Only text is sent. `cancel` stops it.
+     */
+    autoEdit(sessionId: string, request: AutoEditRequest, choice: AiChoice): Promise<IpcResult<AutoEditResult>>
+    /** One agent again, on the same plan, with a further instruction. */
+    autoEditRerun(sessionId: string, request: AutoEditRerunRequest, choice: AiChoice): Promise<IpcResult<WorkerResult>>
+    onAutoEditProgress(listener: (progress: AutoEditProgress) => void): Unsubscribe
   }
   export: {
     /**

@@ -31,7 +31,11 @@ export interface AiCliServiceOptions {
   /** Environment the tools are started from. */
   env: NodeJS.ProcessEnv
   timeoutMs?: number
+  /** How many questions may be in flight at once; the auto-edit asks several in parallel. */
+  maxConcurrent?: number
 }
+
+const DEFAULT_MAX_CONCURRENT = 5
 
 /** Generous: the highest effort levels think for minutes. */
 const DEFAULT_TIMEOUT_MS = 300_000
@@ -58,37 +62,47 @@ function extractJson(text: string): unknown {
  * which the caller validates.
  */
 export class AiCliService {
-  private running: AbortController | null = null
+  /** The questions in flight, each with its own way to be stopped. */
+  private readonly running = new Set<AbortController>()
 
   constructor(private readonly options: AiCliServiceOptions) {}
 
   get busy(): boolean {
-    return this.running !== null
+    return this.running.size > 0
   }
 
-  /** Asks one question, with the chosen tool, model and effort, and returns the parsed JSON answer. */
+  get inFlight(): number {
+    return this.running.size
+  }
+
+  /**
+   * Asks one question, with the chosen tool, model and effort, and returns
+   * the parsed JSON answer. Several questions may run at once, up to the
+   * limit; one more is refused as busy rather than queued, so the caller
+   * knows at once.
+   */
   async ask(choice: AiChoice, request: AiRequest): Promise<unknown> {
-    if (this.running) throw new AiError(appError('ai-busy'))
+    if (this.running.size >= (this.options.maxConcurrent ?? DEFAULT_MAX_CONCURRENT)) throw new AiError(appError('ai-busy'))
     const spec = AI_PROVIDER_SPECS[choice.provider]
     const binary = await locateBinary(this.options.searchDirs, spec.binary)
     if (!binary) throw new AiError(appError('ai-unavailable', `${spec.binary} not found`))
 
     const controller = new AbortController()
-    this.running = controller
+    this.running.add(controller)
     // An empty directory of its own: the tool has no project to read or change.
     const workDir = await mkdtemp(path.join(os.tmpdir(), 'screenrx-ai-'))
     try {
       const ask = { claude: this.askClaude, codex: this.askCodex, agy: this.askAgy }[choice.provider]
       return await ask.call(this, binary, workDir, choice, request, controller.signal)
     } finally {
-      this.running = null
+      this.running.delete(controller)
       await rm(workDir, { recursive: true, force: true })
     }
   }
 
-  /** Stops the question in progress, if any. */
+  /** Stops every question in progress. */
   cancel(): void {
-    this.running?.abort()
+    for (const controller of this.running) controller.abort()
   }
 
   private async askClaude(

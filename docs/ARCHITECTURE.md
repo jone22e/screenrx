@@ -765,6 +765,56 @@ riscado na resposta. A conversa vive só na memória do editor aberto. **Não
 verificado:** nenhuma conversa real com as CLIs; só o prompt, o parser e o
 aplicador têm testes.
 
+### Edição completa por IA ("Editar com IA")
+
+```
+briefing (plataforma, duração alvo, tom, agentes) + estado da edição
+      ↓ AutoEditService (main)
+ficha da gravação (engine/ai/recordingSheet.ts: fatos, atividade por 10 s, pausas, transcrição)
+      ↓ Diretor (1 chamada, esforço alto) → plano: capítulos, preset, modo de legenda, briefing por agente
+      ↓ Agentes em paralelo (Promise.all, pool do AiCliService): Cortador, Câmera, Legendista, Som, Arte
+      ↓ assembly.ts: ordem fixa; zoom/texto/velocidade dentro de corte caem; título de capítulo vai para onde a edição retoma
+EditorStore.applyAutoEdit: um passo de desfazer por agente · cursores coloridos varrem a linha do tempo
+```
+
+- **Pool**: `AiCliService` passou a aceitar várias perguntas ao mesmo tempo
+  (`maxConcurrent`, padrão 5; acima disso `ai-busy`); `cancel` para todas. O
+  assistente, a tradução e as sugestões continuam iguais.
+- **Papéis** (`engine/ai/workerPrompts.ts`, `WORKER_SPECS`): cada agente só
+  pode usar as ações das pistas que possui — por isso rodam em paralelo sem
+  conflito — e responde com `notes` e ações com `reason`. O parser é o do
+  assistente, entrada por entrada, mais o filtro de tipos. Esforço por papel
+  (`AutoEditService.ROLE_EFFORT`): Diretor alto, Cortador e Legendista médio,
+  os outros baixo, quando a ferramenta oferece o nível.
+- **O que sai do Mac**: só texto — transcrição, cliques e deslocamento do
+  cursor por janela de 10 s, nomes de arquivos de imagens e música, estado da
+  edição, briefing. Nenhum quadro.
+- **No editor** (`AutoEditDialog.tsx`): briefing → progresso por agente
+  (evento `ai:auto-edit-progress`) → resultado por agente com cada ação e seu
+  motivo. `EditorStore.applyAutoEdit` aplica cada agente como um passo de
+  desfazer; `undoWorker` tira o trabalho de um só agente (volta ao projeto de
+  antes da equipe e reaplica os outros, como um passo), e `replaceWorker`
+  troca o de um agente refeito (`ai:auto-edit-rerun`, com instrução extra) —
+  os dois só enquanto nada mais foi editado depois da equipe; depois disso,
+  ⌘Z. Os **cursores** (`common/agentCursors.ts`, `AgentCursorsLayer` na linha
+  do tempo) varrem as ações de cada agente em até 2 s, em paralelo, com o
+  motivo ao lado; são só espetáculo: o trabalho já está aplicado.
+- **Primeira rodada real** (2026-11-16, `AutoEditService.live.test.ts`, com
+  `SCREENRX_AI_LIVE=1 SCREENRX_AI_SESSION=<id>`, Claude, modelo padrão):
+  gravação de 1:24 com 189 palavras, briefing "Reels, 1:00, tutorial direto".
+  Total 84 s: Diretor 57 s em esforço alto (por isso passou a médio), agentes
+  em paralelo de 4 a 27 s (Legendista o mais lento). Resultado válido e
+  coerente: 7 cortes (repetições, duas pausas, um enchimento) + 1,25×, 6
+  zooms nos cliques sem sobreposição, 9:16 seguindo o mouse, legendas em
+  highlight curtas com pop, um título por capítulo e dois call-outs fora dos
+  cortes, microfone a 100%, preset Reels e fundo grafite. O que a rodada
+  ensinou e já foi corrigido: briefings do Diretor cortados em 1000 caracteres
+  (agora 3000 e pedido curto), tempos "estimados" em vez de índices de palavra
+  (os prompts agora exigem índices para fala) e agentes pedindo para "conferir
+  na forma de onda" (agora sabem que ninguém ouve nem vê a gravação). Nenhuma
+  ação foi aplicada ao projeto nessa rodada. O projeto completo está em
+  `docs/PLANO-EDICAO-POR-IA.md`.
+
 ### Sugestões de corte por IA
 
 ```

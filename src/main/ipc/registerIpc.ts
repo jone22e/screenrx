@@ -24,6 +24,8 @@ import { AiError } from '../ai/AiCliService'
 import { AI_PROVIDER_SPECS } from '../ai/aiCatalog'
 import type { AiSetupService } from '../ai/AiSetupService'
 import type { AssistantService } from '../ai/AssistantService'
+import type { AutoEditService } from '../ai/AutoEditService'
+import { parseAutoEditRequest, parseAutoEditRerunRequest } from '@shared/models/autoEdit'
 import type { CaptionTranslationService } from '../ai/CaptionTranslationService'
 import type { CutSuggestionService } from '../ai/CutSuggestionService'
 import { DictationError } from '../captions/DictationService'
@@ -79,6 +81,7 @@ export interface IpcDependencies {
   tracking: ObjectTrackingService
   suggestions: CutSuggestionService
   assistant: AssistantService
+  autoEdit: AutoEditService
   translations: CaptionTranslationService
   dubbing: DubbingService
   filters: FilterRenderService
@@ -136,6 +139,7 @@ export function registerIpc(deps: IpcDependencies): void {
     tracking,
     suggestions,
     assistant,
+    autoEdit,
     translations,
     dubbing,
     filters,
@@ -696,6 +700,31 @@ export function registerIpc(deps: IpcDependencies): void {
   })
 
   handle('ai:cancel', () => suggestions.cancel())
+
+  handle('ai:auto-edit', async ([sessionId, value, chosen]) => {
+    const request = parseAutoEditRequest(value)
+    const choice = parseAiChoice(chosen)
+    if (!isSessionId(sessionId) || !request || !choice) return { ok: false, error: appError('ai-failed', 'invalid auto-edit request') }
+    try {
+      return { ok: true, value: await autoEdit.run(sessionId, request, choice) }
+    } catch (error) {
+      const failure = error instanceof AiError ? error.appError : appError('ai-failed', String(error))
+      if (failure.code !== 'ai-cancelled') logger.error('auto-edit failed', { sessionId, code: failure.code, detail: failure.detail })
+      return { ok: false, error: failure }
+    }
+  })
+
+  handle('ai:auto-edit-rerun', async ([sessionId, value, chosen]) => {
+    const request = parseAutoEditRerunRequest(value)
+    const choice = parseAiChoice(chosen)
+    if (!isSessionId(sessionId) || !request || !choice) return { ok: false, error: appError('ai-failed', 'invalid auto-edit request') }
+    try {
+      return { ok: true, value: await autoEdit.rerun(sessionId, request, choice) }
+    } catch (error) {
+      const failure = error instanceof AiError ? error.appError : appError('ai-failed', String(error))
+      return { ok: false, error: failure }
+    }
+  })
 
   handle('ai:assist', async ([sessionId, value, chosen]) => {
     const request = parseAssistantRequest(value)

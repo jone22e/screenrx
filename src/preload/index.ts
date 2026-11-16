@@ -111,7 +111,10 @@ const api: ScreenRxApi = {
     cancelSetup: () => invoke('ai:cancel-setup'),
     suggestCuts: (sessionId, choice) => invoke('ai:suggest-cuts', sessionId, choice),
     assist: (sessionId, request, choice) => invoke('ai:assist', sessionId, request, choice),
-    cancel: () => invoke('ai:cancel')
+    cancel: () => invoke('ai:cancel'),
+    autoEdit: (sessionId, request, choice) => invoke('ai:auto-edit', sessionId, request, choice),
+    autoEditRerun: (sessionId, request, choice) => invoke('ai:auto-edit-rerun', sessionId, request, choice),
+    onAutoEditProgress: (listener) => subscribe('ai:auto-edit-progress', listener)
   },
   export: {
     start: (sessionId, overrides = null) => invoke('export:start', sessionId, overrides),

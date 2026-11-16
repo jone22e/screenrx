@@ -3400,3 +3400,120 @@ kbd {
   margin-left: 0;
   margin-right: 6px;
 }
+
+/* "Editar com IA": the button, the team list and the agents' cursors. */
+.tool-button-ai {
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #2563eb);
+  border: none;
+}
+
+.tool-button-ai:hover {
+  filter: brightness(1.1);
+}
+
+.dialog-wide {
+  width: min(680px, 92vw);
+}
+
+.agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.agent-row[data-stage='thinking'] {
+  border-color: var(--accent);
+}
+
+.agent-row[data-stage='failed'] {
+  border-color: #ff5a5f;
+}
+
+.agent-dot {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 50%;
+}
+
+.agent-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-notes {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.agent-actions {
+  margin: 4px 0 0;
+  padding-left: 14px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text);
+  max-height: 140px;
+  overflow: auto;
+}
+
+.agent-reason {
+  color: var(--text-muted);
+}
+
+.agent-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-count {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-cursor {
+  position: absolute;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: -9px;
+  pointer-events: none;
+  transition:
+    left 0.18s ease-out,
+    top 0.18s ease-out;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+}
+
+.agent-cursor-label {
+  max-width: 220px;
+  padding: 2px 6px;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #111;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border-radius: 4px;
+}

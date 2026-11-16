@@ -4,6 +4,9 @@ import { captionPlacementOf, captionPlacementY } from '@engine/rendering/safeZon
 import { SPEED_CONFIG, isSpeedFactor } from '@engine/timeline/speedConfig'
 import type { TextTemplate } from '@engine/rendering/textTemplates'
 import type { ProjectTemplate } from '@shared/models/template'
+import type { AssistantAction } from '@shared/models/assistant'
+import type { WorkerRole } from '@shared/models/autoEdit'
+import { applyAssistantActions } from './assistantActions'
 import { applyTemplateTo, templateFromProject } from '@shared/models/template'
 import type { SpeechSpan } from '@engine/audio/musicLevel'
 import { speechSpans } from '@engine/audio/musicLevel'
@@ -441,6 +444,63 @@ export class EditorStore {
       this.state.selectedTextId === textId ? null : this.state.selectedTextId,
       null
     )
+  }
+
+  // --- automatic edit -------------------------------------------------------------
+
+  /**
+   * The agents' work as applied: what the project was before any of it, and
+   * each agent's actions in the order applied. Kept so one agent's work can
+   * be taken back on its own, as long as nothing else changed since.
+   */
+  private autoEdit: { base: Project; steps: Array<{ role: WorkerRole; actions: readonly AssistantAction[] }>; after: Project } | null = null
+
+  /** Applies each agent's actions as one undo step of its own, in the order given. */
+  applyAutoEdit(workers: ReadonlyArray<{ role: WorkerRole; actions: readonly AssistantAction[] }>, translate: (language: CaptionLanguage) => void): void {
+    const base = this.project
+    const steps: Array<{ role: WorkerRole; actions: readonly AssistantAction[] }> = []
+    for (const worker of workers) {
+      if (worker.actions.length === 0) continue
+      applyAssistantActions(this, worker.actions, translate)
+      steps.push({ role: worker.role, actions: worker.actions })
+    }
+    this.autoEdit = { base, steps, after: this.project }
+  }
+
+  /** Whether an agent's work can still be taken back on its own: nothing was edited since the agents finished. */
+  canUndoWorker(role: WorkerRole): boolean {
+    return this.autoEdit !== null && this.autoEdit.after === this.project && this.autoEdit.steps.some((step) => step.role === role)
+  }
+
+  /**
+   * Takes back one agent's work: the project goes back to before the agents
+   * and the other agents' actions are applied again over it, as one undo
+   * step. Returns whether it could.
+   */
+  undoWorker(role: WorkerRole, translate: (language: CaptionLanguage) => void): boolean {
+    if (!this.canUndoWorker(role) || !this.autoEdit) return false
+    const { base, steps } = this.autoEdit
+    const remaining = steps.filter((step) => step.role !== role)
+    this.runAsOneStep(() => {
+      this.commit(base, NOTHING_SELECTED, null)
+      for (const step of remaining) applyAssistantActions(this, step.actions, translate)
+    })
+    this.autoEdit = { base, steps: remaining, after: this.project }
+    return true
+  }
+
+  /** Puts one agent's new work in place of its old one (after a rerun), as one undo step. */
+  replaceWorker(role: WorkerRole, actions: readonly AssistantAction[], translate: (language: CaptionLanguage) => void): boolean {
+    if (!this.canUndoWorker(role) && !(this.autoEdit && this.autoEdit.after === this.project)) return false
+    const current = this.autoEdit as NonNullable<typeof this.autoEdit>
+    const steps = current.steps.filter((step) => step.role !== role)
+    this.runAsOneStep(() => {
+      this.commit(current.base, NOTHING_SELECTED, null)
+      for (const step of steps) applyAssistantActions(this, step.actions, translate)
+      if (actions.length > 0) applyAssistantActions(this, actions, translate)
+    })
+    this.autoEdit = { base: current.base, steps: actions.length > 0 ? [...steps, { role, actions }] : steps, after: this.project }
+    return true
   }
 
   // --- templates ------------------------------------------------------------------
