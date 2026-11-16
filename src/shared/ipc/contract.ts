@@ -67,6 +67,7 @@ export interface IpcInvokeContract {
   'library:series': { args: []; result: string[] }
   'library:add-series': { args: [name: string]; result: IpcResult<null> }
   'library:remove-series': { args: [name: string]; result: IpcResult<null> }
+  'library:rename-series': { args: [from: string, to: string]; result: IpcResult<null> }
   'library:plan-series': { args: [sessionId: string, choice: AiChoice, targetSec: number]; result: IpcResult<SeriesPlan> }
   'library:split-series': { args: [sessionId: string, plan: SeriesPlan]; result: IpcResult<{ sessionIds: string[] }> }
   'library:import': { args: []; result: IpcResult<{ sessionIds: string[] }> }
@@ -230,8 +231,10 @@ export interface ScreenRxApi {
     /** The series the user made, whether or not any recording is in them. */
     series(): Promise<string[]>
     addSeries(name: string): Promise<IpcResult<null>>
-    /** Forgets a series; recordings in it keep naming it. */
+    /** Removes a series: its recordings stay, in no series. */
     removeSeries(name: string): Promise<IpcResult<null>>
+    /** Renames a series on every recording in it. */
+    renameSeries(from: string, to: string): Promise<IpcResult<null>>
     /** Asks the AI to split the recording into episodes of about `targetSec` each; nothing is cut yet. */
     planSeries(sessionId: string, choice: AiChoice, targetSec: number): Promise<IpcResult<SeriesPlan>>
     /** Makes each episode of the plan a recording of its own, in the series; the source stays. */

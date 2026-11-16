@@ -1,5 +1,6 @@
 import { readFile, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
+import { EXPORT_CONFIG } from '@engine/export/exportConfig'
 import { SESSION_FILES } from '@shared/config/recording'
 import type { AppError } from '@shared/models/errors'
 import { appError } from '@shared/models/errors'
@@ -29,7 +30,7 @@ export interface SessionSplitterDeps {
 /**
  * Makes a series out of one recording: each episode becomes a recording of
  * its own, with its stretch of the screen, microphone and system tracks cut
- * out, the pointer telemetry and the transcript shifted to start at zero,
+ * out (the webcam too), the pointer telemetry and the transcript shifted to start at zero,
  * the episode's title as its name and the series' name on it. Each episode
  * starts on the keyframe at or before where the plan says, so the video is
  * copied rather than re-encoded (seconds instead of minutes, same picture,
@@ -116,6 +117,18 @@ export class SessionSplitter {
       }
     }
 
+    // The webcam has keyframes of its own, so its stretch is re-encoded to start exactly with the screen's.
+    let webcam: RecordingSessionManifest['assets']['webcam']
+    if (source.assets.webcam) {
+      const camera = source.assets.webcam
+      const bitrate = Math.round(camera.widthPx * camera.heightPx * source.capture.fps * EXPORT_CONFIG.bitsPerPixelPerFrame)
+      await ffmpeg.cutVideo(sessions.trackPathOf(source.id, 'webcam'), created.webcamPath, episode.startMs, wantedMs, { copy: false, bitrate })
+      const [size, probed] = await Promise.all([stat(created.webcamPath), ffmpeg.probeMedia(created.webcamPath)])
+      if (probed.video) {
+        webcam = { file: SESSION_FILES.webcam, sizeBytes: size.size, durationMs: probed.durationMs, widthPx: probed.video.widthPx, heightPx: probed.video.heightPx, deviceName: camera.deviceName }
+      }
+    }
+
     const telemetry = await this.sliceTelemetry(source, episode, created.cursorPath, created.interactionsPath)
     await this.sliceTranscript(source, episode, created.directory)
     await sessions.write({
@@ -135,6 +148,7 @@ export class SessionSplitter {
           droppedFrameCount: 0
         },
         ...audioAssets,
+        ...(webcam && { webcam }),
         ...(telemetry ?? {})
       },
       diagnostics: []

@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { formatClock } from '@shared/format'
+import type { TranscriptionProgress } from '@shared/models/captions'
 import type { AppError } from '@shared/models/errors'
 import type { RecordingSummary } from '@shared/models/session'
 import type { SeriesPlan, SeriesProgress } from '@shared/models/series'
@@ -13,7 +14,18 @@ interface Props {
   onClose: () => void
 }
 
-type Phase = { kind: 'brief' } | { kind: 'planning' } | { kind: 'plan'; plan: SeriesPlan } | { kind: 'splitting'; plan: SeriesPlan; progress: SeriesProgress | null }
+type Phase =
+  | { kind: 'brief' }
+  | { kind: 'transcribing'; progress: TranscriptionProgress | null }
+  | { kind: 'planning' }
+  | { kind: 'plan'; plan: SeriesPlan }
+  | { kind: 'splitting'; plan: SeriesPlan; progress: SeriesProgress | null }
+
+const TRANSCRIBING_LABELS: Record<TranscriptionProgress['stage'], string> = {
+  preparing: 'Preparando a transcrição…',
+  downloading: 'Baixando o modelo de voz…',
+  transcribing: 'Transcrevendo a fala'
+}
 
 const TARGET_LABELS: Record<(typeof SERIES_LIMITS.targetChoicesSec)[number], string> = { 60: '1 min', 180: '3 min', 300: '5 min', 600: '10 min' }
 
@@ -31,25 +43,53 @@ export function SeriesDialog({ recording, onClose }: Props) {
   useEffect(() => {
     void aiSettings.load()
   }, [])
-  // While the episodes are being cut, the main process says which one it is on.
+  // While the episodes are being cut, the main process says which one it is on; likewise while transcribing.
   useEffect(() => {
     if (phase.kind !== 'splitting') return
     return window.screenrx.library.onSplitProgress((progress) => {
       if (progress.sessionId === recording.id) setPhase((current) => (current.kind === 'splitting' ? { ...current, progress } : current))
     })
   }, [phase.kind, recording.id])
+  useEffect(() => {
+    if (phase.kind !== 'transcribing') return
+    return window.screenrx.captions.onProgress((progress) => {
+      if (progress.sessionId === recording.id) setPhase((current) => (current.kind === 'transcribing' ? { ...current, progress } : current))
+    })
+  }, [phase.kind, recording.id])
+
+  // The AI reads the transcript, so a recording without one is transcribed first: the language is detected from the first seconds.
+  const transcribed = recording.transcriptPreview !== null
+  const track = recording.hasMicrophone ? 'microphone' : recording.hasSystemAudio ? 'systemAudio' : null
+  const fail = (failure: AppError): void => {
+    setPhase({ kind: 'brief' })
+    if (failure.code !== 'ai-cancelled' && failure.code !== 'transcription-cancelled') setError(failure)
+  }
+
+  const askForPlan = (): void => {
+    if (!current) return
+    setPhase({ kind: 'planning' })
+    void window.screenrx.library.planSeries(recording.id, current.choice, targetSec).then((result) => {
+      if (result.ok) setPhase({ kind: 'plan', plan: result.value })
+      else fail(result.error)
+    })
+  }
 
   const plan = (): void => {
     if (!current) return
     setError(null)
-    setPhase({ kind: 'planning' })
-    void window.screenrx.library.planSeries(recording.id, current.choice, targetSec).then((result) => {
-      if (result.ok) setPhase({ kind: 'plan', plan: result.value })
-      else {
-        setPhase({ kind: 'brief' })
-        if (result.error.code !== 'ai-cancelled') setError(result.error)
-      }
-    })
+    if (transcribed) return askForPlan()
+    if (!track) {
+      setError({ code: 'ai-no-transcript', message: 'Esta gravação não tem fala: sem microfone nem som do sistema, a IA não tem o que ler.' })
+      return
+    }
+    setPhase({ kind: 'transcribing', progress: null })
+    void window.screenrx.captions
+      .detectLocale(recording.id, track)
+      .then((detected) => window.screenrx.captions.generate(recording.id, { locale: detected.ok && detected.value.locale ? detected.value.locale : 'pt-BR', track }))
+      .then((result) => {
+        if (result.ok) askForPlan()
+        else fail(result.error)
+      })
   }
 
   const split = (): void => {
@@ -66,7 +106,7 @@ export function SeriesDialog({ recording, onClose }: Props) {
     })
   }
 
-  const busy = phase.kind === 'planning' || phase.kind === 'splitting'
+  const busy = phase.kind === 'transcribing' || phase.kind === 'planning' || phase.kind === 'splitting'
   const edit = (change: (plan: SeriesPlan) => SeriesPlan): void => setPhase((current) => (current.kind === 'plan' ? { kind: 'plan', plan: change(current.plan) } : current))
 
   return (
@@ -78,7 +118,7 @@ export function SeriesDialog({ recording, onClose }: Props) {
           gravação da série, pronta para editar e publicar. A gravação original continua na biblioteca.
         </p>
 
-        {(phase.kind === 'brief' || phase.kind === 'planning') && (
+        {(phase.kind === 'brief' || phase.kind === 'transcribing' || phase.kind === 'planning') && (
           <>
             <div className="series-field">
               <span className="series-label">Duração de cada episódio</span>
@@ -96,6 +136,15 @@ export function SeriesDialog({ recording, onClose }: Props) {
                 <button className="panel-button panel-button-small" onClick={openSettings}>
                   Configurar IA
                 </button>
+              </p>
+            )}
+            {!transcribed && phase.kind === 'brief' && track && (
+              <p className="panel-hint">Esta gravação ainda não tem transcrição: a fala é transcrita neste Mac antes de a IA planejar.</p>
+            )}
+            {phase.kind === 'transcribing' && (
+              <p className="panel-hint series-working">
+                {phase.progress ? TRANSCRIBING_LABELS[phase.progress.stage] : 'Descobrindo o idioma…'}
+                {phase.progress?.stage === 'transcribing' && ` · ${Math.round(phase.progress.fraction * 100)}%`}
               </p>
             )}
             {phase.kind === 'planning' && <p className="panel-hint series-working">A IA está lendo a transcrição e separando os episódios…</p>}
@@ -167,8 +216,8 @@ export function SeriesDialog({ recording, onClose }: Props) {
         )}
 
         <div className="dialog-actions">
-          {phase.kind === 'planning' ? (
-            <button className="panel-button" onClick={() => void window.screenrx.ai.cancel()}>
+          {phase.kind === 'planning' || phase.kind === 'transcribing' ? (
+            <button className="panel-button" onClick={() => void (phase.kind === 'planning' ? window.screenrx.ai.cancel() : window.screenrx.captions.cancel())}>
               Cancelar
             </button>
           ) : (
@@ -181,9 +230,9 @@ export function SeriesDialog({ recording, onClose }: Props) {
               Planejar de novo
             </button>
           )}
-          {(phase.kind === 'brief' || phase.kind === 'planning') && (
+          {(phase.kind === 'brief' || phase.kind === 'transcribing' || phase.kind === 'planning') && (
             <button className="panel-button panel-button-primary" disabled={busy || !current} onClick={plan}>
-              <SparklesIcon /> Planejar episódios
+              <SparklesIcon /> {transcribed ? 'Planejar episódios' : 'Transcrever e planejar'}
             </button>
           )}
           {(phase.kind === 'plan' || phase.kind === 'splitting') && (

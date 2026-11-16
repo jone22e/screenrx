@@ -405,6 +405,19 @@ export function registerIpc(deps: IpcDependencies): void {
     }
   })
 
+  handle('library:rename-series', async ([from, to]) => {
+    const source = normalizeSeriesName(from)
+    const target = normalizeSeriesName(to)
+    if (!source || !target) return { ok: false, error: appError('invalid-state', 'invalid series name') }
+    try {
+      await sessions.renameSeries(source, target)
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: null }
+    } catch (error) {
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
   handle('library:plan-series', async ([sessionId, chosen, targetSec]) => {
     const choice = parseAiChoice(chosen)
     const target = typeof targetSec === 'number' && Number.isFinite(targetSec) ? Math.min(Math.max(targetSec, 30), 3600) : 180

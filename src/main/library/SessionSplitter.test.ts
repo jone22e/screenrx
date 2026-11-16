@@ -33,6 +33,7 @@ describe('SessionSplitter', () => {
     )
     run(['-f', 'lavfi', '-i', 'testsrc=size=160x90:rate=30:duration=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-g', '30', created.screenPath])
     run(['-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:a', 'aac', created.microphonePath])
+    run(['-f', 'lavfi', '-i', 'testsrc=size=96x54:rate=30:duration=4', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-g', '90', created.webcamPath])
     await writeFile(created.cursorPath, JSON.stringify([{ timeMs: 500, x: 0.1, y: 0.1 }, { timeMs: 2500, x: 0.9, y: 0.9 }, { timeMs: 3500, x: 0.5, y: 0.5 }]))
     await writeFile(created.interactionsPath, JSON.stringify([{ timeMs: 2600, type: 'click', x: 0.5, y: 0.5, button: 'left' }]))
     await writeFile(
@@ -47,6 +48,7 @@ describe('SessionSplitter', () => {
       assets: {
         screen: { file: SESSION_FILES.screen, sizeBytes: 1, durationMs: 4000, widthPx: 160, heightPx: 90, frameCount: 120, droppedFrameCount: 0 },
         microphone: { file: SESSION_FILES.microphone, sizeBytes: 1, durationMs: 4000, deviceName: 'Mic' },
+        webcam: { file: SESSION_FILES.webcam, sizeBytes: 1, durationMs: 4000, widthPx: 96, heightPx: 54, deviceName: 'Cam' },
         cursor: { file: SESSION_FILES.cursor, entryCount: 3 },
         interactions: { file: SESSION_FILES.interactions, entryCount: 1 }
       }
@@ -78,6 +80,10 @@ describe('SessionSplitter', () => {
     expect(first?.assets.screen?.durationMs).toBeLessThan(2200)
     expect(second?.assets.microphone?.durationMs).toBeGreaterThan(1800)
     expect(second?.assets.microphone?.deviceName).toBe('Mic')
+    // The webcam's keyframes are 3 s apart; its stretch is re-encoded, so the episode still starts at 2 s.
+    expect(second?.assets.webcam).toMatchObject({ widthPx: 96, heightPx: 54, deviceName: 'Cam' })
+    expect(second?.assets.webcam?.durationMs).toBeGreaterThan(1800)
+    expect(second?.assets.webcam?.durationMs).toBeLessThan(2200)
 
     // The second episode keeps only what happened in its stretch, 2 s earlier.
     const cursor = JSON.parse(await readFile(path.join(sessions.directoryOf(ids[1] as string), SESSION_FILES.cursor), 'utf8')) as Array<{ timeMs: number }>

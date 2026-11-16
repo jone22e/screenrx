@@ -66,6 +66,7 @@ const api: ScreenRxApi = {
     series: () => invoke('library:series'),
     addSeries: (name) => invoke('library:add-series', name),
     removeSeries: (name) => invoke('library:remove-series', name),
+    renameSeries: (from, to) => invoke('library:rename-series', from, to),
     planSeries: (sessionId, choice, targetSec) => invoke('library:plan-series', sessionId, choice, targetSec),
     splitSeries: (sessionId, plan) => invoke('library:split-series', sessionId, plan),
     onSplitProgress: (listener) => subscribe('library:split-progress', listener),

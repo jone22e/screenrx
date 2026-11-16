@@ -916,17 +916,23 @@ série**: uma prateleira por série, a da gravação mais recente primeiro, e
 "Sem série" por último; as ordens por data agrupam por dia. As séries também
 existem vazias: "Nova série" no cabeçalho guarda o nome em `series.json` ao
 lado das gravações (`library:series`, `library:add-series`,
-`library:remove-series`; pôr uma gravação numa série também a guarda lá), e
-uma prateleira vazia mostra onde soltar. Um cartão pode ser **arrastado** para
+`library:remove-series`, `library:rename-series`; pôr uma gravação numa série
+também a guarda lá), e uma prateleira vazia mostra onde soltar. No título da
+prateleira, ao passar o mouse: renomear (muda o nome em todas as gravações da
+série) e remover (as gravações ficam, sem série; pede confirmação quando há
+alguma). Um cartão pode ser **arrastado** para
 uma prateleira (tipo de arrasto `application/x-screenrx-recording`; soltar em
 "Sem série" tira da série). **Gerar série** (ação do cartão, `SeriesDialog.tsx`):
-a IA lê a transcrição (`engine/ai/episodePrompt.ts`, índices de palavras como
+sem transcrição, o diálogo detecta o idioma e transcreve neste Mac antes
+(`captions:detect-locale` + `captions:generate`, com progresso); depois a IA lê
+a transcrição (`engine/ai/episodePrompt.ts`, índices de palavras como
 nas sugestões de corte; `EpisodePlannerService`; `library:plan-series`) e
 propõe nome da série e episódios de cerca da duração pedida (1, 3, 5 ou 10 min),
 que o usuário revisa (títulos, juntar ao anterior) antes de `library:split-series`
 cortar: `SessionSplitter` leva cada início ao keyframe anterior e **copia** o
 vídeo sem recodificar (segundos, mesmo tamanho), corta microfone e som do
-sistema no mesmo ponto, desloca telemetria e transcrição para começar em zero,
+sistema no mesmo ponto (a webcam é recodificada, pois tem keyframes próprios),
+desloca telemetria e transcrição para começar em zero,
 e grava cada episódio como gravação própria ("N. Título", na série); progresso
 em `library:split-progress`; a original fica. Na grade agrupada,
 cada grupo é uma

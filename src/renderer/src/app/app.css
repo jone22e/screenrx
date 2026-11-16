@@ -449,13 +449,13 @@ body {
   color: var(--text-muted);
 }
 
-.shelf-remove {
+/* Rename and remove, on the title, shown while the pointer is on the row. */
+.shelf-tool {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 22px;
   height: 22px;
-  margin-left: 2px;
   padding: 0;
   color: var(--text-muted);
   background: transparent;
@@ -464,14 +464,31 @@ body {
   opacity: 0;
 }
 
-.shelf:hover .shelf-remove,
-.shelf-remove:focus-visible {
+.shelf:hover .shelf-tool,
+.shelf-tool:focus-visible {
   opacity: 1;
 }
 
-.shelf-remove:hover {
+.shelf-tool:hover {
   color: var(--text);
   background: rgba(255, 255, 255, 0.1);
+}
+
+.shelf-rename {
+  width: 260px;
+  height: 26px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.shelf-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
 }
 
 /* A row with nothing in it: a dashed box, where a card can be dropped. */

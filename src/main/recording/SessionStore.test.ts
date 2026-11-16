@@ -38,6 +38,21 @@ describe('SessionStore series and cover', () => {
     expect(await sessions.setSeries('recording-20260101-000000-000', 'x')).toBe(false)
   })
 
+  it('renames a series on every recording in it, and removing one leaves its recordings in no series', async () => {
+    const a = await createCompleted()
+    await new Promise((resolve) => setTimeout(resolve, 1100))
+    const b = await createCompleted()
+    await sessions.setSeries(a, 'Curso')
+    await sessions.setSeries(b, 'Curso')
+    await sessions.addSeries('Vazia')
+    await sessions.renameSeries('Curso', 'Curso completo')
+    expect((await sessions.list()).map((entry) => entry.series).sort()).toEqual(['Curso completo', 'Curso completo'])
+    expect(await sessions.listSeries()).toEqual(['Curso completo', 'Vazia'])
+    await sessions.removeSeries('Curso completo')
+    expect((await sessions.list()).map((entry) => entry.series)).toEqual([null, null])
+    expect(await sessions.listSeries()).toEqual(['Vazia'])
+  })
+
   it('keeps a cover of its own in the session folder, replacing the one before, and serves it as the thumbnail', async () => {
     const id = await createCompleted()
     expect((await sessions.list())[0]?.hasCover).toBe(false)

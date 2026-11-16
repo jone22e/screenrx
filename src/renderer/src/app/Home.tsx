@@ -585,7 +585,10 @@ export function Home({ state, recordings, onEdit }: Props) {
                       count={group.items.length}
                       {...(order === 'series' && {
                         onDropRecording: (sessionId: string) => moveToSeries(sessionId, group.label === NO_SERIES_LABEL ? null : group.label),
-                        ...(group.label !== NO_SERIES_LABEL && { onRemove: () => void window.screenrx.library.removeSeries(group.label) })
+                        ...(group.label !== NO_SERIES_LABEL && {
+                          onRemove: () => void window.screenrx.library.removeSeries(group.label),
+                          onRename: (name: string) => void window.screenrx.library.renameSeries(group.label, name)
+                        })
                       })}
                     >
                       {renderCards(group.items)}

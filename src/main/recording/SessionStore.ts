@@ -175,11 +175,35 @@ export class SessionStore {
     await writeJsonAtomic(path.join(this.root, SERIES_FILE), { names: [...names, name] })
   }
 
-  /** Forgets a series; recordings that name it keep it. */
+  /** Removes a series: the recordings in it stay, in no series; the name is forgotten. */
   async removeSeries(name: string): Promise<void> {
+    for (const manifest of await this.manifestsInSeries(name)) {
+      const next = { ...manifest }
+      delete next.series
+      await this.write(next)
+    }
     const names = await this.listSeries()
-    if (!names.includes(name)) return
-    await writeJsonAtomic(path.join(this.root, SERIES_FILE), { names: names.filter((entry) => entry !== name) })
+    if (names.includes(name)) await writeJsonAtomic(path.join(this.root, SERIES_FILE), { names: names.filter((entry) => entry !== name) })
+  }
+
+  /** Gives a series a new name, on every recording in it and in the list. Joins it with a series of that name, if there is one. */
+  async renameSeries(from: string, to: string): Promise<void> {
+    if (from === to) return
+    for (const manifest of await this.manifestsInSeries(from)) await this.write({ ...manifest, series: to })
+    const names = await this.listSeries()
+    const renamed = names.map((entry) => (entry === from ? to : entry))
+    await writeJsonAtomic(path.join(this.root, SERIES_FILE), { names: [...new Set(renamed.includes(to) ? renamed : [...renamed, to])] })
+  }
+
+  private async manifestsInSeries(name: string): Promise<RecordingSessionManifest[]> {
+    let entries: string[]
+    try {
+      entries = await readdir(this.root)
+    } catch {
+      return []
+    }
+    const manifests = await Promise.all(entries.filter(isSessionId).map((id) => this.read(id)))
+    return manifests.filter((manifest): manifest is RecordingSessionManifest => manifest !== null && manifest.series === name)
   }
 
   /** The transcript as saved, `null` when there is none. */
