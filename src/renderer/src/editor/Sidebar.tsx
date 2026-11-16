@@ -8,6 +8,7 @@ import type { EditorSession } from '@shared/models/editor'
 import type { WebcamCorner, WebcamShape } from '@shared/models/project'
 import { BACKGROUND_LIMITS, FRAME_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
 import { AssistantPanel } from './AssistantPanel'
+import { AudioPanel } from './AudioPanel'
 import { CaptionsPanel } from './CaptionsPanel'
 import { DubbingPanel } from './DubbingSection'
 import { EffectsPanel } from './EffectsPanel'
@@ -25,6 +26,7 @@ import {
   CameraIcon,
   FormatIcon,
   CaptionsIcon,
+  MusicIcon,
   VoiceIcon,
   PlusIcon,
   ScissorsIcon,
@@ -42,7 +44,7 @@ interface Props {
   player: PreviewPlayer | null
 }
 
-type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'dub' | 'format' | 'effects' | 'background' | 'webcam'
+type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'audio' | 'dub' | 'format' | 'effects' | 'background' | 'webcam'
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
 const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
@@ -72,6 +74,7 @@ export function Sidebar({ session, store, player }: Props) {
     { id: 'zoom', label: 'Zoom', icon: <ZoomIcon /> },
     { id: 'captions', label: 'Legendas', icon: <CaptionsIcon /> },
     { id: 'text', label: 'Texto', icon: <TextIcon /> },
+    { id: 'audio', label: 'Áudio', icon: <MusicIcon /> },
     { id: 'dub', label: 'Dublagem', icon: <VoiceIcon /> },
     { id: 'format', label: 'Formato', icon: <FormatIcon /> },
     { id: 'effects', label: 'Efeitos', icon: <WandIcon /> },
@@ -103,6 +106,7 @@ export function Sidebar({ session, store, player }: Props) {
         {tab === 'zoom' && <ZoomPanel session={session} store={store} player={player} />}
         {tab === 'captions' && <CaptionsPanel session={session} store={store} player={player} />}
         {tab === 'text' && <TextPanel store={store} player={player} />}
+        {tab === 'audio' && <AudioPanel session={session} store={store} />}
         {tab === 'dub' && <DubbingPanel store={store} onOpenCaptions={() => choose('captions')} />}
         {tab === 'format' && <FormatPanel session={session} store={store} player={player} onOpenBackground={() => choose('background')} />}
         {tab === 'effects' && <EffectsPanel store={store} />}

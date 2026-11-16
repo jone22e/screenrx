@@ -40,5 +40,7 @@ export const SESSION_FILES = {
   dubEn: 'dub-en.m4a',
   dubEs: 'dub-es.m4a',
   dubZh: 'dub-zh.m4a',
-  dubPt: 'dub-pt.m4a'
+  dubPt: 'dub-pt.m4a',
+  /** Background music brought in by the user; replaced whole when another file is chosen. */
+  music: 'music.m4a'
 } as const

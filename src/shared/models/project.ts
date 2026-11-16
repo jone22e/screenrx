@@ -82,6 +82,7 @@ export interface ExportSettings {
    * timeline: `timelineTime = outputTime * speed`. Independent of speed regions.
    */
   speed: number
+  loudness: ExportLoudness
 }
 
 /**
@@ -159,9 +160,38 @@ export const AUDIO_TRACK_KINDS: readonly AudioTrackKind[] = ['microphone', 'syst
 export interface AudioTrackSettings {
   /** A muted track is left out of the preview and of the exported file. */
   muted: boolean
+  /** How loud the track plays, 0…1; 1 is as recorded. */
+  volume: number
 }
 
 export type AudioSettings = Record<AudioTrackKind, AudioTrackSettings>
+
+/** How far the music goes down while someone speaks. */
+export type MusicDucking = 'off' | 'light' | 'strong'
+export const MUSIC_DUCKINGS: readonly MusicDucking[] = ['off', 'light', 'strong']
+
+/**
+ * Background music: a file the user brought into the session (`music.m4a`),
+ * played under the recording on the FINISHED video's clock — it is not cut
+ * or sped up with the recording. These settings only say how it plays; the
+ * file itself is a track of the session.
+ */
+export interface MusicSettings {
+  /** 0…1. */
+  volume: number
+  ducking: MusicDucking
+  /** Starts over when it ends before the video does. */
+  loop: boolean
+  fadeInMs: number
+  fadeOutMs: number
+}
+
+export const MUSIC_LIMITS = { maxFadeMs: 10_000 } as const
+
+export const DEFAULT_MUSIC: MusicSettings = { volume: 0.25, ducking: 'light', loop: true, fadeInMs: 1000, fadeOutMs: 2000 }
+
+/** Final loudness of the exported audio: as mixed, or normalized to what the social platforms expect (−14 LUFS). */
+export type ExportLoudness = 'off' | 'social'
 
 /** Languages captions can be translated into. */
 export type CaptionLanguage = 'en' | 'es' | 'zh' | 'pt'
@@ -282,6 +312,8 @@ export interface Project {
   /** Texts written over the video. Empty in projects saved before they existed. */
   texts: TextOverlay[]
   audio: AudioSettings
+  /** How the session's music track plays; `null` until music is brought in (the file may still be there). */
+  music: MusicSettings | null
   dub: DubSettings
   /** Effects on the picture: stabilization, noise reduction, sharpening, colour. */
   filters: FilterSettings
@@ -298,11 +330,18 @@ export interface DubSettings {
 }
 
 export const createAudioSettings = (): AudioSettings => ({
-  microphone: { muted: false },
-  systemAudio: { muted: false }
+  microphone: { muted: false, volume: 1 },
+  systemAudio: { muted: false, volume: 1 }
 })
 
-export const DEFAULT_EXPORT_SETTINGS: ExportSettings = { format: 'mp4', quality: 'high', compression: 0, fps: 30, speed: 1 }
+export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
+  format: 'mp4',
+  quality: 'high',
+  compression: 0,
+  fps: 30,
+  speed: 1,
+  loudness: 'social'
+}
 
 export const BACKGROUND_LIMITS = { maxPaddingRatio: 0.16, maxCornerRadiusRatio: 0.05 } as const
 
@@ -380,6 +419,7 @@ export function createProject(sessionId: string, effects: TimelineEffect[] = [])
     captions: createCaptionSettings(),
     texts: [],
     audio: createAudioSettings(),
+    music: null,
     dub: { language: null },
     filters: createFilterSettings(),
     export: { ...DEFAULT_EXPORT_SETTINGS }
@@ -593,15 +633,27 @@ function parseTexts(value: unknown): TextOverlay[] {
   return texts.sort((a, b) => a.startMs - b.startMs)
 }
 
-/** Projects saved before tracks could be muted play every track. */
+/** Projects saved before tracks could be muted play every track; before they had a volume, at full volume. */
 function parseAudio(value: unknown): AudioSettings {
   const settings = isRecord(value) ? value : {}
   const audio = createAudioSettings()
   for (const kind of AUDIO_TRACK_KINDS) {
-    const track = settings[kind]
-    audio[kind] = { muted: isRecord(track) && track.muted === true }
+    const track = isRecord(settings[kind]) ? settings[kind] : {}
+    audio[kind] = { muted: track.muted === true, volume: clampRatio(track.volume, 1, 1) }
   }
   return audio
+}
+
+/** Music settings as saved; whatever is not well-formed takes the default. `null` when there are none. */
+function parseMusic(value: unknown): MusicSettings | null {
+  if (!isRecord(value)) return null
+  return {
+    volume: clampRatio(value.volume, DEFAULT_MUSIC.volume, 1),
+    ducking: includes(MUSIC_DUCKINGS, value.ducking) ? value.ducking : DEFAULT_MUSIC.ducking,
+    loop: typeof value.loop === 'boolean' ? value.loop : DEFAULT_MUSIC.loop,
+    fadeInMs: clampRatio(value.fadeInMs, DEFAULT_MUSIC.fadeInMs, MUSIC_LIMITS.maxFadeMs),
+    fadeOutMs: clampRatio(value.fadeOutMs, DEFAULT_MUSIC.fadeOutMs, MUSIC_LIMITS.maxFadeMs)
+  }
 }
 
 function parseBase(value: Record<string, unknown>): TimelineEffectBase | null {
@@ -665,6 +717,7 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
     captions: parseCaptions(value.captions),
     texts: parseTexts(value.texts),
     audio: parseAudio(value.audio),
+    music: parseMusic(value.music),
     dub: {
       language:
         isRecord(value.dub) && includes(CAPTION_LANGUAGES, value.dub.language) ? value.dub.language : null
@@ -681,7 +734,9 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
           : DEFAULT_EXPORT_SETTINGS.compression,
       // Projects saved before the frame rate could be chosen were exported at the default.
       fps: isExportFps(settings.fps) ? settings.fps : DEFAULT_EXPORT_SETTINGS.fps,
-      speed: isFiniteNumber(settings.speed) && settings.speed > 0 ? settings.speed : 1
+      speed: isFiniteNumber(settings.speed) && settings.speed > 0 ? settings.speed : 1,
+      // Projects saved before the loudness could be chosen go out as they were mixed.
+      loudness: settings.loudness === 'social' ? 'social' : 'off'
     }
   }
 }

@@ -4,10 +4,15 @@ import type { FfmpegService } from '../export/FfmpegService'
 import type { SessionStore } from '../recording/SessionStore'
 
 const DUB_TRACK_NAMES = ['dubEn', 'dubEs', 'dubZh', 'dubPt'] as const
-export type AudioTrackName = 'microphone' | 'systemAudio' | (typeof DUB_TRACK_NAMES)[number]
+export type AudioTrackName = 'microphone' | 'systemAudio' | 'music' | (typeof DUB_TRACK_NAMES)[number]
 
 export function isAudioTrackName(value: unknown): value is AudioTrackName {
-  return value === 'microphone' || value === 'systemAudio' || (DUB_TRACK_NAMES as readonly unknown[]).includes(value)
+  return (
+    value === 'microphone' ||
+    value === 'systemAudio' ||
+    value === 'music' ||
+    (DUB_TRACK_NAMES as readonly unknown[]).includes(value)
+  )
 }
 
 /** Points per waveform; plenty for the width of a timeline. */
@@ -29,7 +34,7 @@ export class WaveformService {
     const manifest = await this.sessions.read(sessionId)
     // A recorded track has its own length; a dubbing is as long as the recording.
     const asset: Pick<AudioAsset, 'durationMs'> | undefined =
-      track === 'microphone' || track === 'systemAudio' ? manifest?.assets[track] : manifest?.assets.screen
+      track === 'microphone' || track === 'systemAudio' || track === 'music' ? manifest?.assets[track] : manifest?.assets.screen
     if (!asset) throw new Error(`Session has no ${track} track`)
 
     const filePath = this.sessions.trackPathOf(sessionId, track)

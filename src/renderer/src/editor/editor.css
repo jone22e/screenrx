@@ -3215,3 +3215,30 @@ kbd {
   border-radius: 3px;
   pointer-events: none;
 }
+
+/* The music file in the Áudio panel: its name, its length and the button that lets it go. */
+.music-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  color: var(--text);
+}
+
+.music-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.music-length {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

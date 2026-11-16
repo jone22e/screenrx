@@ -21,6 +21,7 @@ import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
 import { DubbingService } from './dub/DubbingService'
 import { FilterRenderService } from './filters/FilterRenderService'
 import { registerIpc } from './ipc/registerIpc'
+import { MusicImporter } from './library/MusicImporter'
 import { VideoImporter } from './library/VideoImporter'
 import { addLogSink, consoleSink, createLogger, fileSink } from './logging/logger'
 import { ThumbnailService } from './media/ThumbnailService'
@@ -286,6 +287,7 @@ async function bootstrap(): Promise<void> {
     waveforms: new WaveformService(ffmpeg, sessions),
     thumbnails,
     importer: new VideoImporter({ ffmpeg, sessions, logger: createLogger('import') }),
+    music: new MusicImporter({ ffmpeg, sessions, logger: createLogger('music') }),
     meet,
     meetSettings,
     updates,

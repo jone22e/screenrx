@@ -13,7 +13,8 @@ const COLORS: Record<WaveformTrack, string> = {
   dubEn: DUB_COLOR,
   dubEs: DUB_COLOR,
   dubZh: DUB_COLOR,
-  dubPt: DUB_COLOR
+  dubPt: DUB_COLOR,
+  music: '#86efac'
 }
 
 /** The loudness outline of an audio track, drawn along its timeline lane. */

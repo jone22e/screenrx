@@ -5,9 +5,10 @@ import type {
   CaptionLength,
   CaptionMode,
   FrameAspect,
-  FrameFit
+  FrameFit,
+  MusicDucking
 } from './project'
-import { AUDIO_TRACK_KINDS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES } from './project'
+import { AUDIO_TRACK_KINDS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, MUSIC_DUCKINGS } from './project'
 
 /**
  * The editing assistant: a conversation with the AI tool in use, which answers
@@ -43,6 +44,10 @@ export interface AssistantEditState {
   hasSystemAudio: boolean
   microphoneMuted: boolean
   systemAudioMuted: boolean
+  microphoneVolume: number
+  systemAudioVolume: number
+  /** Whether the session has music, and how it is pressed down under speech; `null` without music. */
+  music: { volume: number; ducking: MusicDucking } | null
 }
 
 export interface AssistantRequest {
@@ -69,6 +74,8 @@ export type AssistantAction =
   | { type: 'framing'; fit: FrameFit }
   | { type: 'webcam'; visible: boolean }
   | { type: 'mute'; track: AudioTrackKind; muted: boolean }
+  | { type: 'volume'; track: AudioTrackKind | 'music'; volume: number }
+  | { type: 'music-ducking'; ducking: MusicDucking }
   | { type: 'text'; text: string; startMs: number; endMs: number }
 
 export interface AssistantReply {
@@ -135,9 +142,20 @@ export function parseAssistantRequest(value: unknown): AssistantRequest | null {
       webcamVisible: edit.webcamVisible === true,
       hasSystemAudio: edit.hasSystemAudio === true,
       microphoneMuted: edit.microphoneMuted === true,
-      systemAudioMuted: edit.systemAudioMuted === true
+      systemAudioMuted: edit.systemAudioMuted === true,
+      microphoneVolume: parseLevel(edit.microphoneVolume),
+      systemAudioVolume: parseLevel(edit.systemAudioVolume),
+      music:
+        isRecord(edit.music) && (MUSIC_DUCKINGS as readonly unknown[]).includes(edit.music.ducking)
+          ? { volume: parseLevel(edit.music.volume), ducking: edit.music.ducking as MusicDucking }
+          : null
     }
   }
+}
+
+/** A level 0…1 as sent; 1 when it is not one. */
+function parseLevel(value: unknown): number {
+  return isFiniteNumber(value) ? Math.min(Math.max(value, 0), 1) : 1
 }
 
 export const isAudioTrackKind = (value: unknown): value is AudioTrackKind =>

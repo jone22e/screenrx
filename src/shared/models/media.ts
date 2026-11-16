@@ -11,7 +11,9 @@ export const MEDIA_TRACKS = [
   'dubEn',
   'dubEs',
   'dubZh',
-  'dubPt'
+  'dubPt',
+  /** Background music the user brought in. */
+  'music'
 ] as const
 export type MediaTrack = (typeof MEDIA_TRACKS)[number]
 

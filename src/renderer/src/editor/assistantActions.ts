@@ -120,6 +120,24 @@ export function applyAssistantActions(
           did(action.visible ? 'Câmera mostrada' : 'Câmera oculta', ok)
           break
         }
+        case 'volume': {
+          if (action.track === 'music') {
+            const ok = store.getState().music !== null && store.getState().musicTrack !== null
+            if (ok) store.setMusic({ volume: action.volume })
+            did(`Música a ${Math.round(action.volume * 100)}%`, ok)
+          } else {
+            const ok = store.session.audio.some((track) => track.kind === action.track)
+            if (ok) store.setTrackVolume(action.track, action.volume)
+            did(`${TRACK_LABELS[action.track]} a ${Math.round(action.volume * 100)}%`, ok)
+          }
+          break
+        }
+        case 'music-ducking': {
+          const ok = store.getState().music !== null && store.getState().musicTrack !== null
+          if (ok) store.setMusic({ ducking: action.ducking })
+          did(action.ducking === 'off' ? 'Música sem abaixar na fala' : `Música abaixa ${action.ducking === 'light' ? 'um pouco' : 'bastante'} na fala`, ok)
+          break
+        }
         case 'mute': {
           const ok = store.session.audio.some((track) => track.kind === action.track)
           if (ok) store.setTrackMuted(action.track, action.muted)

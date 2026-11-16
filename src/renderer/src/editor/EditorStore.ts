@@ -1,4 +1,6 @@
 import { CAPTION_CONFIG } from '@engine/captions/captionConfig'
+import type { SpeechSpan } from '@engine/audio/musicLevel'
+import { speechSpans } from '@engine/audio/musicLevel'
 import { buildCues, clipCue, cueText, fitCue, rewordCue } from '@engine/captions/captionCues'
 import { buildDubUnits, pickVoiceReference } from '@engine/dub/dubUnits'
 import { isExportSpeed } from '@engine/export/exportConfig'
@@ -16,9 +18,10 @@ import type { DubProgress, DubRequest, DubTrack } from '@shared/models/dub'
 import type { ColorSettings, FilterRenderRequest, FilterSettings, FilterTrack, RenderedFilter, RenderedFilterName } from '@shared/models/filters'
 import { COLOR_LIMITS, DEFAULT_COLOR, needsRenderedTrack, renderKey } from '@shared/models/filters'
 import type { ObjectTrack, ObjectTrackRequest } from '@shared/models/telemetry'
-import type { EditorSession } from '@shared/models/editor'
+import type { EditorSession, MusicTrack } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
 import type {
+  MusicSettings,
   AudioSettings,
   AudioTrackKind,
   BackgroundSettings,
@@ -37,6 +40,8 @@ import type {
   ZoomEffect
 } from '@shared/models/project'
 import {
+  DEFAULT_MUSIC,
+  MUSIC_LIMITS,
   spreadWords,
   BACKGROUND_LIMITS,
   CAPTION_LIMITS,
@@ -69,6 +74,12 @@ export interface EditorState {
   /** Texts written over the video, sorted by start. */
   texts: readonly TextOverlay[]
   audio: AudioSettings
+  /** How the music plays; `null` until music is brought in. */
+  music: MusicSettings | null
+  /** The session's music file, when there is one. Not part of the project. */
+  musicTrack: MusicTrack | null
+  /** Where someone speaks, from the transcript: how the preview knows when to press the music down. */
+  speech: readonly SpeechSpan[]
   /** Which dubbing is heard instead of the recorded voice. */
   dub: DubSettings
   /** The dubbing tracks that exist for this recording; not part of the project. */
@@ -184,6 +195,8 @@ export class EditorStore {
   private captionNotice: string | null = null
   private translating: CaptionLanguage | null = null
   private dubs: DubTrack[]
+  private musicTrack: MusicTrack | null
+  private speech: SpeechSpan[]
   private objectTrack: ObjectTrack | null
   private tracking: { fraction: number } | null = null
   private trackNotice: string | null = null
@@ -217,6 +230,8 @@ export class EditorStore {
     this.project = session.project
     this.transcript = session.transcript
     this.dubs = [...session.dubs]
+    this.musicTrack = session.music
+    this.speech = speechSpans(session.transcript?.words ?? [])
     this.filterTrack = session.filterTrack
     this.objectTrack = session.track
     this.state = this.derive(NOTHING_SELECTED, 'saved')
@@ -628,6 +643,7 @@ export class EditorStore {
    */
   applyTranscript(transcript: Transcript): void {
     this.transcript = transcript
+    this.speech = speechSpans(transcript.words)
     this.commitCaptions(this.withNewCues(this.cuesFor(this.project.captions.length), { visible: true }), null, null)
   }
 
@@ -1059,6 +1075,40 @@ export class EditorStore {
     this.commit({ ...this.project, audio }, this.selected(), null)
   }
 
+  /** How loud a recorded track plays, 0…1. */
+  setTrackVolume(track: AudioTrackKind, volume: number, gestureKey: string | null = null): void {
+    const audio: AudioSettings = { ...this.project.audio, [track]: { ...this.project.audio[track], volume: clamp(volume, 0, 1) } }
+    this.commit({ ...this.project, audio }, this.selected(), gestureKey)
+  }
+
+  /**
+   * The music file of the session changed: brought in, replaced or removed.
+   * The file is not part of the project, so this is not an undo step; the
+   * first music brought in gets the default settings.
+   */
+  setMusicTrack(track: MusicTrack | null): void {
+    this.musicTrack = track
+    if (track && !this.project.music) {
+      this.commit({ ...this.project, music: { ...DEFAULT_MUSIC } }, this.selected(), null)
+      return
+    }
+    this.state = { ...this.state, musicTrack: track }
+    this.emit()
+  }
+
+  /** How the music plays. Nothing happens until music is brought in. */
+  setMusic(change: Partial<MusicSettings>, gestureKey: string | null = null): void {
+    if (!this.project.music) return
+    const merged = { ...this.project.music, ...change }
+    const music: MusicSettings = {
+      ...merged,
+      volume: clamp(merged.volume, 0, 1),
+      fadeInMs: clamp(merged.fadeInMs, 0, MUSIC_LIMITS.maxFadeMs),
+      fadeOutMs: clamp(merged.fadeOutMs, 0, MUSIC_LIMITS.maxFadeMs)
+    }
+    this.commit({ ...this.project, music }, this.selected(), gestureKey)
+  }
+
   // --- history ----------------------------------------------------------------
 
   /** Ends a drag or slider gesture, so the next edit starts a new undo step. */
@@ -1284,6 +1334,9 @@ export class EditorStore {
       captions: this.project.captions,
       texts: this.project.texts,
       audio: this.project.audio,
+      music: this.project.music,
+      musicTrack: this.musicTrack,
+      speech: this.speech,
       dub: this.project.dub,
       dubs: this.dubs,
       objectTrack: this.objectTrack,

@@ -93,6 +93,9 @@ export class ProjectStore {
       cursor: parseCursorSamples(await this.readJson(sessionId, SESSION_FILES.cursor)),
       track: parseObjectTrack(await this.readJson(sessionId, SESSION_FILES.track)),
       dubs: await this.dubsOf(sessionId),
+      music: manifest.assets.music
+        ? { url: trackUrl(sessionId, 'music'), durationMs: manifest.assets.music.durationMs, name: manifest.assets.music.name }
+        : null,
       filterTrack: await this.filterTrackOf(sessionId),
       // A transcript that does not parse is simply absent: it can be generated again.
       transcript: parseTranscript(await this.readJson(sessionId, SESSION_FILES.transcript)),

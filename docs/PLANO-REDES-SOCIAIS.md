@@ -79,9 +79,22 @@ visíveis ("Clássico", "Destaque", "Uma palavra"). Assistente: ação
 Pronto quando: um vídeo 9:16 exporta com legenda uma palavra por vez e destaque
 colorido idêntico ao preview; teste de `captionAt` com índice da palavra ativa.
 
-## Fase B — Áudio de verdade (M)
+## Fase B — Áudio de verdade (M) — FEITA em 2026-11-16
 
-Hoje só existe mudo por faixa. Falta o que todo vídeo de conteúdo tem.
+O que entrou: volume por trilha, música da sessão (`music.m4a`, importador
+próprio, substituir e remover), volume/ducking/repetir/fades da música,
+ducking real por `sidechaincompress` na exportação e aproximado pela
+transcrição no preview, loudness −14 LUFS na exportação, aba Áudio, ações do
+assistente `volume` e `music-ducking`. Desvios do plano original: em vez de
+uma pasta `assets/` com ids, a música é uma trilha única da sessão (mais
+simples; a pasta de assets fica para as imagens da fase G1); sem fades por
+trilha gravada (só na música); sem faixa da música na linha do tempo (ela
+corre no relógio de saída e ficaria desalinhada dos cortes). Verificado por
+testes com o FFmpeg real (ducking de 11 dB com voz a −27 dB, fades, −14
+LUFS) e pelo importador em sessão temporária; o preview da música não foi
+ouvido no app. Detalhes em `docs/ARCHITECTURE.md`, "Exportação".
+
+Plano original, para referência:
 
 Modelo:
 

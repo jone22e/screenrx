@@ -56,6 +56,8 @@ const settingsOf = (state: EditorState): PreviewSettings => ({
   objectTrack: state.objectTrack,
   audio: state.audio,
   dubUrl: state.dubs.find((dub) => dub.language === state.dub.language)?.url ?? null,
+  music: state.music && state.musicTrack ? { url: state.musicTrack.url, settings: state.music } : null,
+  speech: state.speech,
   speed: state.exportSettings.speed,
   screenUrl: state.screenUrl,
   color: state.filters.color

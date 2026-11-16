@@ -3,6 +3,7 @@ import { once } from 'node:events'
 import type { FileHandle } from 'node:fs/promises'
 import { open, rename, rm, stat } from 'node:fs/promises'
 import { buildAudioGraph } from '@engine/export/audioFilters'
+import type { ExportLoudness, MusicSettings } from '@shared/models/project'
 import type { ExportPlan } from '@engine/export/exportPlan'
 import { createExportPlan } from '@engine/export/exportPlan'
 import { buildTimeMap } from '@engine/time/timeMapping'
@@ -109,13 +110,19 @@ export class ExportService {
       // A track muted in the edit is simply not given to the encoder. A dubbing in
       // use takes the place of the recorded voice.
       const dub = session.dubs.find((track) => track.language === project.dub.language)
-      const audioPaths = session.audio
+      const tracks: ExportAudio['tracks'] = session.audio
         .filter((track) => !project.audio[track.kind].muted && !(dub && track.kind === 'microphone'))
-        .map((track) => sessions.trackPathOf(sessionId, track.kind))
-      if (dub) audioPaths.push(sessions.trackPathOf(sessionId, DUB_TRACKS[dub.language]))
+        .map((track) => ({ path: sessions.trackPathOf(sessionId, track.kind), volume: project.audio[track.kind].volume }))
+      if (dub) tracks.push({ path: sessions.trackPathOf(sessionId, DUB_TRACKS[dub.language]), volume: 1 })
+      // Music plays only while its file is there; the settings may outlive a file that was removed.
+      const music: ExportAudio['music'] =
+        project.music && session.music && project.music.volume > 0
+          ? { path: sessions.trackPathOf(sessionId, 'music'), ...project.music }
+          : null
+      const audio: ExportAudio = { tracks, music, loudness: project.export.loudness }
       const encoder = await ffmpeg.selectVideoEncoder(plan.codec)
       const partialPath = `${outputPath}.part`
-      const process = ffmpeg.spawn(encodeArguments(plan, encoder, audioPaths, map, partialPath))
+      const process = ffmpeg.spawn(encodeArguments(plan, encoder, audio, map, partialPath))
 
       const id = randomUUID()
       this.active = { id, sessionId, plan, process, partialPath, outputPath, files, framesWritten: 0, startedAt: Date.now() }
@@ -125,7 +132,9 @@ export class ExportService {
         frames: plan.frameCount,
         speed: plan.speed,
         encoder,
-        audioTracks: audioPaths.length
+        audioTracks: tracks.length,
+        music: music !== null,
+        loudness: audio.loudness
       })
       return { exportId: id, plan, encoder, fileName: baseName(outputPath), screen, webcam }
     } catch (error) {
@@ -282,6 +291,13 @@ function videoArguments(encoder: VideoEncoder, bitrate: number): string[] {
   }
 }
 
+/** The audio that goes into an export: the recorded tracks heard, the music under them, the final loudness. */
+export interface ExportAudio {
+  tracks: Array<{ path: string; volume: number }>
+  music: ({ path: string } & MusicSettings) | null
+  loudness: ExportLoudness
+}
+
 /**
  * One FFmpeg run for the whole file: raw frames in on stdin, the session's
  * audio tracks as further inputs, H.264 (or HEVC, for the compact file) + AAC out.
@@ -289,12 +305,22 @@ function videoArguments(encoder: VideoEncoder, bitrate: number): string[] {
 export function encodeArguments(
   plan: ExportPlan,
   encoder: VideoEncoder,
-  audioPaths: readonly string[],
+  audio: ExportAudio,
   map: ReturnType<typeof buildTimeMap>,
   outputPath: string
 ): string[] {
-  // Input 0 is the video; audio inputs follow.
-  const audio = buildAudioGraph(audioPaths.map((_, index) => index + 1), map, plan.speed)
+  // Input 0 is the video; the audio tracks follow, then the music, looped by FFmpeg itself when it should go on.
+  const inputs: string[] = audio.tracks.flatMap((track) => ['-i', track.path])
+  if (audio.music) inputs.push(...(audio.music.loop ? ['-stream_loop', '-1'] : []), '-i', audio.music.path)
+  const graph = buildAudioGraph(
+    {
+      tracks: audio.tracks.map((track, index) => ({ inputIndex: index + 1, volume: track.volume })),
+      music: audio.music ? { ...audio.music, inputIndex: audio.tracks.length + 1 } : null,
+      loudness: audio.loudness
+    },
+    map,
+    plan.speed
+  )
   const video = videoArguments(encoder, plan.videoBitrate)
 
   return [
@@ -303,13 +329,13 @@ export function encodeArguments(
     '-video_size', `${plan.width}x${plan.height}`,
     '-framerate', String(plan.fps),
     '-i', 'pipe:0',
-    ...audioPaths.flatMap((audioPath) => ['-i', audioPath]),
-    ...(audio ? ['-filter_complex', audio.filter, '-map', '0:v', '-map', audio.output] : ['-map', '0:v']),
+    ...inputs,
+    ...(graph ? ['-filter_complex', graph.filter, '-map', '0:v', '-map', graph.output] : ['-map', '0:v']),
     ...video,
     // yuv420p plays everywhere; the conversion and the tags agree on BT.709.
     '-vf', 'scale=out_color_matrix=bt709:out_range=tv,format=yuv420p',
     '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
-    ...(audio ? ['-c:a', 'aac', '-b:a', String(plan.audioBitrate)] : []),
+    ...(graph ? ['-c:a', 'aac', '-b:a', String(plan.audioBitrate)] : []),
     '-t', (plan.outputDurationMs / 1000).toFixed(3),
     '-movflags', '+faststart',
     '-f', 'mp4',

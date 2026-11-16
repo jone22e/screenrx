@@ -247,3 +247,11 @@ export const UploadIcon = () => (
     <path d="M12 15V3M7 8l5-5 5 5M5 19h14" />
   </Icon>
 )
+
+export const MusicIcon = () => (
+  <Icon>
+    <path d="M9 18V6l11-2v12" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="17" cy="16" r="3" />
+  </Icon>
+)

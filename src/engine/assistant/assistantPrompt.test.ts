@@ -32,7 +32,10 @@ const request: AssistantRequest = {
     webcamVisible: true,
     hasSystemAudio: true,
     microphoneMuted: false,
-    systemAudioMuted: true
+    systemAudioMuted: true,
+    microphoneVolume: 1,
+    systemAudioVolume: 0.6,
+    music: { volume: 0.25, ducking: 'light' }
   }
 }
 
@@ -42,7 +45,8 @@ describe('buildAssistantPrompt', () => {
     expect(wordCount).toBe(words.length)
     expect(prompt).toContain('Cuts (1):\n  0:03.0–0:04.0')
     expect(prompt).toContain('Zooms (1):\n  0:06.0–0:09.0 1.6x')
-    expect(prompt).toContain('System audio: off')
+    expect(prompt).toContain('System audio: off, volume 60%')
+    expect(prompt).toContain('Music: volume 25%, ducking light')
     expect(prompt).toContain('Webcam: not recorded')
     expect(prompt).toContain('-- 0:01.0 --\n0 oi')
     expect(prompt).toContain('3 ver\n-- pause 3.8s --\n4 o')
@@ -111,6 +115,9 @@ describe('parseAssistantResponse', () => {
       action({ type: 'webcam', value: 'show' }),
       action({ type: 'mute', value: 'system' }),
       action({ type: 'unmute', value: 'microphone' }),
+      action({ type: 'volume', value: 'music', scale: 0.4 }),
+      action({ type: 'volume', value: 'system', scale: 70 }),
+      action({ type: 'music-ducking', value: 'heavy' }),
       action({ type: 'uncut', startSec: 2, endSec: 5 }),
       action({ type: 'remove-zoom', fromWord: 4, toWord: 5 })
     ])
@@ -128,6 +135,9 @@ describe('parseAssistantResponse', () => {
       { type: 'webcam', visible: true },
       { type: 'mute', track: 'systemAudio', muted: true },
       { type: 'mute', track: 'microphone', muted: false },
+      { type: 'volume', track: 'music', volume: 0.4 },
+      { type: 'volume', track: 'systemAudio', volume: 0.7 },
+      { type: 'music-ducking', ducking: 'strong' },
       { type: 'uncut', startMs: 2000, endMs: 5000 },
       { type: 'remove-zoom', startMs: 6000, endMs: 12_000 }
     ])

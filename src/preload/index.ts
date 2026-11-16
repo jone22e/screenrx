@@ -78,6 +78,10 @@ const api: ScreenRxApi = {
     exportSubtitles: (sessionId, format, content) => invoke('captions:export-subtitles', sessionId, format, content),
     importSubtitles: () => invoke('captions:import-subtitles')
   },
+  music: {
+    import: (sessionId) => invoke('music:import', sessionId),
+    remove: (sessionId) => invoke('music:remove', sessionId)
+  },
   dub: {
     status: () => invoke('dub:status'),
     prepareModel: () => invoke('dub:prepare-model'),

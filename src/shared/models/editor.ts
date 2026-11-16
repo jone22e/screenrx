@@ -4,6 +4,14 @@ import type { FilterTrack } from './filters'
 import type { Project } from './project'
 import type { CursorSample, InteractionEvent, ObjectTrack } from './telemetry'
 
+/** The session's music file, as the editor and the preview see it. */
+export interface MusicTrack {
+  url: string
+  durationMs: number
+  /** The name of the file it came from. */
+  name: string
+}
+
 /** Everything the editor needs to open one recording. */
 export interface EditorSession {
   sessionId: string
@@ -28,6 +36,8 @@ export interface EditorSession {
   track: ObjectTrack | null
   /** Dubbing tracks already generated for this session, one per language. */
   dubs: DubTrack[]
+  /** The music track brought into the session, when there is one. */
+  music: MusicTrack | null
   /** The screen track with rendered effects, when one has been made, and what it was made from. */
   filterTrack: FilterTrack | null
   /** Speech-to-text of the session's audio, when it has been transcribed. */

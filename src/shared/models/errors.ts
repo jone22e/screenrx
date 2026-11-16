@@ -45,6 +45,8 @@ export type AppErrorCode =
   | 'meet-join-failed'
   | 'import-unsupported'
   | 'import-failed'
+  | 'music-unsupported'
+  | 'music-failed'
   | 'invalid-state'
   | 'unknown'
 
@@ -114,6 +116,8 @@ const MESSAGES: Record<AppErrorCode, string> = {
   'meet-join-failed': 'Não foi possível entrar na reunião para gravar.',
   'import-unsupported': 'O arquivo escolhido não tem uma trilha de vídeo que o ScreenRx consiga ler.',
   'import-failed': 'Não foi possível importar o vídeo.',
+  'music-unsupported': 'O arquivo escolhido não tem uma trilha de áudio que o ScreenRx consiga ler.',
+  'music-failed': 'Não foi possível trazer a música para a gravação.',
   'invalid-state': 'Essa ação não está disponível no momento.',
   unknown: 'Ocorreu um erro inesperado.'
 }

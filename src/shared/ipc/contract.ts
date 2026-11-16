@@ -12,7 +12,8 @@ import type {
 import type { CaptureDevices } from '../models/devices'
 import type { DubProgress, DubRequest, DubStatus, DubTrack } from '../models/dub'
 import type { FilterRenderProgress, FilterRenderRequest, FilterTrack } from '../models/filters'
-import type { EditorSession } from '../models/editor'
+import type {
+  MusicTrack, EditorSession } from '../models/editor'
 import type { IpcResult } from '../models/errors'
 import type { ExportJob, ExportResult, ExportTrackName } from '../models/export'
 import type { MeetRoom, MeetSettings } from '../models/meet'
@@ -25,7 +26,7 @@ import type { ObjectTrack, ObjectTrackRequest } from '../models/telemetry'
 import type { UpdateState } from '../models/update'
 
 /** An audio track whose outline the timeline can draw: a recorded one, or a dubbing. */
-export type WaveformTrack = 'microphone' | 'systemAudio' | 'dubEn' | 'dubEs' | 'dubZh' | 'dubPt'
+export type WaveformTrack = 'microphone' | 'systemAudio' | 'dubEn' | 'dubEs' | 'dubZh' | 'dubPt' | 'music'
 
 /**
  * Every renderer → main call. The preload bridge exposes exactly these, one
@@ -84,6 +85,9 @@ export interface IpcInvokeContract {
   'dub:prepare-model': { args: []; result: IpcResult<DubStatus> }
   'dub:remove-model': { args: []; result: IpcResult<DubStatus> }
   'dub:generate': { args: [sessionId: string, request: DubRequest]; result: IpcResult<DubTrack> }
+
+  'music:import': { args: [sessionId: string]; result: IpcResult<MusicTrack | null> }
+  'music:remove': { args: [sessionId: string]; result: IpcResult<null> }
   'dub:cancel': { args: []; result: void }
   'filters:render': { args: [sessionId: string, request: FilterRenderRequest]; result: IpcResult<FilterTrack> }
   'filters:cancel': { args: []; result: void }
@@ -219,6 +223,15 @@ export interface ScreenRxApi {
     exportSubtitles(sessionId: string, format: SubtitleFormat, content: string): Promise<IpcResult<{ fileName: string } | null>>
     /** Asks for an SRT or WebVTT file and returns its text, to be read into captions. `null` when cancelled. */
     importSubtitles(): Promise<IpcResult<{ fileName: string; content: string } | null>>
+  }
+  music: {
+    /**
+     * Asks for an audio file and makes it the session's music track (there is one; a new file
+     * replaces it). Resolves with the track, or `null` when the dialog is cancelled.
+     */
+    import(sessionId: string): Promise<IpcResult<MusicTrack | null>>
+    /** Removes the session's music track. */
+    remove(sessionId: string): Promise<IpcResult<null>>
   }
   dub: {
     /** Whether this build can dub, and whether the voice model is on this machine. */

@@ -62,6 +62,12 @@ export interface AudioAsset {
   deviceName?: string
 }
 
+/** Music the user brought into the session, as a track of its own (`music.m4a`). Replaced whole when another is chosen. */
+export interface MusicAsset extends AudioAsset {
+  /** The name of the file it came from, for the editor to show. */
+  name: string
+}
+
 export interface WebcamAsset {
   file: string
   sizeBytes: number
@@ -128,6 +134,7 @@ export interface RecordingSessionManifest {
     microphone?: AudioAsset
     systemAudio?: AudioAsset
     webcam?: WebcamAsset
+    music?: MusicAsset
     cursor?: TelemetryAsset
     interactions?: TelemetryAsset
   }

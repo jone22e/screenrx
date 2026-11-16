@@ -5,7 +5,9 @@ import { outputSizeFor } from '@engine/rendering/frameLayout'
 import { SAFE_AREA_BANDS } from '../common/safeAreas'
 import type { ColorSettings } from '@shared/models/filters'
 import type { TimeMap } from '@engine/time/timeMapping'
-import { keptSourceTime, nextKeptSourceTime } from '@engine/time/timeMapping'
+import { keptSourceTime, nextKeptSourceTime, outputDurationMs, sourceTimeToTimelineTime, timelineTimeToOutputTime } from '@engine/time/timeMapping'
+import type { SpeechSpan } from '@engine/audio/musicLevel'
+import { approachGain, isSpeakingAt, musicTargetGain } from '@engine/audio/musicLevel'
 import { correctTrack } from '@engine/time/trackSync'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { cameraAt } from '@engine/zoom/zoomCamera'
@@ -13,6 +15,7 @@ import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
 import type { EditorSession } from '@shared/models/editor'
 import type { ObjectTrack } from '@shared/models/telemetry'
 import type {
+  MusicSettings,
   AudioSettings,
   BackgroundSettings,
   CaptionSettings,
@@ -78,6 +81,10 @@ export interface PreviewSettings {
   audio: AudioSettings
   /** The dubbing heard instead of the recorded voice, when one is in use. */
   dubUrl: string | null
+  /** The music under the recording, when there is some and settings for it. */
+  music: { url: string; settings: MusicSettings } | null
+  /** Where someone speaks, for pressing the music down as the export will. */
+  speech: readonly SpeechSpan[]
   /** Global speed of the finished video: the preview plays at it, as the exported file will. */
   speed: number
   /** The screen track to show: the recording, or the one with rendered effects. */
@@ -101,12 +108,24 @@ export interface PreviewSettings {
  * is audible as a warble in the sound, and audio always sits a little behind the
  * picture after a start or a seek, so a rate correction would chase that forever.
  */
+/** How far the music may stray from the clock before it is seeked. */
+const MUSIC_DRIFT_SEC = 0.25
+
 export class PreviewPlayer {
   private readonly video: HTMLVideoElement
   private readonly webcam: HTMLVideoElement | null
   private companions: HTMLMediaElement[]
   /** The dubbing in use; created when one is chosen. */
   private dub: { url: string; element: HTMLAudioElement } | null = null
+  /**
+   * The music, when there is some. It runs on the finished video's clock, not
+   * the recording's: it is kept apart from the companions, which follow the
+   * screen track second for second.
+   */
+  private music: { url: string; element: HTMLAudioElement } | null = null
+  /** The music's gain as it is now, smoothed towards what the instant asks for. */
+  private musicGain = 0
+  private musicClockMs = 0
   private readonly audioTracks: Array<{ kind: 'microphone' | 'systemAudio'; element: HTMLAudioElement }>
   private readonly context: CanvasRenderingContext2D
   /** The pointer's smoothed path, for the frame that follows it; computed once. */
@@ -160,6 +179,7 @@ export class PreviewPlayer {
     this.screenUrl = session.video.url
     this.applyScreenSource()
     this.applyDub()
+    this.applyMusic()
     this.applyMutes()
     this.applySpeed()
   }
@@ -251,6 +271,7 @@ export class PreviewPlayer {
       this.context.imageSmoothingQuality = 'high'
     }
     this.applyDub()
+    this.applyMusic()
     this.applyMutes()
     this.applySpeed()
     this.render()
@@ -277,6 +298,7 @@ export class PreviewPlayer {
     const clamped = keptSourceTime(this.settings.timeMap, wanted) ?? wanted
     this.video.currentTime = clamped / 1000
     for (const companion of this.companions) companion.currentTime = clamped / 1000
+    this.placeMusic(clamped, true)
     // Move the playhead at once; the frame follows when the seek completes.
     for (const listener of this.timeListeners) listener(clamped)
   }
@@ -309,7 +331,7 @@ export class PreviewPlayer {
     this.webcam?.removeEventListener('seeked', this.render)
     this.webcam?.removeEventListener('loadeddata', this.render)
     // Releases the decoders and the streams.
-    for (const element of [this.video, ...this.companions]) {
+    for (const element of [this.video, ...this.companions, ...(this.music ? [this.music.element] : [])]) {
       element.pause()
       element.removeAttribute('src')
       element.load()
@@ -362,6 +384,69 @@ export class PreviewPlayer {
     this.dub = { url, element }
     this.companions = [...this.companions, element]
     if (this.playing) void element.play().catch(() => undefined)
+  }
+
+  /** Loads the music that was chosen, or lets go of the one no longer in use. */
+  private applyMusic(): void {
+    const url = this.settings.music?.url ?? null
+    if (url !== (this.music?.url ?? null)) {
+      if (this.music) {
+        const previous = this.music.element
+        previous.pause()
+        previous.removeAttribute('src')
+        previous.load()
+        this.music = null
+      }
+      if (url !== null) {
+        const element = new Audio(url)
+        element.preload = 'auto'
+        element.volume = 0
+        this.music = { url, element }
+        this.musicGain = 0
+        this.placeMusic(this.currentTimeMs, true)
+        if (this.playing) void element.play().catch(() => undefined)
+      }
+    }
+    if (this.music && this.settings.music) {
+      this.music.element.loop = this.settings.music.settings.loop
+      this.updateMusicGain(this.currentTimeMs, 0)
+    }
+  }
+
+  /**
+   * Puts the music where it belongs for `sourceMs`: the matching instant of
+   * the finished video. Only a seek, or a drift too large to be the clocks'
+   * ordinary jitter, moves it — a seek is audible.
+   */
+  private placeMusic(sourceMs: number, force: boolean): void {
+    if (!this.music) return
+    const outputSec = this.outputTimeOf(sourceMs) / 1000
+    const element = this.music.element
+    if (!Number.isFinite(element.duration) || element.duration === 0) {
+      element.currentTime = outputSec
+      return
+    }
+    const wanted = element.loop ? outputSec % element.duration : Math.min(outputSec, element.duration)
+    if (force || Math.abs(element.currentTime - wanted) > MUSIC_DRIFT_SEC) element.currentTime = wanted
+  }
+
+  /** Each frame: follow the clock, and ease the gain towards what the instant asks for. */
+  private updateMusicGain(sourceMs: number, elapsedMs: number): void {
+    if (!this.music || !this.settings.music) return
+    const outputMs = this.outputTimeOf(sourceMs)
+    const target = musicTargetGain(
+      this.settings.music.settings,
+      outputMs,
+      outputDurationMs(this.settings.timeMap, this.settings.speed),
+      isSpeakingAt(this.settings.speech, sourceMs)
+    )
+    this.musicGain = elapsedMs === 0 ? target : approachGain(this.musicGain, target, elapsedMs)
+    this.music.element.volume = Math.min(Math.max(this.musicGain, 0), 1)
+  }
+
+  /** The instant of the finished video that shows `sourceMs`: after the cuts, at the export speed. */
+  private outputTimeOf(sourceMs: number): number {
+    return timelineTimeToOutputTime(sourceTimeToTimelineTime(this.settings.timeMap, sourceMs), this.settings.speed)
   }
 
   /** The output in the chosen format, no larger than the preview needs. */
@@ -589,6 +674,11 @@ export class PreviewPlayer {
     this.skipCuts()
     this.render()
     this.alignCompanions()
+    const now = performance.now()
+    const sourceMs = this.currentTimeMs
+    this.placeMusic(sourceMs, false)
+    this.updateMusicGain(sourceMs, this.musicClockMs === 0 ? 0 : now - this.musicClockMs)
+    this.musicClockMs = now
     if (this.playing && !this.destroyed) this.frameRequest = requestAnimationFrame(this.loop)
   }
 
@@ -627,6 +717,15 @@ export class PreviewPlayer {
         void companion.play().catch(() => undefined)
       } else {
         companion.pause()
+      }
+    }
+    if (this.music) {
+      if (playing) {
+        this.placeMusic(this.currentTimeMs, true)
+        this.musicClockMs = 0
+        void this.music.element.play().catch(() => undefined)
+      } else {
+        this.music.element.pause()
       }
     }
     if (playing) this.frameRequest = requestAnimationFrame(this.loop)

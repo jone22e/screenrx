@@ -7,7 +7,7 @@ import type {
 } from '@shared/models/assistant'
 import { isAudioTrackKind } from '@shared/models/assistant'
 import type { TranscriptWord } from '@shared/models/captions'
-import { CAPTION_ANIMATIONS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, FRAME_ASPECTS, FRAME_FITS } from '@shared/models/project'
+import { CAPTION_ANIMATIONS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, FRAME_ASPECTS, FRAME_FITS, MUSIC_DUCKINGS } from '@shared/models/project'
 import { EXPORT_CONFIG } from '../export/exportConfig'
 import { BACKGROUND_PRESETS } from '../rendering/backgrounds'
 import { TRIM_CONFIG } from '../timeline/trimConfig'
@@ -43,6 +43,8 @@ const ACTION_TYPES = [
   'webcam',
   'mute',
   'unmute',
+  'volume',
+  'music-ducking',
   'text'
 ] as const
 
@@ -99,6 +101,8 @@ Actions and their fields:
 - "framing": how the recording goes into a format of another shape. value = "fit" (all of it, smaller, over the background), "fill" (enlarged to fill the frame; a part of it is used), "follow-mouse" (fills, and the part in use follows the pointer), "follow-zoom" (fills, and it follows the zooms) or "follow-object" (fills, and it follows an object the user marked; the user has to mark it).
 - "webcam": value = "show" or "hide".
 - "mute" / "unmute": value = "microphone" or "system".
+- "volume": how loud a track plays. value = "microphone", "system" or "music"; scale = the level, 0 to 1 (1 = as recorded). The music can only be set when the recording has music.
+- "music-ducking": how far the music goes down while someone speaks. value = "off", "light" or "strong". Only when the recording has music; the user brings music in on the Áudio tab.
 - "text": writes a text over the video (a title, a call-out). value = the text itself; fromWord/toWord or startSec/endSec say when it shows (without an end, ${ASSISTANT_CONFIG.defaultZoomMs / 1000} s). It appears in the middle of the frame; the user moves it.
 
 Rules:
@@ -120,6 +124,7 @@ const clock = (ms: number): string => {
 }
 
 const onOff = (value: boolean): string => (value ? 'on' : 'off')
+const level = (value: number): string => `${Math.round(value * 100)}%`
 
 /** Describes the edit to the model: what exists and how it is set. */
 function describeEdit(edit: AssistantEditState): string {
@@ -137,8 +142,9 @@ function describeEdit(edit: AssistantEditState): string {
       : 'Captions: none generated yet (the user generates them in the Legendas tab)',
     `Background: ${edit.backgroundId ?? 'none'}`,
     edit.hasWebcam ? `Webcam: ${edit.webcamVisible ? 'shown' : 'hidden'}` : 'Webcam: not recorded',
-    `Microphone: ${onOff(!edit.microphoneMuted)}`,
-    edit.hasSystemAudio ? `System audio: ${onOff(!edit.systemAudioMuted)}` : 'System audio: not recorded'
+    `Microphone: ${onOff(!edit.microphoneMuted)}, volume ${level(edit.microphoneVolume)}`,
+    edit.hasSystemAudio ? `System audio: ${onOff(!edit.systemAudioMuted)}, volume ${level(edit.systemAudioVolume)}` : 'System audio: not recorded',
+    edit.music ? `Music: volume ${level(edit.music.volume)}, ducking ${edit.music.ducking}` : 'Music: none (the user brings music in on the Áudio tab)'
   ]
   return lines.join('\n')
 }
@@ -348,6 +354,22 @@ export function parseAssistantResponse(
       case 'unmute': {
         const track = text === 'system' || text === 'systemaudio' ? 'systemAudio' : text
         if (isAudioTrackKind(track)) actions.push({ type: 'mute', track, muted: entry.type === 'mute' })
+        break
+      }
+      case 'volume': {
+        const track = text === 'system' || text === 'systemaudio' ? 'systemAudio' : text
+        if (!isAudioTrackKind(track) && track !== 'music') break
+        // The level may come as 0…1 in `scale`, or as "40%" / "0.4" in the value's tail; anything else is dropped.
+        const raw = typeof entry.scale === 'number' ? entry.scale : NaN
+        if (!Number.isFinite(raw)) break
+        const volume = raw > 1 && raw <= 100 ? raw / 100 : raw
+        if (volume < 0 || volume > 1) break
+        actions.push({ type: 'volume', track, volume: Math.round(volume * 100) / 100 })
+        break
+      }
+      case 'music-ducking': {
+        const ducking = text === 'none' || text === 'no' ? 'off' : text === 'heavy' || text === 'full' ? 'strong' : text === 'soft' ? 'light' : text
+        if (includes(MUSIC_DUCKINGS, ducking)) actions.push({ type: 'music-ducking', ducking })
         break
       }
       default:

@@ -3,7 +3,7 @@ import { buildTimeMap } from '../time/timeMapping'
 import { createExportPlan, estimatedFileBytes, frameSourceTimeMs } from './exportPlan'
 
 const source = { width: 3600, height: 2338 }
-const settings = { format: 'mp4', quality: 'standard', compression: 0, fps: 30, speed: 1 } as const
+const settings = { format: 'mp4', quality: 'standard', compression: 0, fps: 30, speed: 1, loudness: 'off' } as const
 
 describe('createExportPlan', () => {
   it('scales the recording down to the quality limit with even dimensions', () => {

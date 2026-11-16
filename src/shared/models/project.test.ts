@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_MUSIC,
   BACKGROUND_LIMITS,
   CAPTION_LIMITS,
   DEFAULT_BACKGROUND,
@@ -53,7 +54,7 @@ describe('parseProject', () => {
 
   it('repairs export settings rather than rejecting the project', () => {
     const parsed = parseProject({ ...createProject(sessionId), export: { speed: -3 } }, sessionId)
-    expect(parsed?.export).toEqual({ format: 'mp4', quality: 'high', compression: 0, fps: 30, speed: 1 })
+    expect(parsed?.export).toEqual({ format: 'mp4', quality: 'high', compression: 0, fps: 30, speed: 1, loudness: 'off' })
     const level = (compression: unknown) =>
       parseProject({ ...createProject(sessionId), export: { ...DEFAULT_EXPORT_SETTINGS, compression } }, sessionId)?.export.compression
     expect(level(3)).toBe(3)
@@ -293,18 +294,40 @@ describe('parseProject captions', () => {
 })
 
 describe('parseProject audio', () => {
-  it('plays every track in projects saved before tracks could be muted', () => {
+  it('plays every track at full volume in projects saved before tracks could be muted', () => {
     const { audio, ...legacy } = createProject(sessionId)
-    expect(audio).toEqual({ microphone: { muted: false }, systemAudio: { muted: false } })
+    expect(audio).toEqual({ microphone: { muted: false, volume: 1 }, systemAudio: { muted: false, volume: 1 } })
     expect(parseProject(legacy, sessionId)?.audio).toEqual(audio)
   })
 
-  it('keeps which tracks are muted and repairs anything else', () => {
-    const audio = { microphone: { muted: 'yes' }, systemAudio: { muted: true, volume: 3 }, music: { muted: true } }
+  it('keeps which tracks are muted and how loud, and repairs anything else', () => {
+    const audio = { microphone: { muted: 'yes', volume: 0.4 }, systemAudio: { muted: true, volume: 3 }, music: { muted: true } }
     expect(parseProject({ ...createProject(sessionId), audio }, sessionId)?.audio).toEqual({
-      microphone: { muted: false },
-      systemAudio: { muted: true }
+      microphone: { muted: false, volume: 0.4 },
+      systemAudio: { muted: true, volume: 1 }
     })
+  })
+
+  it('has no music until some is brought in, and repairs saved music settings', () => {
+    expect(createProject(sessionId).music).toBeNull()
+    expect(parseProject(createProject(sessionId), sessionId)?.music).toBeNull()
+    const music = { volume: 2, ducking: 'heavy', loop: 'yes', fadeInMs: -1, fadeOutMs: 500 }
+    // A number out of range is clamped; anything else takes the default.
+    expect(parseProject({ ...createProject(sessionId), music }, sessionId)?.music).toEqual({
+      ...DEFAULT_MUSIC,
+      volume: 1,
+      fadeInMs: 0,
+      fadeOutMs: 500
+    })
+    expect(parseProject({ ...createProject(sessionId), music: DEFAULT_MUSIC }, sessionId)?.music).toEqual(DEFAULT_MUSIC)
+  })
+
+  it('normalizes loudness for new projects, and leaves old ones as they were mixed', () => {
+    expect(createProject(sessionId).export.loudness).toBe('social')
+    const { loudness, ...legacy } = createProject(sessionId).export
+    expect(loudness).toBe('social')
+    expect(parseProject({ ...createProject(sessionId), export: legacy }, sessionId)?.export.loudness).toBe('off')
+    expect(parseProject({ ...createProject(sessionId), export: { ...legacy, loudness: 'loud' } }, sessionId)?.export.loudness).toBe('off')
   })
 })
 

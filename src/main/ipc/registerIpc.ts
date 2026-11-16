@@ -42,6 +42,8 @@ import type { ExportService } from '../export/ExportService'
 import type { Logger } from '../logging/logger'
 import { writeFileAtomic } from '../filesystem/atomicWrite'
 import { toImportAppError } from '../library/VideoImporter'
+import type { MusicImporter } from '../library/MusicImporter'
+import { toMusicAppError } from '../library/MusicImporter'
 import type { VideoImporter } from '../library/VideoImporter'
 import type { ThumbnailService } from '../media/ThumbnailService'
 import { toMeetAppError } from '../meet/MeetRecorder'
@@ -75,6 +77,7 @@ export interface IpcDependencies {
   waveforms: WaveformService
   thumbnails: ThumbnailService
   importer: VideoImporter
+  music: MusicImporter
   meet: MeetRecorder
   meetSettings: MeetSettingsStore
   updates: UpdateService
@@ -87,6 +90,9 @@ type Result<Channel extends IpcInvokeChannel> = IpcInvokeContract[Channel]['resu
 
 /** A subtitle file longer than this is not one of a recording. */
 const MAX_SUBTITLE_CHARS = 5_000_000
+
+/** Audio files the music dialog offers; a video file works too, its sound is taken. */
+const MUSIC_EXTENSIONS = ['mp3', 'm4a', 'aac', 'wav', 'aiff', 'aif', 'flac', 'ogg', 'oga', 'opus', 'wma', 'mp4', 'mov', 'm4v']
 
 /** Containers FFmpeg opens that the file dialog offers; anything else is just not listed. */
 const IMPORT_EXTENSIONS = ['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', 'mts', 'm2ts', 'mpg', 'mpeg', 'wmv', 'flv', '3gp']
@@ -121,6 +127,7 @@ export function registerIpc(deps: IpcDependencies): void {
     waveforms,
     thumbnails,
     importer,
+    music,
     meet,
     meetSettings,
     updates,
@@ -466,6 +473,35 @@ export function registerIpc(deps: IpcDependencies): void {
     return dubResult(() => dubbing.generate(sessionId, request))
   })
   handle('dub:cancel', () => dubbing.cancel())
+
+  handle('music:import', async ([sessionId]) => {
+    if (!isSessionId(sessionId)) return { ok: false, error: appError('invalid-state', 'invalid session id') }
+    const owner = windows.mainWindow
+    const options = {
+      title: 'Escolher música',
+      buttonLabel: 'Usar como música',
+      properties: ['openFile'] as Array<'openFile'>,
+      filters: [{ name: 'Áudio', extensions: MUSIC_EXTENSIONS }]
+    }
+    const answer = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    const filePath = answer.filePaths[0]
+    if (answer.canceled || !filePath) return { ok: true, value: null }
+    try {
+      return { ok: true, value: await music.import(sessionId, filePath) }
+    } catch (error) {
+      return { ok: false, error: toMusicAppError(error) }
+    }
+  })
+
+  handle('music:remove', async ([sessionId]) => {
+    if (!isSessionId(sessionId)) return { ok: false, error: appError('invalid-state', 'invalid session id') }
+    try {
+      await music.remove(sessionId)
+      return { ok: true, value: null }
+    } catch (error) {
+      return { ok: false, error: toMusicAppError(error) }
+    }
+  })
 
   handle('filters:render', async ([sessionId, value]) => {
     const request = parseFilterRenderRequest(value)

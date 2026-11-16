@@ -85,6 +85,7 @@ src/
     recording/                     RecordingController, SessionStore, diagnostics
     project/ProjectStore.ts        project.json: abertura, auto zoom inicial, salvamento
   library/VideoImporter.ts       traz um vídeo gravado fora do app para a biblioteca
+  library/MusicImporter.ts       traz um arquivo de áudio como a trilha de música da sessão
   update/UpdateService.ts        atualização automática: consulta, baixa e instala (electron-updater)
     captions/DictationService      ditado do assistente: WAV → texto pelo transcritor nativo
   tracking/ObjectTrackingService segue um objeto marcado pelo vídeo (helper screenrx-track, Vision) → track.json
@@ -139,7 +140,8 @@ recording-20261003-203556-847/
 ├── project.json        edição (criado ao abrir no editor)
 ├── microphone.m4a      só quando o microfone está ligado
 ├── system.m4a          só quando o áudio do sistema está ligado
-└── webcam.mp4          só quando a câmera está ligada
+├── webcam.mp4          só quando a câmera está ligada
+└── music.m4a           só quando o usuário escolhe uma música (aba Áudio)
 ```
 
 `session.json` (`RecordingSessionManifest`) registra fonte, parâmetros de captura,
@@ -938,7 +940,36 @@ FFmpeg: codifica H.264 uma única vez, processa o áudio, gera o MP4
 - **Trilhas silenciadas** (`project.audio[trilha].muted`, o interruptor no rótulo
   da trilha na linha do tempo) continuam tocando mudas no preview, para o som
   voltar no mesmo instante, e simplesmente não são entregues ao FFmpeg na
-  exportação; com todas silenciadas o arquivo sai sem trilha de áudio.
+  exportação; com todas silenciadas (e sem música) o arquivo sai sem trilha de
+  áudio.
+- **Volume por trilha** (`project.audio[trilha].volume`, 0…1, aba Áudio):
+  `volume=` na cadeia de cada trilha antes do `aformat`; no preview é o
+  `volume` do elemento de áudio. Não há ganho acima de 100%: o volume final
+  é tarefa do loudness.
+- **Música de fundo.** Um arquivo que o usuário escolhe na aba Áudio vira a
+  trilha `music.m4a` da sessão (`MusicImporter`: AAC copiado ou reencodado,
+  escrito em `.part` e renomeado; o original não é tocado; `assets.music` no
+  manifesto guarda tamanho, duração e o nome do arquivo). Uma sessão tem uma
+  música: escolher outra substitui o arquivo; remover apaga. `project.music`
+  (`MusicSettings`) diz só como ela toca: volume, `ducking` (`off`, `light`,
+  `strong`), repetir, fade de entrada e de saída. A música corre no relógio do
+  **vídeo pronto**: não sofre cortes nem velocidade. Na exportação é a última
+  entrada do FFmpeg (`-stream_loop -1` quando repete), passa por `aformat`,
+  `volume`, `atrim` na duração de saída e `afade` nas pontas; com ducking, a
+  soma das vozes é dividida (`asplit`) e serve de side chain a um
+  `sidechaincompress` sobre a música (`DUCKING_PRESETS`: limiares de 0,02 e
+  0,01, razões 4 e 12, medidos contra o FFmpeg embutido em
+  `audioMix.test.ts`); por fim vozes e música são somadas com `amerge` + `pan`.
+  No preview (`PreviewPlayer`) a música é um elemento à parte das trilhas
+  companheiras, posicionado pelo tempo de saída (`outputTimeOf`) e reposicionado
+  só quando desvia mais de 250 ms; o ganho é calculado por quadro em
+  `engine/audio/musicLevel.ts` (fades, e o ducking aproximado pelas palavras
+  da transcrição, com ataque de 60 ms e retorno de 450 ms), então sem legendas
+  geradas o preview não abaixa a música, mas a exportação abaixa.
+- **Volume final** (`project.export.loudness`): `social` passa a mistura por
+  `loudnorm=I=-14:TP=-1.5:LRA=11` (uma passagem) e volta ao formato de 48 kHz;
+  é o padrão de projetos novos, e `off` nos salvos antes disso. Só na
+  exportação.
 - **Legendas** são desenhadas em cada quadro pelo `composeFrame`, como no
   preview; não há trilha de legenda no arquivo nem filtro de texto no FFmpeg.
 - O FFmpeg e o FFprobe vêm embutidos (`ffmpeg-static`, `@ffprobe-installer/ffprobe`, ambos nativos de Apple Silicon); o

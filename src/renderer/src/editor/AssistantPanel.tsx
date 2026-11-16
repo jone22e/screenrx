@@ -42,7 +42,10 @@ function editStateOf(store: EditorStore): AssistantEditState {
     webcamVisible: state.webcam.visible,
     hasSystemAudio: session.audio.some((track) => track.kind === 'systemAudio'),
     microphoneMuted: state.audio.microphone.muted,
-    systemAudioMuted: state.audio.systemAudio.muted
+    systemAudioMuted: state.audio.systemAudio.muted,
+    microphoneVolume: state.audio.microphone.volume,
+    systemAudioVolume: state.audio.systemAudio.volume,
+    music: state.music && state.musicTrack ? { volume: state.music.volume, ducking: state.music.ducking } : null
   }
 }
 
