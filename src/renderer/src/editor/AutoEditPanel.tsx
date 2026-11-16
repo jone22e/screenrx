@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { WORKER_SPECS } from '@engine/ai/workerPrompts'
-import { PLATFORM_PRESETS } from '@engine/export/platformPresets'
 import { formatTimecode } from '@shared/format'
 import type { AssistantAction } from '@shared/models/assistant'
 import type { AutoEditBrief, AutoEditPlan, AutoEditStage, WorkerResult, WorkerRole } from '@shared/models/autoEdit'
-import { WORKER_ROLES } from '@shared/models/autoEdit'
 import type { CaptionLanguage } from '@shared/models/project'
 import { aiSettings, currentAiChoice } from '../common/aiSettings'
 import { agentCursors } from '../common/agentCursors'
 import { openSettings } from '../common/settingsScreen'
-import { editStateOf } from './AssistantPanel'
+import { AutoEditBriefForm, ROLE_HINTS, defaultBrief } from './AutoEditBriefForm'
+import { editStateOf } from './editState'
 import type { EditorStore } from './EditorStore'
 import { GearIcon, RefreshIcon, SparklesIcon, UndoIcon } from './icons'
 
@@ -54,14 +53,6 @@ const LANE_OF: Partial<Record<string, string>> = {
 const STEP_MS = 220
 const MAX_SHOW_MS = 4000
 
-const ROLE_HINTS: Record<WorkerRole, string> = {
-  cutter: 'cortes e velocidade',
-  camera: 'zoom, formato e enquadramento',
-  captioner: 'legendas e títulos',
-  sound: 'volumes e música',
-  art: 'fundo e exportação'
-}
-
 /**
  * The editing team, in the assistant's panel, beside the preview and the
  * timeline: the brief, then each agent as it thinks and as its work lands
@@ -73,12 +64,7 @@ export function AutoEditPanel({ store }: Props) {
   const current = currentAiChoice(ai)
   const focus = useSyncExternalStore(autoEditFocus.subscribe, autoEditFocus.getState)
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
-  const [brief, setBrief] = useState<AutoEditBrief>(() => ({
-    preset: store.getState().exportSettings.preset === 'custom' ? 'reels' : store.getState().exportSettings.preset,
-    targetDurationSec: null,
-    tone: '',
-    roles: [...WORKER_ROLES]
-  }))
+  const [brief, setBrief] = useState<AutoEditBrief>(() => defaultBrief(store.getState().exportSettings.preset === 'custom' ? 'reels' : store.getState().exportSettings.preset))
   const [stages, setStages] = useState<Partial<Record<WorkerRole | 'director', { stage: AutoEditStage; elapsedMs: number }>>>({})
   const [plan, setPlan] = useState<AutoEditPlan | null>(null)
   const [results, setResults] = useState<WorkerResult[]>([])
@@ -234,9 +220,6 @@ export function AutoEditPanel({ store }: Props) {
     setRerun(null)
   }
 
-  const toggleRole = (role: WorkerRole): void =>
-    setBrief((previous) => ({ ...previous, roles: previous.roles.includes(role) ? previous.roles.filter((entry) => entry !== role) : [...previous.roles, role] }))
-
   if (phase.kind === 'idle') {
     return (
       <div ref={root} className="team team-idle">
@@ -284,52 +267,7 @@ export function AutoEditPanel({ store }: Props) {
           {!hasTranscript && (
             <p className="dialog-warning">Sem legendas geradas, a equipe não sabe o que foi dito: gere as legendas antes para um resultado melhor.</p>
           )}
-          <label className="field">
-            <span className="field-label">Para onde vai</span>
-            <select className="select" value={brief.preset} onChange={(event) => setBrief({ ...brief, preset: event.target.value as AutoEditBrief['preset'] })}>
-              {PLATFORM_PRESETS.map((preset) => (
-                <option key={preset.id} value={preset.id}>
-                  {preset.label}
-                </option>
-              ))}
-              <option value="custom">Sem rede específica</option>
-            </select>
-          </label>
-          <div className="field">
-            <span className="field-label">
-              Duração alvo <span className="agent-notes">· a gravação tem {formatTimecode(session.durationMs)}</span>
-            </span>
-            <div className="chips" role="radiogroup" aria-label="Duração alvo">
-              {[null, 30, 60, 90, 180].map((seconds) => (
-                <button key={String(seconds)} className="chip chip-small" role="radio" aria-checked={brief.targetDurationSec === seconds} onClick={() => setBrief({ ...brief, targetDurationSec: seconds })}>
-                  {seconds === null ? 'Livre' : seconds < 60 ? `${seconds} s` : `${seconds / 60} min`}
-                </button>
-              ))}
-            </div>
-          </div>
-          <label className="field">
-            <span className="field-label">Tom</span>
-            <input
-              className="text-input"
-              aria-label="Tom do vídeo"
-              placeholder="tutorial direto, bastidores, anúncio…"
-              maxLength={200}
-              value={brief.tone}
-              onChange={(event) => setBrief({ ...brief, tone: event.target.value })}
-              onKeyDown={(event) => event.stopPropagation()}
-            />
-          </label>
-          <div className="field">
-            <span className="field-label">Equipe</span>
-            <div className="team-roles" role="group" aria-label="Agentes">
-              {WORKER_ROLES.map((role) => (
-                <button key={role} className="team-role" aria-pressed={brief.roles.includes(role)} title={ROLE_HINTS[role]} onClick={() => toggleRole(role)}>
-                  <span className="agent-dot" style={{ background: WORKER_SPECS[role].color }} />
-                  {WORKER_SPECS[role].label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <AutoEditBriefForm brief={brief} onChange={setBrief} durationMs={session.durationMs} />
           <div className="cut-actions">
             <button className="panel-button panel-button-primary" disabled={!current || brief.roles.length === 0} onClick={() => void run()}>
               <SparklesIcon /> Editar

@@ -1,19 +1,28 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { formatClock } from '@shared/format'
+import type { AutoEditBrief } from '@shared/models/autoEdit'
 import type { AppError } from '@shared/models/errors'
 import type { RecordingSummary } from '@shared/models/session'
 import type { SeriesPlan, SeriesProgress } from '@shared/models/series'
 import { SERIES_LIMITS } from '@shared/models/series'
 import { aiSettings, currentAiChoice } from '../common/aiSettings'
 import { openSettings } from '../common/settingsScreen'
+import { AutoEditBriefForm, defaultBrief } from '../editor/AutoEditBriefForm'
 import { SparklesIcon, TrashIcon } from './icons'
+import { seriesAutoEdit } from './seriesAutoEdit'
 
 interface Props {
   recording: RecordingSummary
   onClose: () => void
 }
 
-type Phase = { kind: 'brief' } | { kind: 'planning' } | { kind: 'plan'; plan: SeriesPlan } | { kind: 'splitting'; plan: SeriesPlan; progress: SeriesProgress | null }
+type Phase =
+  | { kind: 'brief' }
+  | { kind: 'planning' }
+  | { kind: 'plan'; plan: SeriesPlan }
+  | { kind: 'splitting'; plan: SeriesPlan; progress: SeriesProgress | null }
+  /** The episodes exist; the team can edit them all now, or not. */
+  | { kind: 'made'; plan: SeriesPlan; sessionIds: string[] }
 
 const TARGET_LABELS: Record<(typeof SERIES_LIMITS.targetChoicesSec)[number], string> = { 60: '1 min', 180: '3 min', 300: '5 min', 600: '10 min' }
 
@@ -28,6 +37,7 @@ export function SeriesDialog({ recording, onClose }: Props) {
   const [targetSec, setTargetSec] = useState<number>(180)
   const [phase, setPhase] = useState<Phase>({ kind: 'brief' })
   const [error, setError] = useState<AppError | null>(null)
+  const [editBrief, setEditBrief] = useState<AutoEditBrief>(() => defaultBrief())
   useEffect(() => {
     void aiSettings.load()
   }, [])
@@ -58,12 +68,20 @@ export function SeriesDialog({ recording, onClose }: Props) {
     setError(null)
     setPhase({ kind: 'splitting', plan: ready, progress: null })
     void window.screenrx.library.splitSeries(recording.id, ready).then((result) => {
-      if (result.ok) onClose()
+      if (result.ok) setPhase({ kind: 'made', plan: ready, sessionIds: result.value.sessionIds })
       else {
         setPhase({ kind: 'plan', plan: ready })
         setError(result.error)
       }
     })
+  }
+
+  /** The last step: the team edits every episode just made, one after the other, with one brief. */
+  const editAll = (): void => {
+    if (phase.kind !== 'made' || !current || seriesAutoEdit.working) return
+    const episodes = phase.sessionIds.map((id, index) => ({ id, title: `${index + 1}. ${phase.plan.episodes[index]?.title ?? ''}`.trim() }))
+    void seriesAutoEdit.start(phase.plan.seriesTitle, episodes, editBrief, current.choice)
+    onClose()
   }
 
   const busy = phase.kind === 'planning' || phase.kind === 'splitting'
@@ -160,6 +178,26 @@ export function SeriesDialog({ recording, onClose }: Props) {
           </>
         )}
 
+        {phase.kind === 'made' && (
+          <>
+            <p className="panel-hint series-made">
+              <strong>{phase.sessionIds.length === 1 ? '1 episódio criado' : `${phase.sessionIds.length} episódios criados`}</strong> na série{' '}
+              <strong>{phase.plan.seriesTitle}</strong>. Quer que a equipe de agentes edite todos agora, um depois do outro, com o mesmo briefing? A edição
+              fica guardada em cada episódio, para rever no editor.
+            </p>
+            {ai.providers !== null && !current && (
+              <p className="panel-hint">
+                Nenhuma ferramenta de IA pronta.{' '}
+                <button className="panel-button panel-button-small" onClick={openSettings}>
+                  Configurar IA
+                </button>
+              </p>
+            )}
+            {seriesAutoEdit.working && <p className="dialog-warning">A equipe já está editando outra série; espere ela terminar, ou use "Editar todos com IA" na prateleira depois.</p>}
+            <AutoEditBriefForm brief={editBrief} onChange={setEditBrief} />
+          </>
+        )}
+
         {error && (
           <p className="dialog-error" role="alert">
             {error.message}
@@ -173,7 +211,12 @@ export function SeriesDialog({ recording, onClose }: Props) {
             </button>
           ) : (
             <button className="panel-button" disabled={phase.kind === 'splitting'} onClick={onClose}>
-              {phase.kind === 'plan' ? 'Descartar' : 'Cancelar'}
+              {phase.kind === 'plan' ? 'Descartar' : phase.kind === 'made' ? 'Concluir' : 'Cancelar'}
+            </button>
+          )}
+          {phase.kind === 'made' && (
+            <button className="panel-button panel-button-primary" disabled={!current || seriesAutoEdit.working || editBrief.roles.length === 0} onClick={editAll}>
+              <SparklesIcon /> Editar todos com IA
             </button>
           )}
           {phase.kind === 'plan' && (

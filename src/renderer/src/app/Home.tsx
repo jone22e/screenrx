@@ -1,5 +1,5 @@
 import type { DragEvent } from 'react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { formatBytes, formatClock } from '@shared/format'
 import type { AppError } from '@shared/models/errors'
 import type { RecordingStateSnapshot } from '@shared/models/recording'
@@ -9,6 +9,9 @@ import { PermissionNotice } from './PermissionNotice'
 import { RecordingBanner } from './RecordingBanner'
 import { RecordingCard, SERIES_LIST_ID } from './RecordingCard'
 import { SeriesDialog } from './SeriesDialog'
+import { SeriesEditDialog } from './SeriesEditDialog'
+import { SeriesEditStatus } from './SeriesEditStatus'
+import { seriesAutoEdit } from './seriesAutoEdit'
 import { RecordingRow } from './RecordingRow'
 import { Shelf } from './Shelf'
 import { UpdateNotice } from './UpdateNotice'
@@ -152,6 +155,20 @@ export function Home({ state, recordings, onEdit }: Props) {
   }
   // "Gerar série" for one recording.
   const [seriesFrom, setSeriesFrom] = useState<string | null>(null)
+  // "Editar todos com IA": the series whose brief is being asked, and the run under way or just done.
+  const [editingSeries, setEditingSeries] = useState<string | null>(null)
+  const seriesRun = useSyncExternalStore(seriesAutoEdit.subscribe, seriesAutoEdit.getState)
+  const [heldNotice, setHeldNotice] = useState<string | null>(null)
+  // An episode the team still has to edit, or is editing, stays out of the editor until then.
+  const openRecording = (sessionId: string): void => {
+    if (seriesAutoEdit.holds(sessionId)) {
+      const title = (recordings ?? []).find((recording) => recording.id === sessionId)?.title ?? 'Esse episódio'
+      setHeldNotice(`${title} está na fila da equipe de edição. Espere a vez dele passar, ou cancele a edição da série, para abrir no editor.`)
+      return
+    }
+    setHeldNotice(null)
+    onEdit(sessionId)
+  }
   const moveToSeries = (sessionId: string, series: string | null): void => {
     void window.screenrx.library.setSeries(sessionId, series ?? '')
   }
@@ -276,7 +293,7 @@ export function Home({ state, recordings, onEdit }: Props) {
 
   const renderCards = (items: RecordingSummary[]) =>
     items.map((recording) => (
-      <RecordingCard key={recording.id} recording={recording} highlighted={recording.id === state.lastCompletedSessionId} showSeries={order !== 'series'} onEdit={onEdit} onMakeSeries={setSeriesFrom} />
+      <RecordingCard key={recording.id} recording={recording} highlighted={recording.id === state.lastCompletedSessionId} showSeries={order !== 'series'} onEdit={openRecording} onMakeSeries={setSeriesFrom} />
     ))
 
   const renderItems = (items: RecordingSummary[]) =>
@@ -285,7 +302,7 @@ export function Home({ state, recordings, onEdit }: Props) {
     ) : (
       <div className="row-list">
         {items.map((recording) => (
-          <RecordingRow key={recording.id} recording={recording} highlighted={recording.id === state.lastCompletedSessionId} showSeries={order !== 'series'} onEdit={onEdit} onMakeSeries={setSeriesFrom} />
+          <RecordingRow key={recording.id} recording={recording} highlighted={recording.id === state.lastCompletedSessionId} showSeries={order !== 'series'} onEdit={openRecording} onMakeSeries={setSeriesFrom} />
         ))}
       </div>
     )
@@ -394,8 +411,25 @@ export function Home({ state, recordings, onEdit }: Props) {
 
         <MeetRooms idle={idle} />
 
+        {heldNotice && (
+          <div className="notice" role="status">
+            <p>{heldNotice}</p>
+            <button className="button" onClick={() => setHeldNotice(null)}>
+              Fechar
+            </button>
+          </div>
+        )}
+
         {seriesFrom && (recordings ?? []).some((recording) => recording.id === seriesFrom) && (
           <SeriesDialog recording={(recordings ?? []).find((recording) => recording.id === seriesFrom) as RecordingSummary} onClose={() => setSeriesFrom(null)} />
+        )}
+
+        {editingSeries !== null && (
+          <SeriesEditDialog
+            series={editingSeries}
+            episodes={groupBySeries(recordings ?? [], []).find((group) => group.label === editingSeries)?.items ?? []}
+            onClose={() => setEditingSeries(null)}
+          />
         )}
 
         {joining.open && (
@@ -585,7 +619,11 @@ export function Home({ state, recordings, onEdit }: Props) {
                       count={group.items.length}
                       {...(order === 'series' && {
                         onDropRecording: (sessionId: string) => moveToSeries(sessionId, group.label === NO_SERIES_LABEL ? null : group.label),
-                        ...(group.label !== NO_SERIES_LABEL && { onRemove: () => void window.screenrx.library.removeSeries(group.label) })
+                        ...(group.label !== NO_SERIES_LABEL && {
+                          onRemove: () => void window.screenrx.library.removeSeries(group.label),
+                          ...(seriesRun.phase !== 'working' && { onEditAll: () => setEditingSeries(group.label) }),
+                          ...(seriesRun.phase !== 'idle' && seriesRun.series === group.label && { status: <SeriesEditStatus run={seriesRun} /> })
+                        })
                       })}
                     >
                       {renderCards(group.items)}

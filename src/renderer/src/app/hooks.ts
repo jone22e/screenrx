@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { AppError, IpcResult } from '@shared/models/errors'
 import type { PermissionReport } from '@shared/models/permissions'
 import type { RecordingSummary } from '@shared/models/session'
+import { libraryRefresh } from '../common/libraryRefresh'
 
 /** Runs `effect` now and every time the window regains focus. */
 function useOnFocus(effect: () => void): void {
@@ -67,7 +68,10 @@ export function useLibrary(): RecordingSummary[] | null {
       void window.screenrx.library.list().then(setRecordings)
     }
     refresh()
-    return window.screenrx.library.onChanged(refresh)
+    const stops = [window.screenrx.library.onChanged(refresh), libraryRefresh.subscribe(refresh)]
+    return () => {
+      for (const stop of stops) stop()
+    }
   }, [])
 
   return recordings

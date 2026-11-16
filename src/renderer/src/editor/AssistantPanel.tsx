@@ -1,6 +1,6 @@
 import type { KeyboardEvent } from 'react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { AssistantEditState, AssistantMessage } from '@shared/models/assistant'
+import type { AssistantMessage } from '@shared/models/assistant'
 import { ASSISTANT_LIMITS } from '@shared/models/assistant'
 import type { CaptionLanguage } from '@shared/models/project'
 import { aiSettings, currentAiChoice } from '../common/aiSettings'
@@ -8,6 +8,7 @@ import { useDictation } from '../common/dictation'
 import { openSettings } from '../common/settingsScreen'
 import type { EditorStore } from './EditorStore'
 import { applyAssistantActions } from './assistantActions'
+import { editStateOf } from './editState'
 import { AutoEditPanel } from './AutoEditPanel'
 import { AiChoicePicker } from './AiChoicePicker'
 import { AssistantSuggestions } from './AssistantSuggestions'
@@ -22,34 +23,6 @@ interface ChatEntry extends AssistantMessage {
   id: number
   done?: string[]
   skipped?: string[]
-}
-
-/** The editor as it stands, in the terms the AI is told about. */
-export function editStateOf(store: EditorStore): AssistantEditState {
-  const state = store.getState()
-  const { session } = store
-  return {
-    durationMs: session.durationMs,
-    cuts: state.trims.map(({ startMs, endMs }) => ({ startMs, endMs })),
-    zooms: state.zooms.map(({ startMs, endMs, scale }) => ({ startMs, endMs, scale })),
-    speed: state.exportSettings.speed,
-    speedRegions: state.speeds.map((region) => ({ startMs: region.startMs, endMs: region.endMs, speed: region.speed })),
-    hasCaptions: state.captions.cues.length > 0,
-    captionsVisible: state.captions.visible,
-    captionLanguage: state.captions.language,
-    captionLength: state.captions.length,
-    captionMode: state.captions.style.mode,
-    backgroundId: state.background.presetId,
-    exportPreset: state.exportSettings.preset,
-    hasWebcam: session.webcam !== null,
-    webcamVisible: state.webcam.visible,
-    hasSystemAudio: session.audio.some((track) => track.kind === 'systemAudio'),
-    microphoneMuted: state.audio.microphone.muted,
-    systemAudioMuted: state.audio.systemAudio.muted,
-    microphoneVolume: state.audio.microphone.volume,
-    systemAudioVolume: state.audio.systemAudio.volume,
-    music: state.music && state.musicTrack ? { volume: state.music.volume, ducking: state.music.ducking } : null
-  }
 }
 
 /**

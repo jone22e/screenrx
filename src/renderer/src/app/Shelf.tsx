@@ -1,7 +1,7 @@
 import type { DragEvent, ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { RECORDING_DRAG_TYPE } from './RecordingCard'
-import { CloseIcon } from './icons'
+import { CloseIcon, SparklesIcon } from './icons'
 
 interface Props {
   /** The heading over the row. */
@@ -12,6 +12,10 @@ interface Props {
   onDropRecording?: (sessionId: string) => void
   /** For a row with nothing in it: forgets the series. */
   onRemove?: () => void
+  /** For a series with recordings: the team edits them all, one after the other. */
+  onEditAll?: () => void
+  /** What is going on with the row (the team's progress), under the heading. */
+  status?: ReactNode
   children: ReactNode
 }
 
@@ -29,7 +33,7 @@ const ChevronIcon = ({ direction }: { direction: 'left' | 'right' }) => (
  * items side by side, and a page's worth of them scrolled at a time with the
  * arrows at the edges, which only show where there is more to see.
  */
-export function Shelf({ title, count, onDropRecording, onRemove, children }: Props) {
+export function Shelf({ title, count, onDropRecording, onRemove, onEditAll, status, children }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const [reach, setReach] = useState({ before: false, after: false })
   const [dropping, setDropping] = useState(false)
@@ -96,7 +100,13 @@ export function Shelf({ title, count, onDropRecording, onRemove, children }: Pro
             <CloseIcon />
           </button>
         )}
+        {count > 0 && onEditAll && (
+          <button className="shelf-edit-all" title="Editar todos com IA: a equipe de agentes edita cada episódio da série, um depois do outro" onClick={onEditAll}>
+            <SparklesIcon /> Editar todos com IA
+          </button>
+        )}
       </h2>
+      {status}
       {count === 0 && <p className="shelf-empty">Arraste gravações para cá, ou use "Série" no cartão de uma gravação.</p>}
       <div className="shelf-body">
         <button className="shelf-arrow shelf-arrow-before" aria-label="Anteriores" title="Anteriores" tabIndex={reach.before ? 0 : -1} onClick={() => page(-1)}>
