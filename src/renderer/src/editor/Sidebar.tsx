@@ -163,7 +163,7 @@ function CutsPanel({ session, store, player }: Props) {
 
   return (
     <>
-      <Section title="Seleção">
+      <Section title="Seleção" help="Arraste na linha do tempo, ou marque o início com I e o fim com O. Backspace corta a seleção.">
         <div className="inout">
           <span className="inout-point" data-set={selection !== null}>
             <kbd>I</kbd>
@@ -188,28 +188,26 @@ function CutsPanel({ session, store, player }: Props) {
             <ScissorsIcon /> Daqui
           </button>
         </div>
-        <p className="panel-hint">Arraste na timeline ou marque com <kbd>I</kbd> e <kbd>O</kbd>.</p>
       </Section>
 
       {selectedTrim && (
-        <Section title="Corte selecionado" aside={`${formatTimecode(selectedTrim.startMs)} – ${formatTimecode(selectedTrim.endMs)}`}>
+        <Section
+          title="Corte selecionado"
+          aside={`${formatTimecode(selectedTrim.startMs)} – ${formatTimecode(selectedTrim.endMs)}`}
+          help="Corte: a imagem pula de um lado ao outro. Escurecer: escurece 0,4 s antes do corte e volta depois."
+        >
           <Segmented
             label="Passagem"
             value={selectedTrim.transition ?? 'cut'}
             options={TRANSITIONS}
             onChange={(transition) => store.setTrimTransition(selectedTrim.id, transition)}
           />
-          <p className="panel-hint">
-            {selectedTrim.transition === 'dip'
-              ? 'A imagem escurece antes do corte e volta depois, em 0,4 s.'
-              : 'A imagem pula direto de um lado do corte ao outro.'}
-          </p>
         </Section>
       )}
 
       <SuggestionsPanel store={store} player={player} />
 
-      <Section title={`Cortes${trims.length > 0 ? ` (${trims.length})` : ''}`} aside={trims.length > 0 ? 'Clique para ir até o corte' : undefined}>
+      <Section title={`Cortes${trims.length > 0 ? ` (${trims.length})` : ''}`} help="Clique num corte para ir até ele; a seta desfaz o corte.">
         {trims.length === 0 ? (
           <p className="panel-hint">Nenhum corte.</p>
         ) : (
@@ -245,6 +243,7 @@ function CutsPanel({ session, store, player }: Props) {
       <Section
         title={selectedSpeed ? 'Velocidade do trecho' : `Velocidade${speeds.length > 0 ? ` (${speeds.length})` : ''}`}
         aside={selectedSpeed ? `${formatTimecode(selectedSpeed.startMs)} – ${formatTimecode(selectedSpeed.endMs)}` : undefined}
+        help="A voz mantém o tom. Abaixo de 1× o trecho fica mais longo. A velocidade do vídeo inteiro fica ao lado do play."
       >
         <div className="speed-factors" role="radiogroup" aria-label="Fator de velocidade">
           {SPEED_CONFIG.factors.map((value) => (
@@ -279,9 +278,6 @@ function CutsPanel({ session, store, player }: Props) {
             </button>
           </div>
         )}
-        <p className="panel-hint">
-          A voz mantém o tom. Trechos lentos abaixo de 1× ficam mais longos. A velocidade de todo o vídeo fica ao lado do play.
-        </p>
         {speeds.length > 0 && !selectedSpeed && (
           <ul className="cut-list">
             {speeds.map((region) => (
@@ -307,14 +303,11 @@ function CutsPanel({ session, store, player }: Props) {
         )}
       </Section>
 
-      <Section title={`Marcadores${markers.length > 0 ? ` (${markers.length})` : ''}`}>
+      <Section title={`Marcadores${markers.length > 0 ? ` (${markers.length})` : ''}`} help="Um lembrete na régua, para voltar depois. ⇧M pula para o próximo.">
         <button className="panel-button" disabled={!player} onClick={() => player && store.addMarker(player.currentTimeMs)}>
           <FlagIcon /> Marcar aqui
           <kbd className="button-key">M</kbd>
         </button>
-        <p className="panel-hint">
-          Um lembrete na régua, para voltar depois. <kbd>⇧M</kbd> pula para o próximo. Dê um nome, se quiser.
-        </p>
         {markers.length > 0 && (
           <ul className="cut-list marker-list">
             {markers.map((marker) => (
@@ -358,7 +351,7 @@ function ZoomPanel({ session, store, player }: Props) {
 
   if (zoom) {
     return (
-      <Section title="Zoom selecionado">
+      <Section title="Zoom selecionado" help="Clique no vídeo para mudar o foco do zoom.">
         <p className="panel-meta">
           {formatTimecode(zoom.startMs)} – {formatTimecode(zoom.endMs)}
           <span className="badge">{zoom.mode === 'auto' ? 'Automático' : 'Manual'}</span>
@@ -373,7 +366,6 @@ function ZoomPanel({ session, store, player }: Props) {
           onChange={(scale) => store.setScale(zoom.id, scale)}
           onCommit={() => store.endGesture()}
         />
-        <p className="panel-hint">Clique no vídeo para mudar o foco.</p>
         <button className="panel-button panel-button-danger" onClick={() => store.removeZoom(zoom.id)}>
           <TrashIcon /> Remover zoom
         </button>
@@ -382,12 +374,11 @@ function ZoomPanel({ session, store, player }: Props) {
   }
 
   return (
-    <Section title="Zoom">
-      <p className="panel-hint">
-        {state.zooms.length === 0
-          ? 'Nenhum zoom.'
-          : `${state.zooms.length} ${state.zooms.length === 1 ? 'zoom' : 'zooms'}. Selecione um para ajustar.`}
-      </p>
+    <Section
+      title="Zoom"
+      aside={state.zooms.length > 0 ? `${state.zooms.length} ${state.zooms.length === 1 ? 'zoom' : 'zooms'}` : undefined}
+      help="Selecione um zoom na linha do tempo para ajustar a intensidade e o foco."
+    >
       <button
         className="panel-button panel-button-primary"
         disabled={!player}
@@ -448,7 +439,10 @@ function FormatPanel({ session, store, player, onOpenBackground }: Props & { onO
       </Section>
 
       {vertical && (
-        <Section title="Enquadramento">
+        <Section
+          title="Enquadramento"
+          help={`${FRAME_FIT_HINTS[background.fit]}${background.fit === 'follow-mouse' && session.cursor.length === 0 ? ' Esta gravação não tem o rastro do mouse, então a parte usada fica no centro.' : ''}`}
+        >
           <div className="fit-options" role="radiogroup" aria-label="Enquadramento">
             {FRAME_FIT_OPTIONS.map((option) => (
               <button
@@ -487,10 +481,7 @@ function FormatPanel({ session, store, player, onOpenBackground }: Props & { onO
                 </div>
               ) : markingObject ? (
                 <>
-                  <p className="panel-hint">
-                    Arraste um retângulo em volta do objeto no preview, no instante em que ele aparece. O rastreamento
-                    começa daí.
-                  </p>
+                  <p className="panel-hint">Arraste um retângulo em volta do objeto, no preview.</p>
                   <button className="panel-button" onClick={() => store.setMarkingObject(false)}>
                     Cancelar
                   </button>
@@ -520,11 +511,6 @@ function FormatPanel({ session, store, player, onOpenBackground }: Props & { onO
               {trackNotice && <p className="panel-notice">{trackNotice}</p>}
             </div>
           )}
-          <p className="panel-hint">
-            {FRAME_FIT_HINTS[background.fit]}
-            {background.fit === 'follow-mouse' && session.cursor.length === 0 && ' Esta gravação não tem o rastro do mouse (foi importada ou é uma reunião), então a parte usada fica no centro.'}
-          </p>
-
           <Slider
             label={filling ? 'Zoom' : 'Tamanho'}
             value={percent(filling ? background.scale : Math.min(background.scale, 1))}
@@ -548,21 +534,18 @@ function FormatPanel({ session, store, player, onOpenBackground }: Props & { onO
       )}
 
       {background.aspect === '9:16' && (
-        <Section title="Áreas seguras">
+        <Section title="Áreas seguras" help="Guias desenhadas só no preview; não saem na exportação.">
           <label className="switch-row">
             <span className="switch-row-text">
               <strong>Mostrar áreas seguras</strong>
-              <span>
-                Desenha no preview, só como guia, as faixas que Reels, TikTok e Shorts cobrem com os próprios botões
-                e legendas. Não sai na exportação.
-              </span>
+              <span>As faixas que Reels, TikTok e Shorts cobrem. Só no preview.</span>
             </span>
             <input type="checkbox" role="switch" checked={safe} onChange={(event) => safeAreas.set(event.target.checked)} />
           </label>
           <label className="switch-row">
             <span className="switch-row-text">
               <strong>Ver dentro de um celular</strong>
-              <span>Desenha no preview a tela de um celular com as barras e os botões do app por cima, como o post será visto. Não sai na exportação.</span>
+              <span>A tela de um celular por cima, como o post será visto. Só no preview.</span>
             </span>
             <input type="checkbox" role="switch" checked={phone} onChange={(event) => phoneFrame.set(event.target.checked)} />
           </label>

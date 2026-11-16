@@ -96,8 +96,7 @@ export function EffectsPanel({ store }: Props) {
             </div>
           ) : current ? (
             <p className="panel-hint" data-effects="applied">
-              Efeitos aplicados: o preview e a exportação já mostram o vídeo com eles. A gravação original não
-              foi alterada.
+              Efeitos aplicados ao preview e à exportação. A gravação original não muda.
             </p>
           ) : rendered ? (
             <p className="panel-hint">Os efeitos serão aplicados ao vídeo em instantes.</p>

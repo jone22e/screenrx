@@ -32,8 +32,8 @@ export function CursorPanel({ session, store }: Props) {
       <Section title="Cursor">
         <p className="panel-hint">
           {session.cursorInVideo
-            ? 'Esta gravação tem o cursor do sistema na própria imagem: foi feita antes de o ScreenRx desenhar o cursor, ou veio de um arquivo. Nas gravações novas o cursor é desenhado aqui, maior e mais suave, e dá para ajustar.'
-            : 'Esta gravação não tem o rastro do mouse, então não há cursor para desenhar.'}
+            ? 'O cursor já está na imagem desta gravação; não há o que desenhar.'
+            : 'Sem rastro do mouse nesta gravação.'}
         </p>
       </Section>
     )
@@ -41,18 +41,15 @@ export function CursorPanel({ session, store }: Props) {
 
   return (
     <>
-      <Section title="Cursor">
+      <Section title="Cursor" help="Desenhado por cima da imagem a partir do rastro gravado: cresce com o zoom e nunca fica borrado.">
         <label className="check">
           <input type="checkbox" checked={cursor.visible} onChange={(event) => store.setCursor({ visible: event.target.checked })} />
           <span>Mostrar o cursor</span>
         </label>
-        <p className="panel-hint">
-          Desenhado a partir do rastro gravado, por cima da imagem: cresce junto com o zoom e nunca fica borrado.
-        </p>
       </Section>
 
       {cursor.visible && (
-        <Section title="Aparência">
+        <Section title="Aparência" help="Suavizar tira o tremor da mão; forte demais atrasa o cursor em relação ao clique. Destacar abre um anel a cada clique.">
           <Slider
             label="Tamanho"
             value={percent(cursor.sizeRatio / CURSOR_LIMITS.maxSizeRatio)}
@@ -64,7 +61,6 @@ export function CursorPanel({ session, store }: Props) {
             onCommit={() => store.endGesture()}
           />
           <Segmented label="Suavizar o movimento" value={cursor.smoothing} options={SMOOTHINGS} onChange={(smoothing) => store.setCursor({ smoothing })} />
-          <p className="panel-hint">Suavizar tira o tremor da mão; forte demais atrasa o cursor um instante em relação ao clique.</p>
           <label className="check">
             <input
               type="checkbox"
@@ -73,7 +69,6 @@ export function CursorPanel({ session, store }: Props) {
             />
             <span>Destacar os cliques</span>
           </label>
-          <p className="panel-hint">Um anel que se abre a cada clique, para quem assiste ver onde você clicou.</p>
         </Section>
       )}
     </>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { claudeModelLabel, claudeModelsSeen, parseAgyModels, parseClaudeSessionModels, parseCodexCatalog, toolEffort } from './aiCatalog'
+import { parseAgyModels, parseClaudeCatalog, parseCodexCatalog, toolEffort } from './aiCatalog'
 
 describe('parseCodexCatalog', () => {
   const catalog = {
@@ -51,29 +51,41 @@ describe('toolEffort', () => {
   })
 })
 
-describe('Claude models from session logs', () => {
-  it('finds the model ids an answer names, once each', () => {
-    const log = [
-      '{"type":"assistant","message":{"model":"claude-fable-5-1","content":[]}}',
-      '{"type":"user","message":{"role":"user"}}',
-      '{"type":"assistant","message":{"model":"claude-sonnet-5-5"}}',
-      '{"type":"assistant","message":{"model":"claude-fable-5-1"}}',
-      '{"type":"assistant","message":{"model":"gpt-6"}}'
-    ].join('\n')
-    expect(parseClaudeSessionModels(log)).toEqual(['claude-fable-5-1', 'claude-sonnet-5-5'])
+describe('parseClaudeCatalog', () => {
+  const catalog = {
+    version: 2,
+    fetchedAt: 1794853198455,
+    catalog: {
+      surface: 'ccd',
+      config: {
+        models: [
+          { id: 'claude-fable-5-1', name: 'Fable 5.1', section: 'overflow', runtime: { effort_levels: ['low', 'medium', 'high'], default_effort: 'medium' } },
+          {
+            id: 'claude-opus-5-5',
+            name: 'Opus 5.5',
+            section: 'main',
+            description: 'For complex work and everyday tasks',
+            thinking: { type: 'effort', effort_options: [{ id: 'low' }, { id: 'medium' }, { id: 'turbo' }, { id: 'max' }] },
+            runtime: { effort_levels: ['low', 'medium', 'max'], default_effort: 'medium' }
+          },
+          { id: '--model evil', name: 'Bad', section: 'main' },
+          'nonsense'
+        ]
+      }
+    }
+  }
+
+  it('lists the main models first, then the rest, with the effort levels the tool names', () => {
+    expect(parseClaudeCatalog(catalog)).toEqual({
+      fetchedAt: 1794853198455,
+      models: [
+        { id: 'claude-opus-5-5', label: 'Opus 5.5', description: 'For complex work and everyday tasks', efforts: ['low', 'medium', 'max'], defaultEffort: 'medium' },
+        { id: 'claude-fable-5-1', label: 'Fable 5.1', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium' }
+      ]
+    })
   })
 
-  it('labels an id by family and version', () => {
-    expect(claudeModelLabel('claude-fable-5-1')).toBe('Fable 5.1')
-    expect(claudeModelLabel('claude-opus-5')).toBe('Opus 5')
-    expect(claudeModelLabel('claude-haiku-4-5-20251001')).toBe('Haiku 4.5 (20251001)')
-    expect(claudeModelLabel('claude-nova-7')).toBe('Nova 7')
-    expect(claudeModelLabel('something-else')).toBe('something-else')
-  })
-
-  it('offers the most recently used first', () => {
-    const models = claudeModelsSeen(new Map([['claude-opus-5', 10], ['claude-fable-5-1', 30], ['claude-sonnet-5-5', 20]]))
-    expect(models.map((model) => model.id)).toEqual(['claude-fable-5-1', 'claude-sonnet-5-5', 'claude-opus-5'])
-    expect(models[0]).toEqual({ id: 'claude-fable-5-1', label: 'Fable 5.1' })
+  it.each([null, 'x', {}, { catalog: { config: { models: 'none' } } }])('returns nothing for %j', (raw) => {
+    expect(parseClaudeCatalog(raw)).toBeNull()
   })
 })

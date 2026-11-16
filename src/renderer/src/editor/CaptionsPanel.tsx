@@ -186,7 +186,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
   if (tracks.length === 0) {
     return (
       <Section title="Legendas">
-        <p className="panel-hint">Esta gravação não tem áudio.</p>
+        <p className="panel-hint">Sem áudio nesta gravação.</p>
       </Section>
     )
   }
@@ -229,8 +229,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
   }
 
   const subtitleFiles = (
-    <Section title="Arquivo de legendas">
-      <p className="panel-hint">SRT e WebVTT, para subir junto com o vídeo. O arquivo já sai com os cortes e a velocidade.</p>
+    <Section title="Arquivo de legendas" help="SRT e WebVTT, já com os cortes e a velocidade, para subir junto com o vídeo.">
       <div className="check-row">
         <button className="panel-button" disabled={captions.cues.length === 0} onClick={() => void saveSubtitles('srt')}>
           <DownloadIcon /> Salvar SRT
@@ -339,8 +338,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
 
   if (captions.cues.length === 0) {
     return (
-      <Section title="Legendas automáticas">
-        <p className="panel-hint">Escreve o que foi dito. Tudo roda neste Mac.</p>
+      <Section title="Legendas automáticas" help="Transcreve o que foi dito. Tudo roda neste Mac.">
         {source}
         {activity ?? (
           <button className="panel-button panel-button-primary" onClick={() => void generate(false)}>
@@ -399,8 +397,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
         />
       </Section>
 
-      <Section title="Idioma da legenda">
-        <p className="panel-hint">Muda só a legenda. A voz fica na aba Dublagem.</p>
+      <Section title="Idioma da legenda" help="Muda só a legenda; a voz é na aba Dublagem. Só o texto vai à ferramenta de IA. Mudar o texto por legenda descarta as traduções.">
         <div className="languages" role="radiogroup" aria-label="Idioma da legenda">
           <button
             className="language"
@@ -458,9 +455,6 @@ export function CaptionsPanel({ session, store, player }: Props) {
                 <RefreshIcon /> Traduzir de novo
               </button>
             )}
-            <p className="panel-hint">
-              Só o texto é enviado ao {aiChoice.provider.label}. Mudar o “Texto por legenda” descarta as traduções.
-            </p>
           </>
         )}
         {captionNotice && <p className="panel-notice">{captionNotice}</p>}
@@ -594,11 +588,11 @@ export function CaptionsPanel({ session, store, player }: Props) {
           )}
         </div>
         {style.mode !== 'block' && captions.language !== null && (
-          <p className="panel-hint">Uma tradução não tem o tempo de cada palavra: nela, as legendas aparecem inteiras.</p>
+          <p className="panel-hint">Na tradução as legendas aparecem inteiras, sem palavra a palavra.</p>
         )}
       </Section>
 
-      <Section title="Posição">
+      <Section title="Posição" help="Ou arraste a legenda no vídeo. No vertical, Base fica acima da legenda do próprio app.">
         <Segmented
           label={placement ? 'No vídeo' : 'No vídeo · livre'}
           value={placement?.value ?? 'free'}
@@ -607,13 +601,9 @@ export function CaptionsPanel({ session, store, player }: Props) {
             value !== 'free' && store.setCaptionStyle({ position: { x: 0.5, y: captionPlacementY(value, state.background.aspect) } })
           }
         />
-        <p className="panel-hint">
-          Ou arraste no vídeo.{state.background.aspect === '9:16' && ' No vertical, "Base" fica acima da legenda do próprio app.'}
-        </p>
       </Section>
 
-      <Section title={`Texto (${captions.cues.length})`}>
-        <p className="panel-hint">Corrija o que foi entendido errado.</p>
+      <Section title={`Texto (${captions.cues.length})`} help="Clique numa legenda para corrigir o que foi entendido errado.">
         <ul className="cue-list">
           {captions.cues.map((cue) => (
             <li
@@ -660,8 +650,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
 
       {subtitleFiles}
 
-      <Section title="Refazer a transcrição">
-        <p className="panel-hint">Use só se o texto saiu errado. Escolha o idioma falado na gravação.</p>
+      <Section title="Refazer a transcrição" help="Se o texto saiu errado: escolha o idioma falado e transcreva de novo. Apaga as correções e as traduções.">
         {source}
         {activity ?? (
           <button className="panel-button" onClick={() => void generate(true)}>
@@ -671,7 +660,6 @@ export function CaptionsPanel({ session, store, player }: Props) {
         <button className="panel-button panel-button-danger" onClick={() => store.removeCaptions()}>
           <TrashIcon /> Remover legendas
         </button>
-        <p className="panel-hint">Transcrever de novo apaga as correções e as traduções.</p>
       </Section>
     </>
   )

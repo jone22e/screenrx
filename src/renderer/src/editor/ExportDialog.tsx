@@ -173,7 +173,7 @@ export function ExportDialog({ store, onClose }: Props) {
               <p className="panel-hint">
                 {platform
                   ? platform.hint
-                  : 'Escolha a plataforma para acertar resolução, codec, quadros por segundo e o formato de uma vez. Os ajustes abaixo continuam livres.'}
+                  : 'A plataforma acerta resolução, codec, fps e formato de uma vez.'}
               </p>
               {warnings.map((warning) => (
                 <p key={warning.kind} className="dialog-warning" role="alert">
@@ -197,10 +197,6 @@ export function ExportDialog({ store, onClose }: Props) {
                   </button>
                 ))}
               </div>
-              <p className="panel-hint">
-                Acelera ou desacelera o vídeo inteiro. A voz mantém o tom natural. É a mesma velocidade do
-                seletor ao lado do play, no editor, onde dá para assistir antes de exportar.
-              </p>
             </div>
 
             <div className="dialog-field">
@@ -293,10 +289,7 @@ export function ExportDialog({ store, onClose }: Props) {
                   </label>
                 ))}
               </div>
-              <p className="panel-hint">
-                Um arquivo a mais por plataforma, cada um no formato e nos ajustes dela, um depois do outro. O nome de
-                cada arquivo já vem com a plataforma; é só confirmar onde salvar.
-              </p>
+              <p className="panel-hint">Um arquivo a mais por plataforma, no formato dela.</p>
             </div>
 
             <div className="dialog-actions">

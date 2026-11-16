@@ -226,7 +226,7 @@ export function AutoEditPanel({ store }: Props) {
         <button className="panel-button panel-button-primary" onClick={() => setPhase({ kind: 'brief' })}>
           <SparklesIcon /> Editar com IA
         </button>
-        <p className="panel-hint">Um Diretor lê a gravação e uma equipe de agentes edita o vídeo inteiro, à vista, na linha do tempo.</p>
+        <p className="panel-hint">Um Diretor e uma equipe de agentes editam o vídeo inteiro, à vista.</p>
       </div>
     )
   }
@@ -269,14 +269,18 @@ export function AutoEditPanel({ store }: Props) {
           )}
           <AutoEditBriefForm brief={brief} onChange={setBrief} durationMs={session.durationMs} />
           <div className="cut-actions">
-            <button className="panel-button panel-button-primary" disabled={!current || brief.roles.length === 0} onClick={() => void run()}>
+            <button
+              className="panel-button panel-button-primary"
+              disabled={!current || brief.roles.length === 0}
+              title="Só texto sai do Mac. ⌘Z desfaz a equipe inteira."
+              onClick={() => void run()}
+            >
               <SparklesIcon /> Editar
             </button>
             <button className="panel-button" onClick={() => setPhase({ kind: 'idle' })}>
               Cancelar
             </button>
           </div>
-          <p className="panel-hint">Cada agente trabalha nas próprias pistas, à vista. Só texto sai do Mac. ⌘Z desfaz a equipe inteira; depois, cada agente pode ser desfeito sozinho.</p>
         </>
       )}
 

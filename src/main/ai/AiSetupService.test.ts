@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -84,37 +84,34 @@ describe('AiSetupService.providers', () => {
     expect(claude).toMatchObject({ installed: true, version: '2.1.288', loggedIn: true, account: 'ana@example.com · max' })
   })
 
-  it('offers the Claude models seen in its session logs, newest first, or the aliases without any', async () => {
+  it('offers the Claude models from the catalogue the tool keeps, newest file first, or the aliases without any', async () => {
     await install('claude', CLAUDE)
-    const [withoutSessions] = await createService().providers()
-    expect(withoutSessions?.models.map((model) => model.id)).toEqual(['sonnet', 'haiku', 'opus', 'fable'])
+    const [withoutCatalog] = await createService().providers()
+    expect(withoutCatalog?.models.map((model) => model.id)).toEqual(['sonnet', 'haiku', 'opus', 'fable'])
 
-    const project = path.join(home, '.claude', 'projects', '-Users-ana-app')
-    await mkdir(path.join(project, 'old', 'subagents'), { recursive: true })
-    const line = (model: string): string => `{"type":"assistant","message":{"model":"${model}"}}\n`
-    await writeFile(path.join(project, 'a.jsonl'), line('claude-opus-5') + line('claude-fable-5-1'))
-    await writeFile(path.join(project, 'old', 'subagents', 'b.jsonl'), line('claude-sonnet-5-5'))
-    const old = new Date(Date.now() - 100 * 24 * 60 * 60_000)
-    await utimes(path.join(project, 'old', 'subagents', 'b.jsonl'), old, old)
-    await writeFile(path.join(project, 'c.jsonl'), line('claude-haiku-4-5-20251001'))
-    const later = new Date(Date.now() + 60_000)
-    await utimes(path.join(project, 'c.jsonl'), later, later)
+    const directory = path.join(home, '.claude', 'cache', 'model-catalog')
+    await mkdir(directory, { recursive: true })
+    const catalog = (fetchedAt: number, models: Array<Record<string, unknown>>): string => JSON.stringify({ version: 2, fetchedAt, catalog: { config: { models } } })
+    await writeFile(path.join(directory, 'old.json'), catalog(1, [{ id: 'claude-opus-5', name: 'Opus 5', section: 'main' }]))
+    await writeFile(
+      path.join(directory, 'new.json'),
+      catalog(2, [
+        { id: 'claude-fable-5-1', name: 'Fable 5.1', section: 'overflow' },
+        { id: 'claude-opus-5-5', name: 'Opus 5.5', section: 'main', runtime: { effort_levels: ['low', 'medium'], default_effort: 'medium' } }
+      ])
+    )
+    await writeFile(path.join(directory, 'junk.json'), 'not json')
 
     const [claude] = await createService().providers()
     expect(claude?.models).toEqual([
-      { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 (20251001)' },
-      { id: 'claude-opus-5', label: 'Opus 5' },
+      { id: 'claude-opus-5-5', label: 'Opus 5.5', efforts: ['low', 'medium'], defaultEffort: 'medium' },
       { id: 'claude-fable-5-1', label: 'Fable 5.1' }
     ])
   })
 
-  it('reads Codex status from its exit code and its models from its own catalogue', async () => {
-    await install('codex', 'case "$1" in --version) echo "codex-cli 0.160.0";; login) echo "Logged in using ChatGPT";; esac')
-    await mkdir(path.join(home, '.codex'))
-    await writeFile(
-      path.join(home, '.codex', 'models_cache.json'),
-      JSON.stringify({ models: [{ slug: 'gpt-6-luna', display_name: 'GPT-6-Luna', priority: 1, supported_reasoning_levels: [{ effort: 'low' }] }] })
-    )
+  it('reads Codex status from its exit code and its models from `codex debug models`, or from the file it keeps', async () => {
+    const listing = JSON.stringify({ models: [{ slug: 'gpt-6-luna', display_name: 'GPT-6-Luna', priority: 1, supported_reasoning_levels: [{ effort: 'low' }] }] })
+    await install('codex', `case "$1" in --version) echo "codex-cli 0.160.0";; login) echo "Logged in using ChatGPT";; debug) echo '${listing}';; esac`)
     const codex = (await createService().providers())[1]
     expect(codex).toMatchObject({ installed: true, version: '0.160.0', loggedIn: true, account: 'Logged in using ChatGPT' })
     expect(codex?.models).toEqual([
@@ -122,8 +119,13 @@ describe('AiSetupService.providers', () => {
       { id: 'gpt-6-luna', label: 'GPT-6 Luna', efforts: ['low'] }
     ])
 
-    await install('codex', 'case "$1" in --version) echo "codex-cli 0.160.0";; login) echo "Not logged in"; exit 1;; esac')
-    expect((await createService().providers())[1]).toMatchObject({ installed: true, loggedIn: false, account: null })
+    // Without the command's answer, the catalogue file the tool keeps is read instead.
+    await install('codex', 'case "$1" in --version) echo "codex-cli 0.160.0";; login) echo "Not logged in"; exit 1;; debug) exit 2;; esac')
+    await mkdir(path.join(home, '.codex'))
+    await writeFile(path.join(home, '.codex', 'models_cache.json'), JSON.stringify({ models: [{ slug: 'gpt-6-sol', display_name: 'GPT-6-Sol', priority: 1 }] }))
+    const later = (await createService().providers())[1]
+    expect(later).toMatchObject({ installed: true, loggedIn: false, account: null })
+    expect(later?.models.map((model) => model.id)).toEqual(['', 'gpt-6-sol'])
   })
 
   it('reads Antigravity sign-in from what it stores, and its models from the tool', async () => {

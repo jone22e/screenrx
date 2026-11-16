@@ -11,7 +11,6 @@ import { applyAssistantActions } from './assistantActions'
 import { editStateOf } from './editState'
 import { AutoEditPanel } from './AutoEditPanel'
 import { AiChoicePicker } from './AiChoicePicker'
-import { AssistantSuggestions } from './AssistantSuggestions'
 import { CloseIcon, GearIcon, MicIcon, SparklesIcon } from './icons'
 
 interface Props {
@@ -31,6 +30,9 @@ interface ChatEntry extends AssistantMessage {
  * at once as one undo step. Only text leaves the machine: the transcript,
  * the state of the edit and the conversation.
  */
+/** Pedidos de exemplo, para começar com um clique. */
+const ASSISTANT_EXAMPLES = ['Corta a parte em que eu falo do frete', 'Zoom quando eu abro o pedido', 'Deixa em 1,5×', 'Legendas no estilo Reels']
+
 export function AssistantPanel({ store }: Props) {
   const ai = useSyncExternalStore(aiSettings.subscribe, aiSettings.getState)
   const current = currentAiChoice(ai)
@@ -112,7 +114,6 @@ export function AssistantPanel({ store }: Props) {
       {mode === 'simple' ? (
         <div className="assistant-messages">
           <AutoEditPanel store={store} />
-          <AssistantSuggestions store={store} />
         </div>
       ) : (
       <div className="assistant-messages" ref={listRef}>
@@ -125,11 +126,14 @@ export function AssistantPanel({ store }: Props) {
           </div>
         ) : entries.length === 0 && !asking ? (
           <div className="assistant-empty">
-            <p className="panel-hint">
-              Peça edições ou pergunte sobre a gravação. Por exemplo: “corta a parte em que eu falo do frete”,
-              “coloca zoom quando eu abro o pedido”, “deixa em 1,5×”.
-            </p>
-            <p className="panel-hint">A IA só conhece o que foi dito; ela não vê o vídeo. Tudo pode ser desfeito com ⌘Z.</p>
+            <p className="panel-hint">Peça uma edição ou pergunte sobre a gravação. A IA só conhece o que foi dito; ⌘Z desfaz.</p>
+            <div className="assistant-examples">
+              {ASSISTANT_EXAMPLES.map((example) => (
+                <button key={example} className="chip chip-small" title="Usar este pedido" onClick={() => setDraft(example)}>
+                  {example}
+                </button>
+              ))}
+            </div>
           </div>
         ) : null}
 

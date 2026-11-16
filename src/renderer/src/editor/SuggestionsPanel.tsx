@@ -59,7 +59,7 @@ export function SuggestionsPanel({ store, player }: Props) {
   ) : undefined
 
   return (
-    <Section title="Sugestões da IA" aside={aside}>
+    <Section title="Sugestões da IA" aside={aside} help="Repetições, vícios de fala e trechos fora do assunto, a partir da fala. Você decide um por um.">
       {!hasSpeech ? (
         <p className="panel-hint">Gere as legendas primeiro, na aba Legendas.</p>
       ) : ai.providers === null ? (
@@ -121,9 +121,6 @@ export function SuggestionsPanel({ store, player }: Props) {
             <button className="panel-button" onClick={ask}>
               <SparklesIcon /> {suggestions.length > 0 ? 'Analisar de novo' : 'Sugerir cortes'}
             </button>
-          )}
-          {suggestions.length === 0 && !suggesting && (
-            <p className="panel-hint">Repetições, vícios de fala e trechos fora do assunto, a partir da fala. Você decide um por um.</p>
           )}
           {suggestionNotice && <p className="panel-notice">{suggestionNotice}</p>}
         </>

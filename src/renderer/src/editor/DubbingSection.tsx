@@ -86,8 +86,8 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
     )
   }
 
-  const introText = 'O vídeo falado em outro idioma, com a sua própria voz.'
-  const intro = <p className="panel-hint">{introText}</p>
+  const introText = 'O vídeo falado em outro idioma, com a sua própria voz. A primeira dublagem descobre o idioma falado e transcreve nele; só os idiomas já baixados neste Mac são reconhecidos.'
+  const intro = <p className="panel-hint">O vídeo falado em outro idioma, com a sua própria voz.</p>
 
   const status = model.status
   if (status === null) {
@@ -128,10 +128,7 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
           </div>
         ) : (
           <>
-            <p className="panel-hint">
-              Para clonar a sua voz, baixe o modelo de voz uma única vez ({formatBytes(status.modelDownloadBytes)}).
-              Tudo roda neste Mac.
-            </p>
+            <p className="panel-hint">Baixe o modelo de voz uma vez; tudo roda neste Mac.</p>
             <button className="panel-button panel-button-primary" onClick={() => void voiceModel.download()}>
               Baixar modelo de voz · {formatBytes(status.modelDownloadBytes)}
             </button>
@@ -177,8 +174,7 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
 
   return (
     <>
-      <Section title="Dublagem" aside={`Em uso: ${inUse ? CAPTION_LANGUAGE_NAMES[inUse].label : 'Original'}`}>
-        <p className="panel-hint">{introText}</p>
+      <Section title="Dublagem" aside={`Em uso: ${inUse ? CAPTION_LANGUAGE_NAMES[inUse].label : 'Original'}`} help={introText}>
 
         <div className="dub-spoken-row">
           <VoiceIcon />
@@ -189,12 +185,6 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
             Alterar
           </button>
         </div>
-        {!hasCaptions && !transcription && !detecting && (
-          <p className="panel-hint">
-            A primeira dublagem descobre o idioma falado e transcreve nele. Só os idiomas já baixados no Mac são
-            reconhecidos; os outros, pela aba Legendas.
-          </p>
-        )}
         {captionNotice && !transcription && <p className="panel-notice">{captionNotice}</p>}
 
         <ul className="dub-cards" role="radiogroup" aria-label="Voz do vídeo">
@@ -310,8 +300,7 @@ export function DubbingPanel({ store, onOpenCaptions }: Props) {
         )}
       </Section>
 
-      <Section title="Tradução">
-        <p className="panel-hint">A ferramenta de IA que traduz o texto antes de gerar a voz.</p>
+      <Section title="Tradução" help="A ferramenta de IA que traduz o texto antes de gerar a voz.">
         <AiChoicePicker disabled={busy} placement="below" />
       </Section>
     </>

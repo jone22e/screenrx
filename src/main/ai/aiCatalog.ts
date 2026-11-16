@@ -48,8 +48,9 @@ export const AI_PROVIDER_SPECS: Record<AiProviderId, AiProviderSpec> = {
 export const ACCOUNT_DEFAULT_MODEL: AiModel = { id: '', label: 'Padrão da conta' }
 
 /**
- * Claude Code's aliases, each pointing at the newest model of its family:
- * what is offered when no session of the tool has been seen on this machine.
+ * Claude Code's aliases, each pointing at the newest model of its family, as
+ * its own `--help` documents them: what is offered while the tool has not
+ * fetched its catalogue on this machine yet.
  */
 export const CLAUDE_MODELS: AiModel[] = [
   { id: 'sonnet', label: 'Sonnet', description: 'Equilíbrio entre rapidez e qualidade (recomendado).' },
@@ -122,30 +123,30 @@ export function toolEffort(provider: AiProviderId, effort: AiEffort): string {
   return effort
 }
 
-/** Claude Code lists no models; the ones the user has run show up in its session logs, as full ids. */
-const CLAUDE_SESSION_MODEL = /"model":"(claude-[a-z0-9.-]{2,60})"/g
-
-/** The model ids in a stretch of a Claude Code session log, in order of first appearance. */
-export function parseClaudeSessionModels(text: string): string[] {
-  const ids = new Set<string>()
-  for (const match of text.matchAll(CLAUDE_SESSION_MODEL)) ids.add(match[1] as string)
-  return [...ids]
-}
-
-const CLAUDE_FAMILIES: Record<string, string> = { fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' }
-
-/** "claude-fable-5-1" → "Fable 5.1"; "claude-haiku-4-5-20251001" → "Haiku 4.5 (20251001)"; otherwise the id itself. */
-export function claudeModelLabel(id: string): string {
-  const match = /^claude-([a-z]+)-(\d+)(?:-(\d+))?(?:-(\d{8}))?$/.exec(id)
-  if (!match) return id
-  const [, family = '', major = '', minor, date] = match
-  const name = CLAUDE_FAMILIES[family] ?? family.charAt(0).toUpperCase() + family.slice(1)
-  return `${name} ${major}${minor ? `.${minor}` : ''}${date ? ` (${date})` : ''}`
-}
-
-/** Models seen in Claude Code's sessions, most recently used first, as the app offers them. */
-export function claudeModelsSeen(seen: ReadonlyMap<string, number>): AiModel[] {
-  return [...seen.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([id]) => ({ id, label: claudeModelLabel(id) }))
+/**
+ * The models Claude Code offers this account, from the catalogue the tool
+ * itself fetches and keeps in `~/.claude/cache/model-catalog/<key>.json`:
+ * the main ones first, then the rest, each with the effort levels it takes.
+ * The file's `fetchedAt` says which of several is the newest.
+ */
+export function parseClaudeCatalog(raw: unknown): { fetchedAt: number; models: AiModel[] } | null {
+  if (!isRecord(raw) || !isRecord(raw.catalog) || !isRecord(raw.catalog.config) || !Array.isArray(raw.catalog.config.models)) return null
+  const entries = raw.catalog.config.models.filter(isRecord)
+  const parse = (entry: Record<string, unknown>): AiModel | null => {
+    if (!isAiModelId(entry.id) || entry.id === '') return null
+    const runtime = isRecord(entry.runtime) ? entry.runtime : {}
+    const options = isRecord(entry.thinking) && Array.isArray(entry.thinking.effort_options) ? entry.thinking.effort_options : []
+    const fromOptions = options.map((option) => (isRecord(option) ? option.id : null)).filter(isAiEffort)
+    const fromRuntime = Array.isArray(runtime.effort_levels) ? runtime.effort_levels.filter(isAiEffort) : []
+    const efforts = fromOptions.length > 0 ? fromOptions : fromRuntime
+    const model: AiModel = { id: entry.id, label: (typeof entry.name === 'string' && entry.name.trim() ? entry.name.trim() : entry.id).slice(0, 60) }
+    if (typeof entry.description === 'string' && entry.description.trim()) model.description = entry.description.trim().slice(0, 200)
+    if (efforts.length > 0) model.efforts = efforts
+    if (isAiEffort(runtime.default_effort) && efforts.includes(runtime.default_effort)) model.defaultEffort = runtime.default_effort
+    return model
+  }
+  const main = entries.filter((entry) => entry.section === 'main').map(parse)
+  const rest = entries.filter((entry) => entry.section !== 'main').map(parse)
+  const models = [...main, ...rest].filter((model): model is AiModel => model !== null)
+  return { fetchedAt: typeof raw.fetchedAt === 'number' ? raw.fetchedAt : 0, models }
 }

@@ -1,4 +1,4 @@
-import { open, readFile, readdir, stat } from 'node:fs/promises'
+import { readFile, readdir } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import type { AiModel, AiProvider, AiProviderId } from '@shared/models/ai'
@@ -6,15 +6,7 @@ import { AI_PROVIDER_IDS } from '@shared/models/ai'
 import { appError } from '@shared/models/errors'
 import type { Logger } from '../logging/logger'
 import { AiError } from './AiCliService'
-import {
-  ACCOUNT_DEFAULT_MODEL,
-  AI_PROVIDER_SPECS,
-  CLAUDE_MODELS,
-  claudeModelsSeen,
-  parseAgyModels,
-  parseClaudeSessionModels,
-  parseCodexCatalog
-} from './aiCatalog'
+import { ACCOUNT_DEFAULT_MODEL, AI_PROVIDER_SPECS, CLAUDE_MODELS, parseAgyModels, parseClaudeCatalog, parseCodexCatalog } from './aiCatalog'
 import { lastLine, locateBinary, runTool, toolEnv } from './cliProcess'
 
 export interface AiSetupOptions {
@@ -37,14 +29,8 @@ const DEFAULT_LOGIN_POLL_MS = 3000
 const STATUS_TTL_MS = 60_000
 /** Antigravity's models are asked from its service, so they are kept for longer. */
 const AGY_MODELS_TTL_MS = 60 * 60_000
-/** Claude's models come from reading its session logs, which is a bit of disk work. */
+/** Claude's catalogue is a file the tool keeps; it is re-read now and then. */
 const CLAUDE_MODELS_TTL_MS = 10 * 60_000
-/** How many of the most recent session logs are read, and how much of the end of each. */
-const CLAUDE_SESSIONS_READ = 40
-const CLAUDE_SESSION_TAIL_BYTES = 512 * 1024
-/** Models used longer ago than this are not offered. */
-const CLAUDE_MODEL_MAX_AGE_MS = 90 * 24 * 60 * 60_000
-const CLAUDE_MODELS_OFFERED = 12
 
 /** The vendor's installer, exactly as its site says to run it: no questions asked, into `~/.local/bin`. */
 const runInstaller = (installerUrl: string): { command: string; args: string[] } => ({
@@ -216,17 +202,20 @@ export class AiSetupService {
     }
   }
 
+  /** The models each tool offers, asked from the tool itself: its listing command, or the catalogue it keeps. */
   private async models(id: AiProviderId, binary: string): Promise<AiModel[]> {
     if (id === 'claude') {
       if (!this.claudeModels || Date.now() - this.claudeModels.at > CLAUDE_MODELS_TTL_MS) {
-        this.claudeModels = { at: Date.now(), models: await this.claudeModelsFromSessions() }
+        this.claudeModels = { at: Date.now(), models: await this.claudeModelsFromCatalog() }
       }
       return this.claudeModels.models.length > 0 ? this.claudeModels.models : CLAUDE_MODELS
     }
     try {
       if (id === 'codex') {
-        const catalog = await readFile(path.join(this.options.home, '.codex', 'models_cache.json'), 'utf8')
-        return [ACCOUNT_DEFAULT_MODEL, ...parseCodexCatalog(JSON.parse(catalog))]
+        // `codex debug models` prints the tool's own catalogue; the file it keeps is the same, when the command fails.
+        const listed = await this.exec(binary, ['debug', 'models'])
+        const raw = listed.code === 0 && listed.stdout.trim() ? listed.stdout : await readFile(path.join(this.options.home, '.codex', 'models_cache.json'), 'utf8')
+        return [ACCOUNT_DEFAULT_MODEL, ...parseCodexCatalog(JSON.parse(raw))]
       }
       if (!this.agyModels || Date.now() - this.agyModels.at > AGY_MODELS_TTL_MS) {
         const listed = parseAgyModels((await this.exec(binary, ['models'])).stdout)
@@ -240,55 +229,23 @@ export class AiSetupService {
   }
 
   /**
-   * The models Claude Code has run on this machine, from its session logs
-   * (`~/.claude/projects/<project>/<session>.jsonl`), most recent first. Only
-   * the newest logs are read, and only their ends: every answer names its model.
+   * The models Claude Code offers this account: the tool has no listing
+   * command, but keeps the catalogue it fetches in
+   * `~/.claude/cache/model-catalog/`, one file per key; the newest wins.
    */
-  private async claudeModelsFromSessions(): Promise<AiModel[]> {
-    const root = path.join(this.options.home, '.claude', 'projects')
-    const logs: Array<{ file: string; mtimeMs: number }> = []
-    const collect = async (directory: string, depth: number): Promise<void> => {
-      const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
-      for (const entry of entries) {
-        const file = path.join(directory, entry.name)
-        if (entry.isDirectory()) {
-          if (depth < 3) await collect(file, depth + 1)
-        } else if (entry.name.endsWith('.jsonl')) {
-          const info = await stat(file).catch(() => null)
-          if (info) logs.push({ file, mtimeMs: info.mtimeMs })
-        }
+  private async claudeModelsFromCatalog(): Promise<AiModel[]> {
+    const directory = path.join(this.options.home, '.claude', 'cache', 'model-catalog')
+    const files = (await readdir(directory).catch(() => [])).filter((name) => name.endsWith('.json'))
+    let newest: { fetchedAt: number; models: AiModel[] } | null = null
+    for (const name of files) {
+      try {
+        const parsed = parseClaudeCatalog(JSON.parse(await readFile(path.join(directory, name), 'utf8')))
+        if (parsed && parsed.models.length > 0 && (!newest || parsed.fetchedAt > newest.fetchedAt)) newest = parsed
+      } catch {
+        // A file that is not a catalogue is skipped.
       }
     }
-    await collect(root, 0)
-    const since = Date.now() - CLAUDE_MODEL_MAX_AGE_MS
-    const recent = logs
-      .filter((log) => log.mtimeMs >= since)
-      .sort((a, b) => b.mtimeMs - a.mtimeMs)
-      .slice(0, CLAUDE_SESSIONS_READ)
-
-    const seen = new Map<string, number>()
-    for (const log of recent) {
-      for (const id of parseClaudeSessionModels(await this.readTail(log.file))) {
-        if ((seen.get(id) ?? 0) < log.mtimeMs) seen.set(id, log.mtimeMs)
-      }
-    }
-    return claudeModelsSeen(seen).slice(0, CLAUDE_MODELS_OFFERED)
-  }
-
-  private async readTail(file: string): Promise<string> {
-    const handle = await open(file, 'r').catch(() => null)
-    if (!handle) return ''
-    try {
-      const { size } = await handle.stat()
-      const length = Math.min(size, CLAUDE_SESSION_TAIL_BYTES)
-      const buffer = Buffer.alloc(length)
-      await handle.read(buffer, 0, length, size - length)
-      return buffer.toString('utf8')
-    } catch {
-      return ''
-    } finally {
-      await handle.close()
-    }
+    return newest?.models ?? []
   }
 
   private exec(binary: string, args: string[]) {

@@ -501,6 +501,51 @@ kbd {
   color: var(--text-muted);
 }
 
+.panel-title-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* The ⓘ: a small circle whose tooltip explains the section. */
+.panel-help {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  text-transform: none;
+  cursor: help;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 50%;
+  opacity: 0.7;
+}
+
+.panel-help:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.5);
+  opacity: 1;
+}
+
+.brief-more {
+  align-self: flex-start;
+  padding: 0;
+  font-size: 12px;
+}
+
+.assistant-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
 .panel-title-aside {
   flex: none;
   font-size: 11.5px;
@@ -2454,78 +2499,6 @@ kbd {
 }
 
 /* --- assistant: what it sees to do ---------------------------------------- */
-
-.assistant-suggestions {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.assistant-subtitle {
-  margin: 0 0 2px;
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.suggestion-card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
-  background: var(--panel-raised);
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
-}
-
-.suggestion-card h3 {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.suggestion-card p {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text-muted);
-}
-
-.suggestion-card footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 4px;
-}
-
-.suggestion-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 2px;
-}
-
-.suggestion-card[data-tone='cut'] .suggestion-dot {
-  background: var(--record);
-}
-
-.suggestion-card[data-tone='zoom'] .suggestion-dot {
-  background: var(--zoom-auto);
-}
-
-.suggestion-card[data-tone='captions'] .suggestion-dot {
-  background: #ffc44d;
-}
-
-.suggestion-card[data-tone='ai'] .suggestion-dot {
-  background: var(--suggestion);
-}
-
-.suggestion-card[data-state='done'] {
-  opacity: 0.75;
-}
 
 .suggestion-metric {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;

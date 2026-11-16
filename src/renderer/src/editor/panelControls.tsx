@@ -2,11 +2,19 @@ import type { ReactNode } from 'react'
 
 /** Building blocks shared by the inspector's panels. */
 
-export function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
+/** A panel section: the title, an optional ⓘ whose tooltip explains the section (`help`), and an aside at the right. */
+export function Section({ title, aside, help, children }: { title: string; aside?: ReactNode; help?: string; children: ReactNode }) {
   return (
     <section className="panel">
       <h2 className="panel-title">
-        {title}
+        <span className="panel-title-text">
+          {title}
+          {help && (
+            <span className="panel-help" role="img" aria-label={help} title={help}>
+              ?
+            </span>
+          )}
+        </span>
         {aside && <span className="panel-title-aside">{aside}</span>}
       </h2>
       {children}

@@ -39,7 +39,10 @@ export function TemplatesSection({ store }: { store: EditorStore }) {
   }
 
   return (
-    <Section title={`Modelos${templates && templates.length > 0 ? ` (${templates.length})` : ''}`}>
+    <Section
+      title={`Modelos${templates && templates.length > 0 ? ` (${templates.length})` : ''}`}
+      help="Guarda fundo e formato, estilo das legendas, cursor, câmera, música e exportação. Cortes, legendas e imagens ficam de fora. Aplicar é um passo de desfazer."
+    >
       {templates && templates.length > 0 && (
         <ul className="region-list">
           {templates.map((template) => (
@@ -87,10 +90,6 @@ export function TemplatesSection({ store }: { store: EditorStore }) {
           </button>
         </div>
       )}
-      <p className="panel-hint">
-        Fundo e formato, estilo das legendas, cursor, câmera, ajustes da música e da exportação. Cortes, legendas e
-        imagens ficam de fora. Aplicar um modelo é um passo de desfazer.
-      </p>
       {notice && <p className="panel-hint">{notice}</p>}
     </Section>
   )

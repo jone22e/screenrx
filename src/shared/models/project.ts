@@ -513,7 +513,7 @@ export function createCaptionSettings(): CaptionSettings {
 }
 
 export const DEFAULT_BACKGROUND: BackgroundSettings = {
-  presetId: 'aurora',
+  presetId: null,
   aspect: 'native',
   fit: 'fit',
   crop: { x: 0.5, y: 0.5 },

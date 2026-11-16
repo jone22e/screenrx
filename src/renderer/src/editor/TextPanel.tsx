@@ -45,7 +45,7 @@ export function TextPanel({ store, player }: Props) {
 
   return (
     <>
-      <Section title={`Texto${texts.length > 0 ? ` (${texts.length})` : ''}`}>
+      <Section title={`Texto${texts.length > 0 ? ` (${texts.length})` : ''}`} help="Um título ou um aviso sobre o vídeo, no instante que você quiser. Escolha um estilo para adicionar.">
         <button className="panel-button panel-button-primary" disabled={!player} onClick={add}>
           <PlusIcon /> Adicionar texto
         </button>
@@ -75,9 +75,7 @@ export function TextPanel({ store, player }: Props) {
             </button>
           ))}
         </div>
-        {texts.length === 0 ? (
-          <p className="panel-hint">Um título ou um aviso sobre o vídeo, no instante que você quiser.</p>
-        ) : (
+        {texts.length > 0 && (
           <ul className="region-list">
             {texts.map((text) => (
               <li key={text.id} className="region-row" data-selected={text.id === selectedTextId}>
@@ -107,7 +105,7 @@ export function TextPanel({ store, player }: Props) {
 
       {selected && (
         <>
-          <Section title="Texto selecionado">
+          <Section title="Texto selecionado" help="Arraste no vídeo para posicionar; na linha do tempo, para mudar quando aparece.">
             <p className="panel-meta">
               {formatTimecode(selected.startMs)} – {formatTimecode(selected.endMs)}
             </p>
@@ -120,7 +118,6 @@ export function TextPanel({ store, player }: Props) {
               onChange={(event) => store.setTextContent(selected.id, event.target.value)}
               onBlur={() => store.endGesture()}
             />
-            <p className="panel-hint">Arraste no vídeo para posicionar; na linha do tempo, para mudar quando aparece.</p>
           </Section>
 
           <Section title="Animação">

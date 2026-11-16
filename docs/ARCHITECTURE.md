@@ -715,14 +715,12 @@ microfone + transcrição → pickVoiceReference ─┤
 
 ### Assistente de edição (chat)
 
-O painel abre no modo **Simples**: cartões com o que o assistente vê para fazer
-nesta gravação, calculados dela mesma, sem chamar IA (`AssistantSuggestions`,
-`engine/assistant/quickFixes.ts`): remover pausas longas (silêncios de mais de
-1,5 s entre palavras da transcrição, cortados com 200 ms de margem, num passo só
-de desfazer), zoom automático nos cliques (`regenerateAutoZooms`), gerar legendas
-(pt-BR, trilha do microfone) e limpar a fala com IA (as sugestões de corte). Cada
-cartão tem **Aplicar** e passa a "Aplicado ✓" quando a condição já está atendida.
-O modo **Avançado** é a conversa; enviar uma mensagem muda para ele.
+O painel abre no modo **Simples**: só a equipe de edição por IA
+(`AutoEditPanel`), com rede e duração à vista e tom e agentes atrás de "Mais
+opções". Os cartões de sugestões rápidas (remover pausas, zoom nos cliques,
+gerar legendas, limpar a fala) foram tirados a pedido de Jone, que achou o
+painel complexo demais; `engine/assistant/quickFixes.ts` continua, usado pelo
+chat. O modo **Avançado** é a conversa; enviar uma mensagem muda para ele.
 
 
 ```
@@ -865,13 +863,15 @@ corte comum (TrimEffect) no project.json, com desfazer
   são aceitos (`isAiModelId`); o esforço é mapeado para o nível mais próximo que
   cada ferramenta aceita (`toolEffort`).
 - **`AiSetupService`** diz como cada ferramenta está neste Mac: instalada,
-  versão, com login (e em qual conta), modelos e níveis de esforço. O Claude Code
-  não lista modelos: os oferecidos são os ids reais que apareceram nos registros de
-  sessão dele (`~/.claude/projects/**/*.jsonl`, campo `model` de cada resposta;
-  lidos só os 40 registros mais recentes dos últimos 90 dias, e só o fim de cada
-  um), do mais recente para o mais antigo, com rótulo derivado do id ("Fable 5.1");
-  sem nenhuma sessão, ficam os apelidos do CLI (`sonnet`, `opus`…). Os do
-  Codex vêm do catálogo que ele guarda em `~/.codex/models_cache.json`; os do
+  versão, com login (e em qual conta), modelos e níveis de esforço. Os modelos
+  vêm de cada ferramenta, nunca de uma lista do app: os do Claude Code, do
+  catálogo que ele mesmo baixa para a conta e guarda em
+  `~/.claude/cache/model-catalog/*.json` (o arquivo de `fetchedAt` mais recente;
+  os da seção `main` primeiro, cada um com seus níveis de esforço e rótulo
+  próprio, "Fable 5.1"); sem catálogo ainda, os apelidos que o `--help` do CLI
+  documenta (`sonnet`, `opus`…). Os do Codex, de `codex debug models` (o
+  catálogo em JSON pela própria CLI; `~/.codex/models_cache.json` quando o
+  comando falha); os do
   Antigravity, de `agy models`. Também instala (o instalador oficial de cada
   fornecedor, só depois de uma confirmação nativa) e inicia o login do Claude e
   do Codex (o próprio CLI abre o navegador; o fim é percebido consultando o
@@ -947,6 +947,15 @@ ficam cada um numa linha sob a capa. Rodapé: total de gravações e
 tempo, e espaço usado. As reuniões ao vivo do Screen Live viram um banner cada
 ("está ao vivo · começou há N min · N participantes") com Ignorar e Gravar reunião;
 sem reunião, nada aparece.
+
+### Painéis do editor: pouco texto, ajuda no ⓘ
+
+Cada seção da barra lateral (`Section` em `panelControls.tsx`) tem o título, um
+**ⓘ** opcional (`help`) cujo tooltip explica a seção, e um aside à direita
+(contagem, intervalo). As explicações que antes eram parágrafos sob os
+controles vivem nesse tooltip ou no `title` do próprio botão; o que fica
+visível são só estados (vazio, progresso, avisos) e o essencial. No
+Assistente, os pedidos de exemplo são chips que preenchem a caixa.
 
 ### Editar todos com IA (uma série inteira)
 

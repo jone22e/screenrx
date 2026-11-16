@@ -83,7 +83,10 @@ export function LayersPanel({ session, store, player }: Props) {
 
   return (
     <>
-      <Section title={`Camadas${layers.length > 0 ? ` (${layers.length})` : ''}`}>
+      <Section
+        title={`Camadas${layers.length > 0 ? ` (${layers.length})` : ''}`}
+        help="Um logo, um sticker, uma captura ou um trecho de outro vídeo por cima da gravação. A imagem entra o vídeo inteiro; o vídeo, a partir do play. A primeira da lista fica por cima."
+      >
         <div className="cut-actions">
           <button className="panel-button panel-button-primary" disabled={busy} onClick={() => void addImages()}>
             <PlusIcon /> {busy ? 'Trazendo…' : 'Imagem…'}
@@ -93,13 +96,7 @@ export function LayersPanel({ session, store, player }: Props) {
           </button>
         </div>
         {notice && <p className="panel-notice">{notice}</p>}
-        {layers.length === 0 ? (
-          <p className="panel-hint">
-            Um logo no canto, um sticker, uma captura de tela, ou um trecho de outro vídeo (b-roll) por cima da
-            gravação. A imagem entra durante o vídeo inteiro; o vídeo, a partir do play, pelo tempo dele. Encurte na
-            linha do tempo.
-          </p>
-        ) : (
+        {layers.length > 0 && (
           <ul className="region-list">
             {[...layers].reverse().map((layer, position) => (
               <li key={layer.id} className="region-row" data-selected={layer.id === selectedLayerId}>
@@ -148,11 +145,14 @@ export function LayersPanel({ session, store, player }: Props) {
             ))}
           </ul>
         )}
-        {layers.length > 1 && <p className="panel-hint">A primeira da lista fica por cima das outras.</p>}
       </Section>
 
       {selected && (
-        <Section title={selected.kind === 'video' ? 'Vídeo selecionado' : 'Imagem selecionada'} aside={nameOf(selected.file)}>
+        <Section
+          title={selected.kind === 'video' ? 'Vídeo selecionado' : 'Imagem selecionada'}
+          aside={nameOf(selected.file)}
+          help="Arraste no vídeo para posicionar e puxe um canto para redimensionar. Na linha do tempo, mude quando aparece."
+        >
           <p className="panel-meta">
             {formatTimecode(selected.startMs)} – {formatTimecode(selected.endMs)}
             {!(selected.startMs === 0 && selected.endMs >= session.durationMs) && (
@@ -213,7 +213,6 @@ export function LayersPanel({ session, store, player }: Props) {
             onChange={(cornerRadiusRatio) => store.setLayer(selected.id, { cornerRadiusRatio }, 'layer-corners')}
             onCommit={() => store.endGesture()}
           />
-          <p className="panel-hint">Arraste no vídeo para posicionar; puxe um canto para redimensionar. Na linha do tempo, mude quando aparece.</p>
           <button className="panel-button panel-button-danger" onClick={() => void remove(selected.id, selected.file)}>
             <TrashIcon /> Remover {selected.kind === 'video' ? 'vídeo' : 'imagem'}
           </button>

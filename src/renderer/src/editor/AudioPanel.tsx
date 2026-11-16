@@ -64,7 +64,7 @@ export function AudioPanel({ session, store }: Props) {
     <>
       {session.audio.length === 0 ? (
         <Section title="Gravação">
-          <p className="panel-hint">Esta gravação não tem áudio. A música, abaixo, pode ser o som do vídeo.</p>
+          <p className="panel-hint">Sem áudio. A música abaixo pode ser o som do vídeo.</p>
         </Section>
       ) : (
         session.audio.map((track) => {
@@ -97,7 +97,7 @@ export function AudioPanel({ session, store }: Props) {
         })
       )}
 
-      <Section title="Música de fundo">
+      <Section title="Música de fundo" help="Uma trilha por baixo da gravação, do começo ao fim do vídeo pronto; o arquivo original não muda. Na exportação a música desce quando alguém fala (no preview, só depois das legendas).">
         {musicTrack ? (
           <>
             <div className="music-file">
@@ -122,7 +122,6 @@ export function AudioPanel({ session, store }: Props) {
           </>
         ) : (
           <>
-            <p className="panel-hint">Uma trilha por baixo da gravação, do começo ao fim do vídeo pronto. O arquivo original não é alterado.</p>
             <button className="panel-button panel-button-primary" disabled={busy} onClick={() => void chooseMusic()}>
               <MusicIcon /> {busy ? 'Trazendo…' : 'Escolher música…'}
             </button>
@@ -148,9 +147,6 @@ export function AudioPanel({ session, store }: Props) {
               options={DUCKINGS}
               onChange={(ducking) => store.setMusic({ ducking })}
             />
-            <p className="panel-hint">
-              No vídeo exportado a música desce ao ouvir a voz. {state.speech.length === 0 && 'No preview, isso só aparece depois de gerar as legendas.'}
-            </p>
             <label className="check">
               <input type="checkbox" checked={music.loop} onChange={(event) => store.setMusic({ loop: event.target.checked })} />
               <span>Repetir até o fim do vídeo</span>
@@ -179,7 +175,7 @@ export function AudioPanel({ session, store }: Props) {
         )}
       </Section>
 
-      <Section title="Volume final">
+      <Section title="Volume final" help="Deixa a exportação no volume que Instagram, TikTok e YouTube esperam: nem baixo ao lado de outros posts, nem alto a ponto de ser abaixado. O preview não muda.">
         <label className="check">
           <input
             type="checkbox"
@@ -188,9 +184,6 @@ export function AudioPanel({ session, store }: Props) {
           />
           <span>Ajustar para redes sociais (−14 LUFS)</span>
         </label>
-        <p className="panel-hint">
-          Deixa o vídeo exportado no volume que Instagram, TikTok e YouTube esperam: nem baixo demais ao lado de outros posts, nem alto a ponto de ser abaixado por eles. Só na exportação; o preview não muda.
-        </p>
       </Section>
     </>
   )
