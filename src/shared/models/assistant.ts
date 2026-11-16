@@ -1,5 +1,13 @@
-import type { AudioTrackKind, CaptionLanguage, CaptionLength, FrameAspect, FrameFit } from './project'
-import { AUDIO_TRACK_KINDS, CAPTION_LANGUAGES } from './project'
+import type {
+  AudioTrackKind,
+  CaptionAnimation,
+  CaptionLanguage,
+  CaptionLength,
+  CaptionMode,
+  FrameAspect,
+  FrameFit
+} from './project'
+import { AUDIO_TRACK_KINDS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES } from './project'
 
 /**
  * The editing assistant: a conversation with the AI tool in use, which answers
@@ -28,6 +36,7 @@ export interface AssistantEditState {
   captionsVisible: boolean
   captionLanguage: CaptionLanguage | null
   captionLength: CaptionLength
+  captionMode: CaptionMode
   backgroundId: string | null
   hasWebcam: boolean
   webcamVisible: boolean
@@ -53,6 +62,8 @@ export type AssistantAction =
   | { type: 'captions'; visible: boolean }
   | { type: 'caption-language'; language: CaptionLanguage | null }
   | { type: 'caption-length'; length: CaptionLength }
+  | { type: 'caption-mode'; mode: CaptionMode }
+  | { type: 'caption-animation'; animation: CaptionAnimation }
   | { type: 'background'; presetId: string | null }
   | { type: 'format'; aspect: FrameAspect }
   | { type: 'framing'; fit: FrameFit }
@@ -102,7 +113,10 @@ export function parseAssistantRequest(value: unknown): AssistantRequest | null {
   const language = (CAPTION_LANGUAGES as readonly unknown[]).includes(edit.captionLanguage)
     ? (edit.captionLanguage as CaptionLanguage)
     : null
-  const length = edit.captionLength === 'short' || edit.captionLength === 'long' ? edit.captionLength : 'medium'
+  const length = (CAPTION_LENGTHS as readonly unknown[]).includes(edit.captionLength)
+    ? (edit.captionLength as CaptionLength)
+    : 'medium'
+  const mode = (CAPTION_MODES as readonly unknown[]).includes(edit.captionMode) ? (edit.captionMode as CaptionMode) : 'block'
   return {
     message,
     history: history.slice(-ASSISTANT_LIMITS.historyMessages),
@@ -115,6 +129,7 @@ export function parseAssistantRequest(value: unknown): AssistantRequest | null {
       captionsVisible: edit.captionsVisible === true,
       captionLanguage: language,
       captionLength: length,
+      captionMode: mode,
       backgroundId: typeof edit.backgroundId === 'string' ? edit.backgroundId : null,
       hasWebcam: edit.hasWebcam === true,
       webcamVisible: edit.webcamVisible === true,

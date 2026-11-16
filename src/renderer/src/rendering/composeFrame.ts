@@ -1,4 +1,7 @@
+import { activeWordScale, captionEntrance } from '@engine/captions/captionAnimation'
 import { CAPTION_LAYOUT } from '@engine/captions/captionConfig'
+import type { CaptionTiming } from '@engine/captions/captionCues'
+import type { CaptionLayout } from '@engine/captions/captionLayout'
 import { captionFontCss, captionFontPx, layoutCaption } from '@engine/captions/captionLayout'
 import { canvasColorFilter } from '@engine/filters/filterChain'
 import { findBackgroundPreset } from '@engine/rendering/backgrounds'
@@ -23,8 +26,8 @@ export interface FrameInput {
   background: BackgroundSettings
   /** Colour applied to the recording's picture (not to the backdrop, webcam or texts); `null` for as recorded. */
   color: ColorSettings | null
-  /** The caption on screen at this instant, when there is one and captions are shown. */
-  caption: { text: string; style: CaptionStyle } | null
+  /** The caption on screen at this instant, when there is one and captions are shown, and where in it the instant falls. */
+  caption: { text: string; style: CaptionStyle; timing: CaptionTiming } | null
   /** The user's texts on screen at this instant, drawn over the caption in this order. */
   texts: ReadonlyArray<{ id: string; text: string; style: CaptionStyle }>
 }
@@ -45,8 +48,19 @@ function withAlpha(hex: string, alpha: number): string {
   return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`
 }
 
-/** Draws a caption over the finished frame and returns the block it occupies. */
-export function drawCaption(context: Context, output: Size, text: string, style: CaptionStyle): Rect | null {
+/**
+ * Draws a caption over the finished frame and returns the block it occupies.
+ * With `timing`, the caption comes on with its animation and, in the
+ * word-by-word modes, the spoken word is told apart; a text has no timing
+ * and is drawn still.
+ */
+export function drawCaption(
+  context: Context,
+  output: Size,
+  text: string,
+  style: CaptionStyle,
+  timing: CaptionTiming | null = null
+): Rect | null {
   context.save()
   context.font = captionFontCss(style, captionFontPx(style, output))
   context.textAlign = 'center'
@@ -58,6 +72,17 @@ export function drawCaption(context: Context, output: Size, text: string, style:
   }
   const { box, fontPx } = layout
 
+  // The entrance: the whole caption swells or fades in around its centre.
+  const entrance = timing ? captionEntrance(style.animation, timing.sinceStartMs) : null
+  if (entrance && (entrance.scale !== 1 || entrance.alpha !== 1)) {
+    const centerX = box.x + box.width / 2
+    const centerY = box.y + box.height / 2
+    context.translate(centerX, centerY)
+    context.scale(entrance.scale, entrance.scale)
+    context.translate(-centerX, -centerY)
+    context.globalAlpha = entrance.alpha
+  }
+
   if (style.backdrop === 'box') {
     context.fillStyle = withAlpha(style.backdropColor, CAPTION_LAYOUT.boxOpacity)
     context.beginPath()
@@ -68,17 +93,54 @@ export function drawCaption(context: Context, output: Size, text: string, style:
     context.lineJoin = 'round'
     context.lineWidth = fontPx * CAPTION_LAYOUT.outlineWidth
     context.strokeStyle = style.backdropColor
-    for (const line of layout.lines) context.strokeText(line.text, line.centerX, line.centerY)
   }
   if (style.backdrop === 'shadow') {
     context.shadowColor = 'rgba(0, 0, 0, 0.8)'
     context.shadowBlur = fontPx * CAPTION_LAYOUT.shadowBlur
     context.shadowOffsetY = fontPx * CAPTION_LAYOUT.shadowOffsetY
   }
-  context.fillStyle = style.color
-  for (const line of layout.lines) context.fillText(line.text, line.centerX, line.centerY)
+
+  const activeWord = timing && style.mode !== 'block' ? timing.activeWord : null
+  if (activeWord === null) {
+    drawLines(context, layout, style)
+  } else {
+    drawWords(context, layout, style, activeWord, activeWordScale(style.animation, timing?.sinceWordMs ?? 0))
+  }
   context.restore()
   return box
+}
+
+/** The caption line by line, every word alike. */
+function drawLines(context: Context, layout: CaptionLayout, style: CaptionStyle): void {
+  context.fillStyle = style.color
+  for (const line of layout.lines) {
+    if (style.backdrop === 'outline') context.strokeText(line.text, line.centerX, line.centerY)
+    context.fillText(line.text, line.centerX, line.centerY)
+  }
+}
+
+/**
+ * The caption piece by piece, in place in its lines: the spoken word in the
+ * highlight colour and a little bigger; in the `reveal` mode, the words not
+ * yet spoken are left out.
+ */
+function drawWords(context: Context, layout: CaptionLayout, style: CaptionStyle, activeWord: number, scale: number): void {
+  for (const line of layout.lines) {
+    for (const piece of line.pieces) {
+      if (style.mode === 'reveal' && piece.wordIndex > activeWord) continue
+      const active = piece.wordIndex === activeWord
+      context.save()
+      if (active && scale !== 1) {
+        context.translate(piece.centerX, line.centerY)
+        context.scale(scale, scale)
+        context.translate(-piece.centerX, -line.centerY)
+      }
+      if (style.backdrop === 'outline') context.strokeText(piece.text, piece.centerX, line.centerY)
+      context.fillStyle = active ? style.highlightColor : style.color
+      context.fillText(piece.text, piece.centerX, line.centerY)
+      context.restore()
+    }
+  }
 }
 
 /**
@@ -193,7 +255,9 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
   }
 
   // Captions are not part of the recording: they stay put and sharp while it zooms.
-  const caption = input.caption ? drawCaption(context, output, input.caption.text, input.caption.style) : null
+  const caption = input.caption
+    ? drawCaption(context, output, input.caption.text, input.caption.style, input.caption.timing)
+    : null
   const texts: FrameRegions['texts'] = []
   for (const item of input.texts) {
     const box = drawCaption(context, output, item.text, item.style)

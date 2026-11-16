@@ -36,6 +36,7 @@ function editStateOf(store: EditorStore): AssistantEditState {
     captionsVisible: state.captions.visible,
     captionLanguage: state.captions.language,
     captionLength: state.captions.length,
+    captionMode: state.captions.style.mode,
     backgroundId: state.background.presetId,
     hasWebcam: session.webcam !== null,
     webcamVisible: state.webcam.visible,

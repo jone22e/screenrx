@@ -235,3 +235,15 @@ export const FitIcon = () => (
     <path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" />
   </Icon>
 )
+
+export const DownloadIcon = () => (
+  <Icon>
+    <path d="M12 3v12M7 10l5 5 5-5M5 19h14" />
+  </Icon>
+)
+
+export const UploadIcon = () => (
+  <Icon>
+    <path d="M12 15V3M7 8l5-5 5 5M5 19h14" />
+  </Icon>
+)

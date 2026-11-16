@@ -13,6 +13,10 @@ export interface TranscriptWord {
 
 export type TranscriptTrack = 'microphone' | 'systemAudio'
 
+/** Subtitle files the captions can be saved as and read from. */
+export type SubtitleFormat = 'srt' | 'vtt'
+export const isSubtitleFormat = (value: unknown): value is SubtitleFormat => value === 'srt' || value === 'vtt'
+
 export const TRANSCRIPT_SCHEMA_VERSION = 1
 
 export interface Transcript {

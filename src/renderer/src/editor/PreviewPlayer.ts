@@ -417,7 +417,7 @@ export class PreviewPlayer {
       object: this.objectPointAt(timeMs),
       background: this.settings.background,
       color: this.settings.color,
-      caption: caption === null ? null : { text: caption, style: captions.style },
+      caption: caption === null ? null : { text: caption.text, style: captions.style, timing: caption },
       texts: textsAt(this.settings.texts, timeMs)
     })
     this.drawnCaption = regions.caption

@@ -16,7 +16,9 @@ const span = (action: { startMs: number; endMs: number }): string =>
   `${formatTimecode(action.startMs)}–${formatTimecode(action.endMs)}`
 
 const TRACK_LABELS = { microphone: 'microfone', systemAudio: 'som do sistema' } as const
-const LENGTH_LABELS = { short: 'curto', medium: 'médio', long: 'longo' } as const
+const LENGTH_LABELS = { word: 'uma palavra', pair: 'duas ou três palavras', short: 'curto', medium: 'médio', long: 'longo' } as const
+const MODE_LABELS = { block: 'em bloco', highlight: 'palavra em destaque', reveal: 'palavra por palavra' } as const
+const ANIMATION_LABELS = { none: 'sem animação', pop: 'com pop', fade: 'com fade' } as const
 
 /**
  * Makes the edits the assistant asked for, as one undo step. A translation
@@ -81,6 +83,14 @@ export function applyAssistantActions(
           did(`Texto por legenda: ${LENGTH_LABELS[action.length]}`, ok)
           break
         }
+        case 'caption-mode':
+          store.setCaptionStyle({ mode: action.mode })
+          did(`Legendas ${MODE_LABELS[action.mode]}`, true)
+          break
+        case 'caption-animation':
+          store.setCaptionStyle({ animation: action.animation })
+          did(`Legendas ${ANIMATION_LABELS[action.animation]}`, true)
+          break
         case 'background': {
           store.setBackground({ presetId: action.presetId })
           const preset = BACKGROUND_PRESETS.find((candidate) => candidate.id === action.presetId)

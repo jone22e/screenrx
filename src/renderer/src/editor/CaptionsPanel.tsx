@@ -3,15 +3,18 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { CAPTION_FONTS, CAPTION_POSITIONS } from '@engine/captions/captionConfig'
 import { cueAt } from '@engine/captions/captionCues'
 import { CAPTION_LANGUAGE_NAMES, translationTargets } from '@engine/captions/captionTranslation'
+import { formatSubtitles, parseSubtitles, subtitleCues } from '@engine/captions/subtitles'
 import { formatTimecode } from '@shared/format'
-import type { CaptionLocaleId, TranscriptTrack } from '@shared/models/captions'
+import type { CaptionLocaleId, SubtitleFormat, TranscriptTrack } from '@shared/models/captions'
 import { CAPTION_LOCALES, DEFAULT_CAPTION_LOCALE, isCaptionLocale } from '@shared/models/captions'
 import type { EditorSession } from '@shared/models/editor'
 import type {
+  CaptionAnimation,
   CaptionBackdrop,
   CaptionFont,
   CaptionLanguage,
   CaptionLength,
+  CaptionMode,
   CaptionStyle
 } from '@shared/models/project'
 import { CAPTION_FONT_IDS, CAPTION_LIMITS } from '@shared/models/project'
@@ -20,6 +23,7 @@ import { openSettings } from '../common/settingsScreen'
 import type { EditorStore, TranscriptionActivity } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
 import { CaptionsIcon, GearIcon, RefreshIcon, TrashIcon } from './icons'
+import { DownloadIcon, UploadIcon } from './icons'
 import { Section, Segmented, Slider } from './panelControls'
 
 interface Props {
@@ -34,9 +38,23 @@ const TRACK_LABELS: Record<TranscriptTrack, string> = {
 }
 
 const LENGTHS: ReadonlyArray<{ value: CaptionLength; label: string }> = [
+  { value: 'word', label: '1 palavra' },
+  { value: 'pair', label: '2–3' },
   { value: 'short', label: 'Curtas' },
   { value: 'medium', label: 'Médias' },
   { value: 'long', label: 'Longas' }
+]
+
+const MODES: ReadonlyArray<{ value: CaptionMode; label: string }> = [
+  { value: 'block', label: 'Iguais' },
+  { value: 'highlight', label: 'Destacar' },
+  { value: 'reveal', label: 'Revelar' }
+]
+
+const ANIMATIONS: ReadonlyArray<{ value: CaptionAnimation; label: string }> = [
+  { value: 'none', label: 'Nenhuma' },
+  { value: 'pop', label: 'Pop' },
+  { value: 'fade', label: 'Fade' }
 ]
 
 const BACKDROPS: ReadonlyArray<{ value: CaptionBackdrop; label: string }> = [
@@ -54,33 +72,53 @@ const PLACEMENTS: ReadonlyArray<{ value: Placement; label: string }> = [
   { value: 'bottom', label: 'Base' }
 ]
 
-type Look = Pick<CaptionStyle, 'font' | 'bold' | 'uppercase' | 'color' | 'backdrop' | 'backdropColor'>
+type Look = Pick<
+  CaptionStyle,
+  'font' | 'bold' | 'uppercase' | 'color' | 'backdrop' | 'backdropColor' | 'mode' | 'highlightColor' | 'animation'
+>
 
-/** Ready-made looks: one click sets font, colours and backdrop together. */
-const LOOKS: ReadonlyArray<{ id: string; label: string; look: Look }> = [
+/**
+ * Ready-made looks: one click sets font, colours, backdrop and the way the
+ * words come on. The word-by-word ones also set how much text goes into a
+ * caption, which is what makes them read as they do.
+ */
+const LOOKS: ReadonlyArray<{ id: string; label: string; look: Look; length?: CaptionLength }> = [
   {
     id: 'classic',
     label: 'Clássica',
-    look: { font: 'system', bold: true, uppercase: false, color: '#ffffff', backdrop: 'box', backdropColor: '#000000' }
+    look: { font: 'system', bold: true, uppercase: false, color: '#ffffff', backdrop: 'box', backdropColor: '#000000', mode: 'block', highlightColor: '#ffe14d', animation: 'none' }
   },
   {
     id: 'outline',
     label: 'Contorno',
-    look: { font: 'system', bold: true, uppercase: false, color: '#ffffff', backdrop: 'outline', backdropColor: '#000000' }
-  },
-  {
-    id: 'highlight',
-    label: 'Destaque',
-    look: { font: 'impact', bold: true, uppercase: true, color: '#ffe14d', backdrop: 'outline', backdropColor: '#000000' }
+    look: { font: 'system', bold: true, uppercase: false, color: '#ffffff', backdrop: 'outline', backdropColor: '#000000', mode: 'block', highlightColor: '#ffe14d', animation: 'none' }
   },
   {
     id: 'clean',
     label: 'Suave',
-    look: { font: 'rounded', bold: false, uppercase: false, color: '#ffffff', backdrop: 'shadow', backdropColor: '#000000' }
+    look: { font: 'rounded', bold: false, uppercase: false, color: '#ffffff', backdrop: 'shadow', backdropColor: '#000000', mode: 'block', highlightColor: '#ffe14d', animation: 'fade' }
+  },
+  {
+    id: 'highlight',
+    label: 'Destaque',
+    look: { font: 'impact', bold: true, uppercase: true, color: '#ffffff', backdrop: 'outline', backdropColor: '#000000', mode: 'highlight', highlightColor: '#ffe14d', animation: 'pop' },
+    length: 'short'
+  },
+  {
+    id: 'one-word',
+    label: 'Uma palavra',
+    look: { font: 'impact', bold: true, uppercase: true, color: '#ffffff', backdrop: 'outline', backdropColor: '#000000', mode: 'highlight', highlightColor: '#4df0a0', animation: 'pop' },
+    length: 'word'
+  },
+  {
+    id: 'reveal',
+    label: 'Revelar',
+    look: { font: 'rounded', bold: true, uppercase: false, color: '#ffffff', backdrop: 'box', backdropColor: '#000000', mode: 'reveal', highlightColor: '#ffe14d', animation: 'none' },
+    length: 'pair'
   }
 ]
 
-const LOOK_KEYS = ['font', 'bold', 'uppercase', 'color', 'backdrop', 'backdropColor'] as const
+const LOOK_KEYS = ['font', 'bold', 'uppercase', 'color', 'backdrop', 'backdropColor', 'mode', 'highlightColor', 'animation'] as const
 const hasLook = (style: CaptionStyle, look: Look): boolean => LOOK_KEYS.every((key) => style[key] === look[key])
 
 /** How a look is previewed on its button, approximating what the canvas draws. */
@@ -94,6 +132,18 @@ function lookSample(look: Look): CSSProperties {
     ...(look.backdrop === 'outline' && { WebkitTextStroke: `3px ${look.backdropColor}`, paintOrder: 'stroke fill' }),
     ...(look.backdrop === 'shadow' && { textShadow: '0 1px 4px rgba(0, 0, 0, 0.9)' })
   }
+}
+
+/** The sample on a look's button: two words, the second as the spoken one in the word-by-word modes. */
+function LookSampleText({ look }: { look: Look }) {
+  const base = lookSample(look)
+  if (look.mode === 'block') return <span style={base}>Aa</span>
+  return (
+    <span style={base}>
+      <span style={{ opacity: look.mode === 'reveal' ? 0.45 : 1 }}>A</span>
+      <span style={{ color: look.highlightColor, fontSize: '1.1em' }}>a</span>
+    </span>
+  )
 }
 
 const STAGE_LABELS: Record<TranscriptionActivity['stage'], string> = {
@@ -117,6 +167,8 @@ export function CaptionsPanel({ session, store, player }: Props) {
   const [detecting, setDetecting] = useState(false)
   const [detectionNote, setDetectionNote] = useState<string | null>(null)
   const [activeCueId, setActiveCueId] = useState<string | null>(null)
+  // What became of the last subtitle file saved or read.
+  const [fileNote, setFileNote] = useState<string | null>(null)
   // Translating is done by the AI tool chosen in the settings.
   const ai = useSyncExternalStore(aiSettings.subscribe, aiSettings.getState)
   const aiChoice = currentAiChoice(ai)
@@ -143,6 +195,56 @@ export function CaptionsPanel({ session, store, player }: Props) {
     const first = store.getState().captions.cues[0]
     if (first && player) player.seek(first.startMs)
   }
+
+  /** Writes the captions as a subtitle file of the finished video: cuts and speed applied. */
+  const saveSubtitles = async (format: SubtitleFormat): Promise<void> => {
+    const current = store.getState()
+    const cues = subtitleCues(current.captions, current.timeMap, current.exportSettings.speed)
+    if (cues.length === 0) {
+      setFileNote('Nenhuma legenda sobra depois dos cortes.')
+      return
+    }
+    const result = await window.screenrx.captions
+      .exportSubtitles(session.sessionId, format, formatSubtitles(cues, format))
+      .catch(() => null)
+    if (!result?.ok) setFileNote(result?.error.message ?? 'Não foi possível salvar o arquivo.')
+    else if (result.value) setFileNote(`Salvo como ${result.value.fileName}.`)
+  }
+
+  /** Reads an SRT or WebVTT file in place of the captions. The times are taken as the recording's own. */
+  const loadSubtitles = async (): Promise<void> => {
+    const result = await window.screenrx.captions.importSubtitles().catch(() => null)
+    if (!result?.ok) {
+      setFileNote(result?.error.message ?? 'Não foi possível ler o arquivo.')
+      return
+    }
+    if (!result.value) return
+    const count = store.importCues(parseSubtitles(result.value.content))
+    setFileNote(
+      count === 0
+        ? `Nenhuma legenda foi encontrada em ${result.value.fileName}.`
+        : `${count} ${count === 1 ? 'legenda lida' : 'legendas lidas'} de ${result.value.fileName}.`
+    )
+    showFirstCaption()
+  }
+
+  const subtitleFiles = (
+    <Section title="Arquivo de legendas">
+      <p className="panel-hint">SRT e WebVTT, para subir junto com o vídeo. O arquivo já sai com os cortes e a velocidade.</p>
+      <div className="check-row">
+        <button className="panel-button" disabled={captions.cues.length === 0} onClick={() => void saveSubtitles('srt')}>
+          <DownloadIcon /> Salvar SRT
+        </button>
+        <button className="panel-button" disabled={captions.cues.length === 0} onClick={() => void saveSubtitles('vtt')}>
+          <DownloadIcon /> Salvar VTT
+        </button>
+      </div>
+      <button className="panel-button" disabled={transcription !== null} onClick={() => void loadSubtitles()}>
+        <UploadIcon /> Importar SRT ou VTT
+      </button>
+      {fileNote && <p className="panel-hint">{fileNote}</p>}
+    </Section>
+  )
 
   const detectLocale = async (): Promise<void> => {
     setDetecting(true)
@@ -246,6 +348,14 @@ export function CaptionsPanel({ session, store, player }: Props) {
           </button>
         )}
         {captionNotice && <p className="panel-notice">{captionNotice}</p>}
+        {!activity && (
+          <>
+            <button className="panel-button" onClick={() => void loadSubtitles()}>
+              <UploadIcon /> Importar SRT ou VTT
+            </button>
+            {fileNote && <p className="panel-hint">{fileNote}</p>}
+          </>
+        )}
       </Section>
     )
   }
@@ -360,22 +470,40 @@ export function CaptionsPanel({ session, store, player }: Props) {
 
       <Section title="Estilo">
         <div className="looks" role="group" aria-label="Estilos prontos">
-          {LOOKS.map(({ id, label, look }) => (
+          {LOOKS.map(({ id, label, look, length }) => (
             <button
               key={id}
               className="look"
-              aria-pressed={hasLook(style, look)}
+              aria-pressed={hasLook(style, look) && (length === undefined || captions.length === length)}
               aria-label={`Estilo ${label}`}
               title={label}
-              onClick={() => store.setCaptionStyle(look)}
+              onClick={() =>
+                store.runAsOneStep(() => {
+                  store.setCaptionStyle(look)
+                  if (length !== undefined && captions.length !== length) store.setCaptionLength(length)
+                })
+              }
             >
               <span className="look-sample">
-                <span style={lookSample(look)}>Aa</span>
+                <LookSampleText look={look} />
               </span>
               <span className="look-name">{label}</span>
             </button>
           ))}
         </div>
+
+        <Segmented
+          label="Palavra falada"
+          value={style.mode}
+          options={MODES}
+          onChange={(mode) => store.setCaptionStyle({ mode })}
+        />
+        <Segmented
+          label="Entrada"
+          value={style.animation}
+          options={ANIMATIONS}
+          onChange={(animation) => store.setCaptionStyle({ animation })}
+        />
 
         <label className="field">
           <span className="field-label">Fonte</span>
@@ -440,6 +568,18 @@ export function CaptionsPanel({ session, store, player }: Props) {
             />
             <span>Texto</span>
           </label>
+          {style.mode !== 'block' && (
+            <label className="color-field">
+              <input
+                type="color"
+                aria-label="Cor da palavra falada"
+                value={style.highlightColor}
+                onChange={(event) => store.setCaptionStyle({ highlightColor: event.target.value }, 'caption-highlight-color')}
+                onBlur={() => store.endGesture()}
+              />
+              <span>Falada</span>
+            </label>
+          )}
           {(style.backdrop === 'box' || style.backdrop === 'outline') && (
             <label className="color-field">
               <input
@@ -455,6 +595,9 @@ export function CaptionsPanel({ session, store, player }: Props) {
             </label>
           )}
         </div>
+        {style.mode !== 'block' && captions.language !== null && (
+          <p className="panel-hint">Uma tradução não tem o tempo de cada palavra: nela, as legendas aparecem inteiras.</p>
+        )}
       </Section>
 
       <Section title="Posição">
@@ -514,6 +657,8 @@ export function CaptionsPanel({ session, store, player }: Props) {
           ))}
         </ul>
       </Section>
+
+      {subtitleFiles}
 
       <Section title="Refazer a transcrição">
         <p className="panel-hint">Use só se o texto saiu errado. Escolha o idioma falado na gravação.</p>

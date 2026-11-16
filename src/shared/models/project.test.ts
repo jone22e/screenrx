@@ -159,7 +159,16 @@ describe('parseProject framing', () => {
 })
 
 describe('parseProject captions', () => {
-  const cue = { id: 'cue-1', startMs: 0, endMs: 1200, text: 'Olá, pessoal.' }
+  const cue = {
+    id: 'cue-1',
+    startMs: 0,
+    endMs: 1200,
+    text: 'Olá, pessoal.',
+    words: [
+      { text: 'Olá,', startMs: 0, endMs: 500 },
+      { text: 'pessoal.', startMs: 500, endMs: 1200 }
+    ]
+  }
 
   it('gives projects saved before captions existed none, with the default style', () => {
     const { captions, ...legacy } = createProject(sessionId)
@@ -186,13 +195,52 @@ describe('parseProject captions', () => {
         color: '#ffe14d',
         backdrop: 'outline',
         backdropColor: '#101010',
-        position: { x: 0.3, y: 0.12 }
+        position: { x: 0.3, y: 0.12 },
+        mode: 'highlight',
+        highlightColor: '#4df0a0',
+        animation: 'pop'
       },
-      cues: [cue, { id: 'cue-2', startMs: 1200, endMs: 2500, text: 'Hoje vamos exportar.' }],
+      cues: [
+        cue,
+        {
+          id: 'cue-2',
+          startMs: 1200,
+          endMs: 2500,
+          text: 'Hoje vamos exportar.',
+          words: [
+            { text: 'Hoje', startMs: 1200, endMs: 1500 },
+            { text: 'vamos', startMs: 1500, endMs: 1900 },
+            { text: 'exportar.', startMs: 1900, endMs: 2500 }
+          ]
+        }
+      ],
       language: 'zh',
       translations: { zh: { 'cue-1': '大家好。', 'cue-2': '今天我们来导出。' }, en: { 'cue-1': 'Hello, everyone.' } }
     }
     expect(parseProject({ ...createProject(sessionId), captions }, sessionId)?.captions).toEqual(captions)
+  })
+
+  it('spreads the words of a caption saved without them, or with words that do not fit', () => {
+    const parse = (entry: Record<string, unknown>) =>
+      parseProject({ ...createProject(sessionId), captions: { cues: [entry] } }, sessionId)?.captions.cues[0]?.words
+    const even = [
+      { text: 'Olá,', startMs: 0, endMs: 600 },
+      { text: 'pessoal.', startMs: 600, endMs: 1200 }
+    ]
+    const { words, ...bare } = cue
+    expect(parse(bare)).toEqual(even)
+    // One word for two: not the text's words.
+    expect(parse({ ...bare, words: [words[0]] })).toEqual(even)
+    // A word past the caption's end.
+    expect(parse({ ...bare, words: [words[0], { ...words[1], endMs: 9000 }] })).toEqual(even)
+    // Out of order.
+    expect(parse({ ...bare, words: [{ ...words[0], startMs: 700 }, { ...words[1], startMs: 500 }] })).toEqual(even)
+  })
+
+  it('repairs an unknown mode, highlight colour or animation', () => {
+    const style = { mode: 'karaoke', highlightColor: 'yellow', animation: 'bounce' }
+    const parsed = parseProject({ ...createProject(sessionId), captions: { style } }, sessionId)?.captions.style
+    expect(parsed).toEqual(DEFAULT_CAPTION_STYLE)
   })
 
   it('repairs a nonsense style instead of rejecting the project', () => {

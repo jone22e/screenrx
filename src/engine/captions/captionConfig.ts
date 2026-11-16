@@ -3,13 +3,28 @@ import type { CaptionFont, CaptionLength } from '@shared/models/project'
 /** Tunables of how a transcript becomes captions. */
 export const CAPTION_CONFIG = {
   /** Most characters in one caption, per length setting. */
-  maxChars: { short: 18, medium: 42, long: 84 } satisfies Record<CaptionLength, number>,
+  maxChars: { word: 84, pair: 24, short: 18, medium: 42, long: 84 } satisfies Record<CaptionLength, number>,
+  /** Most words in one caption, per length setting. */
+  maxWords: { word: 1, pair: 3, short: Infinity, medium: Infinity, long: Infinity } satisfies Record<CaptionLength, number>,
   /** A word that takes this long to give way to the next one is followed by a pause: the caption ends there. */
   pauseMs: 1500,
   /** A caption stays at most this long after its last word begins. */
   maxLingerMs: 2000,
+  /** A caption followed by another within this long stays on until the next begins, so the text never blinks. */
+  bridgeGapMs: 400,
   /** Shortest caption the timeline lets the user make. */
   minCueDurationMs: 300
+} as const
+
+/** Tunables of how a caption comes on screen and how the spoken word is marked. */
+export const CAPTION_ANIMATION = {
+  /** How long the `pop` entrance takes, and how far past its size it swings. */
+  popMs: 180,
+  popOvershoot: 1.08,
+  fadeMs: 160,
+  /** The spoken word, in the `highlight` mode: how much bigger it is drawn and how long it takes to get there. */
+  wordScale: 1.06,
+  wordPopMs: 120
 } as const
 
 /** Tunables of how a caption is drawn. Lengths are ratios of the font size unless noted. */

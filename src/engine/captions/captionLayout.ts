@@ -2,11 +2,23 @@ import type { CaptionStyle } from '@shared/models/project'
 import type { Rect, Size } from '../rendering/frameLayout'
 import { CAPTION_FONTS, CAPTION_LAYOUT } from './captionConfig'
 
+/** One piece of a line — a word, or a character in a language written without spaces — and where it sits. */
+export interface CaptionPiece {
+  text: string
+  /** Which space-separated word of the caption the piece belongs to. */
+  wordIndex: number
+  /** Centre of the piece, in output pixels. */
+  centerX: number
+  width: number
+}
+
 export interface CaptionLine {
   text: string
   /** Centre of the line, in output pixels. */
   centerX: number
   centerY: number
+  /** The line piece by piece, for drawing its words apart. */
+  pieces: CaptionPiece[]
 }
 
 /** Where a caption sits on the output, in output pixels. */
@@ -35,10 +47,11 @@ export function captionFontCss(style: CaptionStyle, fontPx: number): string {
   return `${style.bold ? 700 : 500} ${fontPx}px ${CAPTION_FONTS[style.font].family}`
 }
 
-/** A piece of text a line may end after, and whether a space separates it from the piece before. */
-interface Piece {
+/** A piece of text a line may end after, whether a space separates it from the piece before, and its word. */
+export interface Piece {
   text: string
   spaced: boolean
+  wordIndex: number
 }
 
 /** Chinese, Japanese and Korean are written without spaces: a line may break between any two characters. */
@@ -52,19 +65,19 @@ const CLOSING = /^[，。！？、；：）」』】》〉,.!?;:)\]]/
  */
 export function captionPieces(text: string): Piece[] {
   const pieces: Piece[] = []
-  text.split(' ').forEach((word) => {
+  text.split(' ').forEach((word, wordIndex) => {
     let current = ''
     let spaced = true
     const flush = (): void => {
       if (current === '') return
-      pieces.push({ text: current, spaced })
+      pieces.push({ text: current, spaced, wordIndex })
       current = ''
       spaced = false
     }
     for (const character of word) {
       if (CJK.test(character)) {
         flush()
-        pieces.push({ text: character, spaced })
+        pieces.push({ text: character, spaced, wordIndex })
         spaced = false
       } else if (CLOSING.test(character) && current === '' && pieces.length > 0 && !spaced) {
         // Closing punctuation never starts a line: it joins the piece before it.
@@ -79,20 +92,24 @@ export function captionPieces(text: string): Piece[] {
   return pieces
 }
 
+/** The text of a line: its pieces, with a space before each that asks for one (never before the first). */
+const lineText = (pieces: readonly Piece[]): string =>
+  pieces.map((piece, index) => (index > 0 && piece.spaced ? ` ${piece.text}` : piece.text)).join('')
+
 /** Breaks the pieces into lines no wider than `maxWidth`; a piece wider than that gets a line of its own. */
-function wrap(pieces: readonly Piece[], maxWidth: number, measure: (text: string) => number): string[] {
-  const lines: string[] = []
-  let line = ''
+function wrap(pieces: readonly Piece[], maxWidth: number, measure: (text: string) => number): Piece[][] {
+  const lines: Piece[][] = []
+  let line: Piece[] = []
   for (const piece of pieces) {
-    const candidate = line === '' ? piece.text : `${line}${piece.spaced ? ' ' : ''}${piece.text}`
-    if (line !== '' && measure(candidate) > maxWidth) {
+    const candidate = [...line, piece]
+    if (line.length > 0 && measure(lineText(candidate)) > maxWidth) {
       lines.push(line)
-      line = piece.text
+      line = [piece]
     } else {
       line = candidate
     }
   }
-  if (line !== '') lines.push(line)
+  if (line.length > 0) lines.push(line)
   return lines
 }
 
@@ -125,7 +142,7 @@ export function layoutCaption(
     for (let step = 0; step < 12; step++) {
       const candidate = (narrow + wide) / 2
       const wrapped = wrap(words, candidate, measure)
-      const fits = wrapped.length <= lineCount && wrapped.every((line) => measure(line) <= maxWidth)
+      const fits = wrapped.length <= lineCount && wrapped.every((line) => measure(lineText(line)) <= maxWidth)
       if (fits) {
         wide = candidate
         lines = wrapped
@@ -135,7 +152,8 @@ export function layoutCaption(
     }
   }
 
-  const textWidth = Math.max(...lines.map(measure))
+  const texts = lines.map(lineText)
+  const textWidth = Math.max(...texts.map(measure))
   const lineHeight = fontPx * CAPTION_LAYOUT.lineHeight
   const width = Math.min(textWidth + 2 * fontPx * CAPTION_LAYOUT.boxPaddingX, output.width)
   const height = Math.min(lines.length * lineHeight + 2 * fontPx * CAPTION_LAYOUT.boxPaddingY, output.height)
@@ -145,13 +163,20 @@ export function layoutCaption(
   const y = clamp(style.position.y * output.height - height / 2, margin, output.height - height - margin)
   const firstLineY = y + height / 2 - ((lines.length - 1) * lineHeight) / 2
 
+  const centerX = x + width / 2
   return {
     fontPx,
-    lines: lines.map((line, index) => ({
-      text: line,
-      centerX: x + width / 2,
-      centerY: firstLineY + index * lineHeight
-    })),
+    lines: lines.map((line, index) => {
+      const text = texts[index] as string
+      const left = centerX - measure(text) / 2
+      // Each piece sits where it falls in the line as a whole, so the pieces together read as the line.
+      const pieces = line.map((piece, pieceIndex) => {
+        const before = measure(lineText(line.slice(0, pieceIndex + 1))) - measure(piece.text)
+        const pieceWidth = measure(piece.text)
+        return { text: piece.text, wordIndex: piece.wordIndex, centerX: left + before + pieceWidth / 2, width: pieceWidth }
+      })
+      return { text, centerX, centerY: firstLineY + index * lineHeight, pieces }
+    }),
     box: { x, y, width, height },
     boxRadius: fontPx * CAPTION_LAYOUT.boxRadius
   }

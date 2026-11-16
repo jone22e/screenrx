@@ -1,11 +1,12 @@
-import { access } from 'node:fs/promises'
+import { access, readFile, stat } from 'node:fs/promises'
+import path from 'node:path'
 import { Menu, app, dialog, ipcMain, screen, shell, systemPreferences } from 'electron'
 import type { IpcInvokeChannel, IpcInvokeContract } from '@shared/ipc/contract'
 import type { AiProvider } from '@shared/models/ai'
 import { isAiProviderId, parseAiChoice } from '@shared/models/ai'
 import { parseAssistantRequest } from '@shared/models/assistant'
 import { parseObjectTrackRequest } from '@shared/models/telemetry'
-import { CAPTION_LOCALES, parseCaptionTranslationRequest, parseTranscriptionRequest } from '@shared/models/captions'
+import { CAPTION_LOCALES, isSubtitleFormat, parseCaptionTranslationRequest, parseTranscriptionRequest } from '@shared/models/captions'
 import type { CaptureSourceCatalog } from '@shared/models/capture'
 import { isDeviceId } from '@shared/models/devices'
 import { parseDubRequest } from '@shared/models/dub'
@@ -39,6 +40,7 @@ import { CaptureError } from '../capture/CaptureEngine'
 import { ExportError } from '../export/ExportService'
 import type { ExportService } from '../export/ExportService'
 import type { Logger } from '../logging/logger'
+import { writeFileAtomic } from '../filesystem/atomicWrite'
 import { toImportAppError } from '../library/VideoImporter'
 import type { VideoImporter } from '../library/VideoImporter'
 import type { ThumbnailService } from '../media/ThumbnailService'
@@ -82,6 +84,9 @@ export interface IpcDependencies {
 }
 
 type Result<Channel extends IpcInvokeChannel> = IpcInvokeContract[Channel]['result']
+
+/** A subtitle file longer than this is not one of a recording. */
+const MAX_SUBTITLE_CHARS = 5_000_000
 
 /** Containers FFmpeg opens that the file dialog offers; anything else is just not listed. */
 const IMPORT_EXTENSIONS = ['mp4', 'mov', 'm4v', 'mkv', 'webm', 'avi', 'mts', 'm2ts', 'mpg', 'mpeg', 'wmv', 'flv', '3gp']
@@ -392,6 +397,51 @@ export function registerIpc(deps: IpcDependencies): void {
   })
 
   handle('captions:cancel', () => transcriptions.cancel())
+
+  handle('captions:export-subtitles', async ([sessionId, format, content]) => {
+    if (!isSessionId(sessionId) || !isSubtitleFormat(format) || typeof content !== 'string' || content.length > MAX_SUBTITLE_CHARS) {
+      return { ok: false, error: appError('invalid-state', 'invalid subtitle file') }
+    }
+    const manifest = await sessions.read(sessionId)
+    if (!manifest) return { ok: false, error: appError('invalid-state', 'session not found') }
+    const title = (manifest.title ?? manifest.source.label).replace(/[/\\:*?"<>|]/g, '-').trim().slice(0, 80) || 'Legendas'
+    const options = {
+      title: 'Salvar legendas',
+      defaultPath: path.join(app.getPath('videos'), `${title}.${format}`),
+      filters: [format === 'srt' ? { name: 'Legendas SRT', extensions: ['srt'] } : { name: 'Legendas WebVTT', extensions: ['vtt'] }]
+    }
+    const owner = windows.mainWindow
+    const answer = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options)
+    if (answer.canceled || !answer.filePath) return { ok: true, value: null }
+    try {
+      await writeFileAtomic(answer.filePath, content)
+      return { ok: true, value: { fileName: path.basename(answer.filePath) } }
+    } catch (error) {
+      logger.error('could not write subtitles', { sessionId, error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('captions:import-subtitles', async () => {
+    const owner = windows.mainWindow
+    const options = {
+      title: 'Importar legendas',
+      buttonLabel: 'Importar',
+      properties: ['openFile'] as Array<'openFile'>,
+      filters: [{ name: 'Legendas', extensions: ['srt', 'vtt'] }]
+    }
+    const answer = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    const filePath = answer.filePaths[0]
+    if (answer.canceled || !filePath) return { ok: true, value: null }
+    try {
+      const { size } = await stat(filePath)
+      if (size > MAX_SUBTITLE_CHARS) return { ok: false, error: appError('invalid-state', 'subtitle file too large') }
+      return { ok: true, value: { fileName: path.basename(filePath), content: await readFile(filePath, 'utf8') } }
+    } catch (error) {
+      logger.error('could not read subtitles', { filePath, error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
 
   const dubResult = async <T>(operation: () => Promise<T>): Promise<IpcResult<T>> => {
     try {

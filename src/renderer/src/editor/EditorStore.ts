@@ -1,5 +1,5 @@
 import { CAPTION_CONFIG } from '@engine/captions/captionConfig'
-import { buildCues, cueText } from '@engine/captions/captionCues'
+import { buildCues, clipCue, cueText, fitCue, rewordCue } from '@engine/captions/captionCues'
 import { buildDubUnits, pickVoiceReference } from '@engine/dub/dubUnits'
 import { isExportSpeed } from '@engine/export/exportConfig'
 import { addCut, isCoveredByCuts } from '@engine/suggestions/cutSuggestions'
@@ -37,6 +37,7 @@ import type {
   ZoomEffect
 } from '@shared/models/project'
 import {
+  spreadWords,
   BACKGROUND_LIMITS,
   CAPTION_LIMITS,
   DEFAULT_TEXT_STYLE,
@@ -650,6 +651,26 @@ export class EditorStore {
   }
 
   /**
+   * Replaces the captions with subtitles read from a file. They are taken
+   * to be on the recording's own clock; the words get even timing.
+   */
+  importCues(subtitles: ReadonlyArray<{ startMs: number; endMs: number; text: string }>): number {
+    const durationMs = this.session.durationMs
+    const cues: CaptionCue[] = []
+    for (const subtitle of subtitles.slice(0, CAPTION_LIMITS.maxCues)) {
+      if (subtitle.startMs >= durationMs) break
+      const text = subtitle.text.slice(0, CAPTION_LIMITS.maxTextLength)
+      const endMs = Math.min(subtitle.endMs, durationMs)
+      if (endMs <= subtitle.startMs) continue
+      cues.push({ id: createCueId(), startMs: subtitle.startMs, endMs, text, words: spreadWords(text, subtitle.startMs, endMs) })
+    }
+    if (cues.length === 0) return 0
+    this.captionNotice = null
+    this.commitCaptions(this.withNewCues(cues, { visible: true }), null, null)
+    return cues.length
+  }
+
+  /**
    * Shows the captions in `language` (`null`: as spoken). A language that has
    * not been translated yet cannot be shown: translate it first.
    */
@@ -724,7 +745,7 @@ export class EditorStore {
     const clipped = text.slice(0, CAPTION_LIMITS.maxTextLength)
     const { language, translations } = this.project.captions
     if (language === null) {
-      this.editCue(cueId, 'cue-text', (cue) => ({ ...cue, text: clipped }))
+      this.editCue(cueId, 'cue-text', (cue) => rewordCue(cue, clipped))
       return
     }
     this.commitCaptions(
@@ -744,7 +765,7 @@ export class EditorStore {
 
   moveCue(original: CaptionCue, deltaMs: number): void {
     const span = moveSpan(this.state.captions.cues, original, deltaMs, this.session.durationMs)
-    this.editCue(original.id, 'cue-span', (cue) => ({ ...cue, ...span }))
+    this.editCue(original.id, 'cue-span', (cue) => fitCue(cue, span))
   }
 
   resizeCue(original: CaptionCue, edge: 'start' | 'end', timeMs: number): void {
@@ -756,7 +777,7 @@ export class EditorStore {
       this.session.durationMs,
       CAPTION_CONFIG.minCueDurationMs
     )
-    this.editCue(original.id, 'cue-span', (cue) => ({ ...cue, ...span }))
+    this.editCue(original.id, 'cue-span', (cue) => fitCue(cue, span))
   }
 
   removeCue(cueId: string): void {
@@ -1185,7 +1206,7 @@ export class EditorStore {
     const durationMs = this.session.durationMs
     return buildCues(this.transcript.words, length, createCueId)
       .filter((cue) => cue.startMs < durationMs)
-      .map((cue) => (cue.endMs > durationMs ? { ...cue, endMs: durationMs } : cue))
+      .map((cue) => clipCue(cue, durationMs))
   }
 
   private editCue(cueId: string, gesture: string, change: (cue: CaptionCue) => CaptionCue): void {

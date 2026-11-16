@@ -409,9 +409,39 @@ trilha de áudio → screenrx-transcribe (SpeechAnalyzer, local) → transcript.
   vez, limpa as palavras (`normalizeWords`) e grava `transcript.json` na sessão.
   É dado derivado: pode ser apagado e gerado de novo; a trilha só é lida.
 - **Palavras → legendas** (`buildCues`): uma legenda termina quando enche (18, 42
-  ou 84 caracteres), no fim de uma frase ou em uma pausa, e não fica na tela
-  muito depois da última palavra. Trocar o tamanho refaz as legendas a partir da
-  mesma transcrição.
+  ou 84 caracteres; ou 1 palavra em "1 palavra", até 3 em "2–3"), no fim de uma
+  frase ou em uma pausa, e não fica na tela muito depois da última palavra. Se a
+  próxima começa em menos de 400 ms, a legenda fica até ela entrar, para o texto
+  não piscar. Trocar o tamanho refaz as legendas a partir da mesma transcrição.
+- **Cada legenda guarda suas palavras** (`CaptionCue.words`: texto, início e fim
+  em tempo de origem), sempre uma por palavra do texto. Corrigir o texto mantém
+  os tempos quando o número de palavras não muda (`rewordCue`); mover ou
+  redimensionar a legenda leva as palavras junto em proporção (`fitCue`). Um
+  projeto antigo, ou uma legenda digitada, recebe tempos distribuídos por igual
+  (`spreadWords`); o parser aceita as palavras salvas só quando batem com o
+  texto e cabem no intervalo.
+- **Palavra falada** (`CaptionStyle.mode`): `block` desenha tudo igual;
+  `highlight` pinta a palavra falada com `highlightColor` e a desenha um pouco
+  maior; `reveal` mostra as palavras conforme são ditas. `captionAt` devolve,
+  além do texto, qual palavra está sendo falada (`activeWordIndex`: a última
+  que começou, para o destaque não sumir no silêncio) e há quanto tempo. Uma
+  tradução não tem tempo por palavra: nela a legenda aparece inteira.
+  `layoutCaption` devolve cada linha também em peças (`CaptionPiece`: texto,
+  índice da palavra, centro e largura), posicionadas onde caem na linha inteira;
+  `drawCaption` desenha por peça só quando há palavra a destacar.
+- **Entrada** (`CaptionStyle.animation`, `captionAnimation.ts`): `pop` (cresce
+  um pouco além do tamanho e assenta em 180 ms) ou `fade` (160 ms), aplicados
+  ao bloco inteiro; em `highlight`, a palavra falada cresce em 120 ms. Os
+  estilos prontos do painel ("Destaque", "Uma palavra", "Revelar") combinam
+  modo, animação e tamanho de legenda. O assistente tem as ações `caption-mode`
+  e `caption-animation`, e `caption-length` aceita `word` e `pair`.
+- **Arquivo de legendas** (`subtitles.ts`): "Salvar SRT/VTT" escreve as
+  legendas no tempo do vídeo exportado (cortes e velocidade aplicados; uma
+  legenda cortada inteira fica de fora), no idioma mostrado. "Importar SRT ou
+  VTT" lê um arquivo (tempos tomados como tempo de origem, palavras
+  distribuídas por igual) no lugar das legendas atuais. O main só abre os
+  diálogos e lê/escreve o arquivo (`captions:export-subtitles`,
+  `captions:import-subtitles`, até 5 MB); formatar e interpretar é do motor.
 - **As legendas pertencem ao projeto.** Depois de geradas são do usuário: texto
   corrigido no painel, tempo ajustado na linha do tempo, tudo com desfazer. Ficam
   em tempo de origem, então um corte simplesmente não mostra a legenda daquele

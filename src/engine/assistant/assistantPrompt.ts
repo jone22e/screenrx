@@ -7,7 +7,7 @@ import type {
 } from '@shared/models/assistant'
 import { isAudioTrackKind } from '@shared/models/assistant'
 import type { TranscriptWord } from '@shared/models/captions'
-import { CAPTION_LANGUAGES, FRAME_ASPECTS, FRAME_FITS } from '@shared/models/project'
+import { CAPTION_ANIMATIONS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, FRAME_ASPECTS, FRAME_FITS } from '@shared/models/project'
 import { EXPORT_CONFIG } from '../export/exportConfig'
 import { BACKGROUND_PRESETS } from '../rendering/backgrounds'
 import { TRIM_CONFIG } from '../timeline/trimConfig'
@@ -35,6 +35,8 @@ const ACTION_TYPES = [
   'captions',
   'caption-language',
   'caption-length',
+  'caption-mode',
+  'caption-animation',
   'background',
   'format',
   'framing',
@@ -89,7 +91,9 @@ Actions and their fields:
 - "speed": value = one of ${EXPORT_CONFIG.speeds.join(', ')}.
 - "captions": value = "show" or "hide".
 - "caption-language": value = ${CAPTION_LANGUAGES.map((language) => `"${language}"`).join(', ')} or "original". Translating takes the editor a while.
-- "caption-length": value = "short", "medium" or "long" (how much text per caption).
+- "caption-length": value = "word" (one word at a time), "pair" (two or three words), "short", "medium" or "long" (how much text per caption).
+- "caption-mode": how the words are drawn as they are spoken. value = "block" (all alike), "highlight" (the spoken word in the highlight colour, a little bigger — the usual Reels/TikTok look) or "reveal" (words appear one by one as they are said).
+- "caption-animation": how a caption comes on screen. value = "none", "pop" or "fade".
 - "background": value = ${BACKGROUND_PRESETS.map((preset) => `"${preset.id}" (${preset.name})`).join(', ')} or "none".
 - "format": the shape of the finished video. value = "native" (the recording's own), "9:16" (vertical: Reels, TikTok, Shorts), "1:1" (square) or "4:5" (portrait, feed).
 - "framing": how the recording goes into a format of another shape. value = "fit" (all of it, smaller, over the background), "fill" (enlarged to fill the frame; a part of it is used), "follow-mouse" (fills, and the part in use follows the pointer), "follow-zoom" (fills, and it follows the zooms) or "follow-object" (fills, and it follows an object the user marked; the user has to mark it).
@@ -104,6 +108,9 @@ Rules:
 - When the user refers to what is on screen and the transcript does not say, tell them you only know what was said.
 - If the request cannot be done with these actions, say so in the reply.
 - Answer only with the structured output.`
+
+const includes = <T>(options: readonly T[], candidate: unknown): candidate is T =>
+  (options as readonly unknown[]).includes(candidate)
 
 const clock = (ms: number): string => {
   const total = Math.max(0, Math.round(ms / 100))
@@ -126,7 +133,7 @@ function describeEdit(edit: AssistantEditState): string {
       ? 'Zooms: none'
       : `Zooms (${edit.zooms.length}):\n${edit.zooms.map((zoom) => `  ${clock(zoom.startMs)}–${clock(zoom.endMs)} ${zoom.scale}x`).join('\n')}`,
     edit.hasCaptions
-      ? `Captions: ${edit.captionsVisible ? 'shown' : 'hidden'}, language ${edit.captionLanguage ?? 'original'}, length ${edit.captionLength}`
+      ? `Captions: ${edit.captionsVisible ? 'shown' : 'hidden'}, language ${edit.captionLanguage ?? 'original'}, length ${edit.captionLength}, mode ${edit.captionMode}`
       : 'Captions: none generated yet (the user generates them in the Legendas tab)',
     `Background: ${edit.backgroundId ?? 'none'}`,
     edit.hasWebcam ? `Webcam: ${edit.webcamVisible ? 'shown' : 'hidden'}` : 'Webcam: not recorded',
@@ -286,7 +293,18 @@ export function parseAssistantResponse(
         break
       }
       case 'caption-length': {
-        if (text === 'short' || text === 'medium' || text === 'long') actions.push({ type: 'caption-length', length: text })
+        const length = text === 'one' || text === 'single' ? 'word' : text === 'two' || text === 'three' ? 'pair' : text
+        if (includes(CAPTION_LENGTHS, length)) actions.push({ type: 'caption-length', length })
+        break
+      }
+      case 'caption-mode': {
+        const mode = text === 'karaoke' || text === 'word' ? 'highlight' : text === 'progressive' || text === 'typewriter' ? 'reveal' : text
+        if (includes(CAPTION_MODES, mode)) actions.push({ type: 'caption-mode', mode })
+        break
+      }
+      case 'caption-animation': {
+        const animation = text === 'off' || text === 'still' ? 'none' : text
+        if (includes(CAPTION_ANIMATIONS, animation)) actions.push({ type: 'caption-animation', animation })
         break
       }
       case 'background': {

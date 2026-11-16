@@ -1,5 +1,6 @@
 import type { TranscriptWord } from '@shared/models/captions'
-import type { CaptionCue, CaptionLength, CaptionSettings } from '@shared/models/project'
+import type { CaptionCue, CaptionLength, CaptionSettings, CaptionWord } from '@shared/models/project'
+import { spreadWords } from '@shared/models/project'
 import { CAPTION_CONFIG } from './captionConfig'
 
 const HAS_LETTER_OR_DIGIT = /[\p{L}\p{N}]/u
@@ -41,6 +42,7 @@ export function buildCues(
   createId: () => string
 ): CaptionCue[] {
   const maxChars = CAPTION_CONFIG.maxChars[length]
+  const maxWords = CAPTION_CONFIG.maxWords[length]
   const groups: TranscriptWord[][] = []
   let current: TranscriptWord[] = []
   let chars = 0
@@ -48,7 +50,7 @@ export function buildCues(
   for (const word of words) {
     const previous = current[current.length - 1]
     if (previous) {
-      const full = chars + 1 + word.text.length > maxChars
+      const full = chars + 1 + word.text.length > maxChars || current.length >= maxWords
       const sentenceEnded = ENDS_SENTENCE.test(previous.text)
       const paused = word.startMs - previous.startMs > CAPTION_CONFIG.pauseMs
       if (full || sentenceEnded || paused) {
@@ -68,16 +70,72 @@ export function buildCues(
     const last = group[group.length - 1]
     if (!first || !last) return
     const nextStartMs = groups[index + 1]?.[0]?.startMs ?? Infinity
-    const endMs = Math.min(last.endMs, last.startMs + CAPTION_CONFIG.maxLingerMs, nextStartMs)
+    const natural = Math.min(last.endMs, last.startMs + CAPTION_CONFIG.maxLingerMs, nextStartMs)
+    // Straight into the next caption when it follows closely: a blank between two would blink.
+    const endMs = nextStartMs - natural < CAPTION_CONFIG.bridgeGapMs ? nextStartMs : natural
     if (endMs <= first.startMs) return
     cues.push({
       id: createId(),
       startMs: first.startMs,
       endMs,
-      text: group.map((word) => word.text).join(' ')
+      text: group.map((word) => word.text).join(' '),
+      words: group.map((word) => ({
+        text: word.text,
+        startMs: Math.min(word.startMs, endMs),
+        endMs: Math.min(Math.max(word.endMs, word.startMs), endMs)
+      }))
     })
   })
   return cues
+}
+
+/**
+ * The caption with its text replaced. The words keep their timing when there
+ * are as many as before (a correction); otherwise they are spread evenly.
+ */
+export function rewordCue(cue: CaptionCue, text: string): CaptionCue {
+  const tokens = text.split(/\s+/).filter((token) => token !== '')
+  const words =
+    tokens.length === cue.words.length
+      ? cue.words.map((word, index) => ({ ...word, text: tokens[index] as string }))
+      : spreadWords(text, cue.startMs, cue.endMs)
+  return { ...cue, text, words }
+}
+
+/** The caption moved or resized to `span`, its words carried along in proportion. */
+export function fitCue(cue: CaptionCue, span: { startMs: number; endMs: number }): CaptionCue {
+  const scale = (span.endMs - span.startMs) / Math.max(cue.endMs - cue.startMs, 1)
+  const words = cue.words.map((word) => ({
+    ...word,
+    startMs: span.startMs + (word.startMs - cue.startMs) * scale,
+    endMs: span.startMs + (word.endMs - cue.startMs) * scale
+  }))
+  return { ...cue, ...span, words }
+}
+
+/** The caption clipped to end at `endMs` at the latest, words included. */
+export function clipCue(cue: CaptionCue, endMs: number): CaptionCue {
+  if (cue.endMs <= endMs) return cue
+  return {
+    ...cue,
+    endMs,
+    words: cue.words.map((word) => ({ ...word, startMs: Math.min(word.startMs, endMs), endMs: Math.min(word.endMs, endMs) }))
+  }
+}
+
+/**
+ * Which of the caption's words is being spoken at `timeMs`: the last one
+ * begun, so the mark stays on a word through the silence after it. `null`
+ * when the caption has no words.
+ */
+export function activeWordIndex(words: readonly CaptionWord[], timeMs: number): number | null {
+  if (words.length === 0) return null
+  let index = 0
+  for (let candidate = 1; candidate < words.length; candidate++) {
+    if ((words[candidate] as CaptionWord).startMs <= timeMs) index = candidate
+    else break
+  }
+  return index
 }
 
 /** The caption on screen at `timeMs` (source time), if any. `cues` must be sorted by start time. */
@@ -104,9 +162,37 @@ export function cueText(captions: Pick<CaptionSettings, 'language' | 'translatio
   return translated ?? cue.text
 }
 
-/** The text on screen at `timeMs` (source time), in the chosen language; `null` when there is none. */
-export function captionAt(captions: CaptionSettings, timeMs: number): string | null {
+/** When in a caption an instant falls, for the word-by-word styles and the entrance animation. */
+export interface CaptionTiming {
+  /** The word being spoken, as an index into the text's words; `null` when that is unknown. */
+  activeWord: number | null
+  /** How long the caption has been on screen. */
+  sinceStartMs: number
+  /** How long the active word has been spoken. */
+  sinceWordMs: number
+}
+
+export interface CaptionInstant extends CaptionTiming {
+  text: string
+}
+
+/**
+ * The caption on screen at `timeMs` (source time), in the chosen language,
+ * and where in it the instant falls; `null` when there is none. A translation
+ * has no timing of its own, so its words are not told apart.
+ */
+export function captionAt(captions: CaptionSettings, timeMs: number): CaptionInstant | null {
   if (!captions.visible) return null
   const cue = cueAt(captions.cues, timeMs)
-  return cue ? cueText(captions, cue) : null
+  if (!cue) return null
+  const text = cueText(captions, cue)
+  const timed = captions.language === null && cue.words.length === text.split(/\s+/).filter((t) => t !== '').length
+  const activeWord = timed ? activeWordIndex(cue.words, timeMs) : null
+  const word = activeWord === null ? null : cue.words[activeWord]
+  return {
+    text,
+    activeWord,
+    sinceStartMs: timeMs - cue.startMs,
+    sinceWordMs: word ? Math.max(0, timeMs - word.startMs) : timeMs - cue.startMs
+  }
 }

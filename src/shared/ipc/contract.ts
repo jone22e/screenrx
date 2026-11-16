@@ -1,6 +1,7 @@
 import type { AiChoice, AiProvider, AiProviderId } from '../models/ai'
 import type { AssistantReply, AssistantRequest } from '../models/assistant'
 import type {
+  SubtitleFormat,
   CaptionTranslationRequest,
   Transcript,
   TranscriptionProgress,
@@ -73,6 +74,11 @@ export interface IpcInvokeContract {
     args: [request: CaptionTranslationRequest, choice: AiChoice]
     result: IpcResult<Record<string, string>>
   }
+  'captions:export-subtitles': {
+    args: [sessionId: string, format: SubtitleFormat, content: string]
+    result: IpcResult<{ fileName: string } | null>
+  }
+  'captions:import-subtitles': { args: []; result: IpcResult<{ fileName: string; content: string } | null> }
 
   'dub:status': { args: []; result: DubStatus }
   'dub:prepare-model': { args: []; result: IpcResult<DubStatus> }
@@ -209,6 +215,10 @@ export interface ScreenRxApi {
      * text by caption id. Only the captions' text is sent. `ai.cancel` stops it.
      */
     translate(request: CaptionTranslationRequest, choice: AiChoice): Promise<IpcResult<Record<string, string>>>
+    /** Asks where to save and writes a subtitle file already formatted. `null` when the dialog is cancelled. */
+    exportSubtitles(sessionId: string, format: SubtitleFormat, content: string): Promise<IpcResult<{ fileName: string } | null>>
+    /** Asks for an SRT or WebVTT file and returns its text, to be read into captions. `null` when cancelled. */
+    importSubtitles(): Promise<IpcResult<{ fileName: string; content: string } | null>>
   }
   dub: {
     /** Whether this build can dub, and whether the voice model is on this machine. */

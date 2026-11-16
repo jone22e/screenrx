@@ -74,7 +74,9 @@ const api: ScreenRxApi = {
     cancel: () => invoke('captions:cancel'),
     detectLocale: (sessionId, track) => invoke('captions:detect-locale', sessionId, track),
     onProgress: (listener) => subscribe('captions:progress', listener),
-    translate: (request, choice) => invoke('captions:translate', request, choice)
+    translate: (request, choice) => invoke('captions:translate', request, choice),
+    exportSubtitles: (sessionId, format, content) => invoke('captions:export-subtitles', sessionId, format, content),
+    importSubtitles: () => invoke('captions:import-subtitles')
   },
   dub: {
     status: () => invoke('dub:status'),

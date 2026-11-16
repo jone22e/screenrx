@@ -167,19 +167,43 @@ export type AudioSettings = Record<AudioTrackKind, AudioTrackSettings>
 export type CaptionLanguage = 'en' | 'es' | 'zh' | 'pt'
 export const CAPTION_LANGUAGES: readonly CaptionLanguage[] = ['en', 'es', 'zh', 'pt']
 
+/** One word of a caption and when it is spoken (source time), for the word-by-word styles. */
+export interface CaptionWord {
+  text: string
+  startMs: number
+  endMs: number
+}
+
 /** One caption: a line of text shown over a span of SOURCE time. */
 export interface CaptionCue {
   id: string
   startMs: number
   endMs: number
   text: string
+  /**
+   * The words of `text`, in order, each with its own time. Always one per
+   * space-separated word of `text`; spread evenly when the real timing is
+   * unknown (a caption typed by hand, an older project).
+   */
+  words: CaptionWord[]
 }
 
 export type CaptionFont = 'system' | 'rounded' | 'serif' | 'impact' | 'mono'
 /** What keeps the text readable over the video. */
 export type CaptionBackdrop = 'box' | 'outline' | 'shadow' | 'none'
-/** How much text goes into one caption when they are built from a transcript. */
-export type CaptionLength = 'short' | 'medium' | 'long'
+/**
+ * How much text goes into one caption when they are built from a transcript:
+ * `word` is one word at a time, `pair` two or three, the others fill a line.
+ */
+export type CaptionLength = 'word' | 'pair' | 'short' | 'medium' | 'long'
+/**
+ * How the words of a caption are drawn as they are spoken: all alike (`block`),
+ * the spoken one in the highlight colour (`highlight`), or appearing one by one
+ * as they are said (`reveal`).
+ */
+export type CaptionMode = 'block' | 'highlight' | 'reveal'
+/** How a caption comes on screen. */
+export type CaptionAnimation = 'none' | 'pop' | 'fade'
 
 export interface CaptionStyle {
   font: CaptionFont
@@ -194,6 +218,21 @@ export interface CaptionStyle {
   backdropColor: string
   /** Centre of the caption, normalized to the output. */
   position: NormalizedPoint
+  mode: CaptionMode
+  /** Colour of the word being spoken in the `highlight` and `reveal` modes, `#rrggbb`. */
+  highlightColor: string
+  animation: CaptionAnimation
+}
+
+/** Words of `text` spread evenly over `startMs`–`endMs`: the timing used when the real one is unknown. */
+export function spreadWords(text: string, startMs: number, endMs: number): CaptionWord[] {
+  const tokens = text.split(/\s+/).filter((token) => token !== '')
+  const step = (endMs - startMs) / Math.max(tokens.length, 1)
+  return tokens.map((token, index) => ({
+    text: token,
+    startMs: startMs + index * step,
+    endMs: index === tokens.length - 1 ? endMs : startMs + (index + 1) * step
+  }))
 }
 
 /**
@@ -294,7 +333,10 @@ export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
   color: '#ffffff',
   backdrop: 'box',
   backdropColor: '#000000',
-  position: { x: 0.5, y: 0.88 }
+  position: { x: 0.5, y: 0.88 },
+  mode: 'block',
+  highlightColor: '#ffe14d',
+  animation: 'none'
 }
 
 /** A new text: big, in the middle of the frame, with a shadow so it reads over anything. */
@@ -371,7 +413,9 @@ const WEBCAM_SHAPES: readonly WebcamShape[] = ['circle', 'rounded', 'square']
 const WEBCAM_CORNERS: readonly WebcamCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
 export const CAPTION_FONT_IDS: readonly CaptionFont[] = ['system', 'rounded', 'serif', 'impact', 'mono']
 const CAPTION_BACKDROPS: readonly CaptionBackdrop[] = ['box', 'outline', 'shadow', 'none']
-const CAPTION_LENGTHS: readonly CaptionLength[] = ['short', 'medium', 'long']
+export const CAPTION_LENGTHS: readonly CaptionLength[] = ['word', 'pair', 'short', 'medium', 'long']
+export const CAPTION_MODES: readonly CaptionMode[] = ['block', 'highlight', 'reveal']
+export const CAPTION_ANIMATIONS: readonly CaptionAnimation[] = ['none', 'pop', 'fade']
 
 const includes = <T>(options: readonly T[], candidate: unknown): candidate is T =>
   (options as readonly unknown[]).includes(candidate)
@@ -464,7 +508,8 @@ function parseCaptions(value: unknown): CaptionSettings {
     // Cues never overlap: one that starts before the previous one ends is dropped.
     const previous = cues[cues.length - 1]
     if (previous && base.startMs < previous.endMs) continue
-    cues.push({ ...base, text: entry.text.slice(0, CAPTION_LIMITS.maxTextLength) })
+    const text = entry.text.slice(0, CAPTION_LIMITS.maxTextLength)
+    cues.push({ ...base, text, words: parseWords(entry.words, text, base) })
   }
 
   // A translation only holds text for captions that exist; a language with none left is dropped.
@@ -509,8 +554,31 @@ function parseStyle(value: unknown, fallback: CaptionStyle): CaptionStyle {
     position: {
       x: clampRatio(position.x, fallback.position.x, 1),
       y: clampRatio(position.y, fallback.position.y, 1)
-    }
+    },
+    mode: includes(CAPTION_MODES, style.mode) ? style.mode : fallback.mode,
+    highlightColor: isHexColor(style.highlightColor) ? style.highlightColor : fallback.highlightColor,
+    animation: includes(CAPTION_ANIMATIONS, style.animation) ? style.animation : fallback.animation
   }
+}
+
+/**
+ * The words of a saved caption, when they match its text and stay inside its
+ * span; otherwise the text's words spread evenly, which is always usable.
+ */
+function parseWords(value: unknown, text: string, span: { startMs: number; endMs: number }): CaptionWord[] {
+  const tokens = text.split(/\s+/).filter((token) => token !== '')
+  if (Array.isArray(value) && value.length === tokens.length) {
+    const words: CaptionWord[] = []
+    let previousStart = span.startMs
+    for (const [index, entry] of value.entries()) {
+      if (!isRecord(entry) || !isFiniteNumber(entry.startMs) || !isFiniteNumber(entry.endMs)) break
+      if (entry.startMs < previousStart || entry.endMs < entry.startMs || entry.endMs > span.endMs) break
+      words.push({ text: tokens[index] as string, startMs: entry.startMs, endMs: entry.endMs })
+      previousStart = entry.startMs
+    }
+    if (words.length === tokens.length) return words
+  }
+  return spreadWords(text, span.startMs, span.endMs)
 }
 
 /** Texts over the video, sorted by start; they may overlap. Projects saved before them have none. */

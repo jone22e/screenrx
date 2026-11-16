@@ -82,11 +82,15 @@ describe('layoutCaption', () => {
 describe('captionPieces', () => {
   it('breaks languages written with spaces between words', () => {
     expect(captionPieces('olá mundo, tudo bem?')).toEqual([
-      { text: 'olá', spaced: true },
-      { text: 'mundo,', spaced: true },
-      { text: 'tudo', spaced: true },
-      { text: 'bem?', spaced: true }
+      { text: 'olá', spaced: true, wordIndex: 0 },
+      { text: 'mundo,', spaced: true, wordIndex: 1 },
+      { text: 'tudo', spaced: true, wordIndex: 2 },
+      { text: 'bem?', spaced: true, wordIndex: 3 }
     ])
+  })
+
+  it('tells which word each character of Chinese belongs to', () => {
+    expect(captionPieces('大家 好').map((piece) => piece.wordIndex)).toEqual([0, 0, 1])
   })
 
   it('breaks Chinese between characters, keeping punctuation with what it closes', () => {
@@ -96,6 +100,25 @@ describe('captionPieces', () => {
 
   it('keeps a word in Latin letters whole inside Chinese text', () => {
     expect(captionPieces('导出 MP4 视频').map((piece) => piece.text)).toEqual(['导', '出', 'MP4', '视', '频'])
+  })
+})
+
+describe('layoutCaption pieces', () => {
+  it('places each word where it falls in its line', () => {
+    const layout = layoutCaption('olá mundo', style({ position: { x: 0.5, y: 0.5 } }), output, measure)
+    const line = layout?.lines[0]
+    // "olá mundo" is 9 characters: 180 px, from 870 to 1050.
+    expect(line?.pieces.map((piece) => [piece.text, piece.wordIndex, piece.centerX, piece.width])).toEqual([
+      ['olá', 0, 900, 60],
+      ['mundo', 1, 1000, 100]
+    ])
+  })
+
+  it('keeps the word index across wrapped lines', () => {
+    const text = Array.from({ length: 20 }, (_, index) => `palavra${index}`).join(' ')
+    const layout = layoutCaption(text, style(), output, measure)
+    const indices = layout?.lines.flatMap((line) => line.pieces.map((piece) => piece.wordIndex))
+    expect(indices).toEqual(Array.from({ length: 20 }, (_, index) => index))
   })
 })
 

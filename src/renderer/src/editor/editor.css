@@ -650,7 +650,7 @@ kbd {
 /* Ready-made caption looks, each shown as it will be drawn. */
 .looks {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 6px;
 }
 
