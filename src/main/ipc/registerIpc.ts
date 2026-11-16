@@ -1,4 +1,4 @@
-import { access, readFile, stat } from 'node:fs/promises'
+import { access, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Menu, app, dialog, ipcMain, screen, shell, systemPreferences } from 'electron'
 import type { IpcInvokeChannel, IpcInvokeContract } from '@shared/ipc/contract'
@@ -18,7 +18,8 @@ import { parseProject } from '@shared/models/project'
 import type { PermissionKind, PermissionReport } from '@shared/models/permissions'
 import { isSessionId, normalizeSessionTitle } from '@shared/models/session'
 import type { ProjectStore } from '../project/ProjectStore'
-import { isExportTrackName } from '@shared/models/export'
+import { isExportTrackName, parseExportOverrides } from '@shared/models/export'
+import { formatTimecode } from '@shared/format'
 import { AiError } from '../ai/AiCliService'
 import { AI_PROVIDER_SPECS } from '../ai/aiCatalog'
 import type { AiSetupService } from '../ai/AiSetupService'
@@ -87,6 +88,9 @@ export interface IpcDependencies {
 }
 
 type Result<Channel extends IpcInvokeChannel> = IpcInvokeContract[Channel]['result']
+
+/** A cover is one PNG frame; anything bigger than this is not one. */
+const MAX_COVER_BYTES = 64 * 1024 * 1024
 
 /** A subtitle file longer than this is not one of a recording. */
 const MAX_SUBTITLE_CHARS = 5_000_000
@@ -633,12 +637,39 @@ export function registerIpc(deps: IpcDependencies): void {
   }
   const isExportId = (value: unknown): value is string => typeof value === 'string' && value.length <= 64
 
-  handle('export:start', ([sessionId]) =>
+  handle('export:start', ([sessionId, overrides]) =>
     exportResult(async () => {
       if (!isSessionId(sessionId)) throw new ExportError(appError('export-failed', 'invalid session id'))
-      return exports.start(sessionId)
+      const parsed = overrides === null || overrides === undefined ? null : parseExportOverrides(overrides)
+      if (overrides && !parsed) throw new ExportError(appError('export-failed', 'invalid export overrides'))
+      return exports.start(sessionId, parsed)
     })
   )
+
+  handle('export:save-frame', async ([sessionId, timeMs, png]) => {
+    const valid =
+      isSessionId(sessionId) && typeof timeMs === 'number' && Number.isFinite(timeMs) && png instanceof Uint8Array && png.byteLength > 0 && png.byteLength <= MAX_COVER_BYTES
+    if (!valid) return { ok: false, error: appError('invalid-state', 'invalid cover frame') }
+    const manifest = await sessions.read(sessionId)
+    if (!manifest) return { ok: false, error: appError('invalid-state', 'session not found') }
+    const title = (manifest.title ?? manifest.source.label).replace(/[/\\:*?"<>|]/g, '-').trim().slice(0, 80) || 'Capa'
+    const stamp = formatTimecode(Math.max(0, timeMs)).replace(':', '-').replace(',', '.')
+    const options = {
+      title: 'Salvar capa',
+      defaultPath: path.join(app.getPath('pictures'), `${title} capa ${stamp}.png`),
+      filters: [{ name: 'Imagem PNG', extensions: ['png'] }]
+    }
+    const owner = windows.mainWindow
+    const answer = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options)
+    if (answer.canceled || !answer.filePath) return { ok: true, value: null }
+    try {
+      await writeFile(answer.filePath, png)
+      return { ok: true, value: { fileName: path.basename(answer.filePath) } }
+    } catch (error) {
+      logger.error('could not write cover', { sessionId, error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
 
   handle('export:read-chunk', async ([exportId, track, offset, length]) => {
     if (!isExportId(exportId) || !isExportTrackName(track)) throw new Error('Invalid chunk request')

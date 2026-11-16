@@ -28,6 +28,7 @@ const request: AssistantRequest = {
     captionLength: 'medium',
     captionMode: 'block',
     backgroundId: 'aurora',
+    exportPreset: 'custom',
     hasWebcam: false,
     webcamVisible: true,
     hasSystemAudio: true,
@@ -118,6 +119,7 @@ describe('parseAssistantResponse', () => {
       action({ type: 'volume', value: 'music', scale: 0.4 }),
       action({ type: 'volume', value: 'system', scale: 70 }),
       action({ type: 'music-ducking', value: 'heavy' }),
+      action({ type: 'export-preset', value: 'Instagram' }),
       action({ type: 'uncut', startSec: 2, endSec: 5 }),
       action({ type: 'remove-zoom', fromWord: 4, toWord: 5 })
     ])
@@ -138,6 +140,7 @@ describe('parseAssistantResponse', () => {
       { type: 'volume', track: 'music', volume: 0.4 },
       { type: 'volume', track: 'systemAudio', volume: 0.7 },
       { type: 'music-ducking', ducking: 'strong' },
+      { type: 'export-preset', preset: 'reels' },
       { type: 'uncut', startMs: 2000, endMs: 5000 },
       { type: 'remove-zoom', startMs: 6000, endMs: 12_000 }
     ])

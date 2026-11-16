@@ -4,7 +4,8 @@ import { sourceTimeToTimelineTime } from '@engine/time/timeMapping'
 import { formatTimecode } from '@shared/format'
 import type { EditorStore } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
-import { PauseIcon, PlayIcon, SkipStartIcon } from './icons'
+import { createExportPlan } from '@engine/export/exportPlan'
+import { CameraIcon, PauseIcon, PlayIcon, SkipStartIcon } from './icons'
 
 interface Props {
   player: PreviewPlayer
@@ -19,10 +20,27 @@ const speedLabel = (speed: number): string => `${String(speed).replace('.', ',')
  * preview plays at it and the export uses it.
  */
 export function Transport({ player, store }: Props) {
-  const { timeMap, exportSettings } = useSyncExternalStore(store.subscribe, store.getState)
+  const { timeMap, exportSettings, background } = useSyncExternalStore(store.subscribe, store.getState)
   const { speed } = exportSettings
   const timeLabel = useRef<HTMLSpanElement>(null)
   const [playing, setPlaying] = useState(player.playing)
+  const [cover, setCover] = useState<{ busy: boolean; note: string | null }>({ busy: false, note: null })
+  const { session } = store
+
+  /** Saves the frame on screen as a PNG the size of the exported video: the post's cover. */
+  const saveCover = async (): Promise<void> => {
+    player.pause()
+    setCover({ busy: true, note: null })
+    try {
+      const plan = createExportPlan({ width: session.video.widthPx, height: session.video.heightPx }, timeMap, exportSettings, background.aspect)
+      const blob = await player.captureFrame({ width: plan.width, height: plan.height })
+      const png = new Uint8Array(await blob.arrayBuffer())
+      const result = await window.screenrx.export.saveFrame(session.sessionId, sourceTimeToTimelineTime(timeMap, player.currentTimeMs), png)
+      setCover({ busy: false, note: !result.ok ? result.error.message : result.value ? `Capa salva: ${result.value.fileName}` : null })
+    } catch {
+      setCover({ busy: false, note: 'Não foi possível salvar a capa.' })
+    }
+  }
 
   // The clock follows the player directly, without re-rendering React.
   useEffect(() => {
@@ -81,6 +99,21 @@ export function Transport({ player, store }: Props) {
       {speed !== 1 && (
         <span className="transport-output" title="Duração do vídeo exportado nesta velocidade">
           vídeo final: {formatTimecode(timeMap.timelineDurationMs / speed)}
+        </span>
+      )}
+      <button
+        className="transport-button transport-cover"
+        aria-label="Salvar este quadro como capa"
+        title="Salva o quadro na tela como imagem PNG, no tamanho do vídeo exportado, para usar de capa"
+        disabled={cover.busy}
+        onClick={() => void saveCover()}
+      >
+        <CameraIcon />
+        <span>Capa</span>
+      </button>
+      {cover.note && (
+        <span className="transport-note" role="status">
+          {cover.note}
         </span>
       )}
     </div>

@@ -4,11 +4,12 @@ import type {
   CaptionLanguage,
   CaptionLength,
   CaptionMode,
+  ExportPreset,
   FrameAspect,
   FrameFit,
   MusicDucking
 } from './project'
-import { AUDIO_TRACK_KINDS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, MUSIC_DUCKINGS } from './project'
+import { AUDIO_TRACK_KINDS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, MUSIC_DUCKINGS, isExportPreset } from './project'
 
 /**
  * The editing assistant: a conversation with the AI tool in use, which answers
@@ -39,6 +40,8 @@ export interface AssistantEditState {
   captionLength: CaptionLength
   captionMode: CaptionMode
   backgroundId: string | null
+  /** The platform the export is set up for. */
+  exportPreset: ExportPreset
   hasWebcam: boolean
   webcamVisible: boolean
   hasSystemAudio: boolean
@@ -71,6 +74,7 @@ export type AssistantAction =
   | { type: 'caption-animation'; animation: CaptionAnimation }
   | { type: 'background'; presetId: string | null }
   | { type: 'format'; aspect: FrameAspect }
+  | { type: 'export-preset'; preset: ExportPreset }
   | { type: 'framing'; fit: FrameFit }
   | { type: 'webcam'; visible: boolean }
   | { type: 'mute'; track: AudioTrackKind; muted: boolean }
@@ -138,6 +142,7 @@ export function parseAssistantRequest(value: unknown): AssistantRequest | null {
       captionLength: length,
       captionMode: mode,
       backgroundId: typeof edit.backgroundId === 'string' ? edit.backgroundId : null,
+      exportPreset: isExportPreset(edit.exportPreset) ? edit.exportPreset : 'custom',
       hasWebcam: edit.hasWebcam === true,
       webcamVisible: edit.webcamVisible === true,
       hasSystemAudio: edit.hasSystemAudio === true,

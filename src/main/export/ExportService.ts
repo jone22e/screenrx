@@ -3,14 +3,14 @@ import { once } from 'node:events'
 import type { FileHandle } from 'node:fs/promises'
 import { open, rename, rm, stat } from 'node:fs/promises'
 import { buildAudioGraph } from '@engine/export/audioFilters'
-import type { ExportLoudness, MusicSettings } from '@shared/models/project'
+import type { ExportLoudness, ExportPreset, MusicSettings, Project } from '@shared/models/project'
 import type { ExportPlan } from '@engine/export/exportPlan'
 import { createExportPlan } from '@engine/export/exportPlan'
 import { buildTimeMap } from '@engine/time/timeMapping'
 import type { AppError } from '@shared/models/errors'
 import { needsRenderedTrack, renderKey } from '@shared/models/filters'
 import { appError } from '@shared/models/errors'
-import type { ExportJob, ExportResult, ExportTrack, ExportTrackName } from '@shared/models/export'
+import type { ExportJob, ExportOverrides, ExportResult, ExportTrack, ExportTrackName } from '@shared/models/export'
 import { DUB_TRACKS } from '@shared/models/media'
 import type { Logger } from '../logging/logger'
 import type { ProjectStore } from '../project/ProjectStore'
@@ -49,6 +49,16 @@ interface ActiveExport {
   startedAt: number
 }
 
+/** What a platform's file is called after the recording's name. */
+const PRESET_SUFFIXES: Record<Exclude<ExportPreset, 'custom'>, string> = {
+  reels: 'Reels',
+  tiktok: 'TikTok',
+  shorts: 'Shorts',
+  youtube: 'YouTube',
+  linkedin: 'LinkedIn',
+  x: 'X'
+}
+
 /** Largest slice of a track the renderer may ask for at once. */
 const MAX_CHUNK_BYTES = 64 * 1024 * 1024
 const BYTES_PER_PIXEL = 4
@@ -71,12 +81,15 @@ export class ExportService {
     return this.active !== null
   }
 
-  async start(sessionId: string): Promise<ExportJob> {
+  async start(sessionId: string, overrides: ExportOverrides | null = null): Promise<ExportJob> {
     if (this.active) throw new ExportError(appError('export-busy'))
     const { ffmpeg, sessions, projects, logger } = this.deps
 
     const session = await projects.open(sessionId)
-    const { project } = session
+    // A batch makes one file per platform with its own settings and shape; the project itself is not changed.
+    const project: Project = overrides
+      ? { ...session.project, export: overrides.export, background: { ...session.project.background, aspect: overrides.aspect } }
+      : session.project
     const map = buildTimeMap(session.durationMs, project.effects)
     const plan = createExportPlan(
       { width: session.video.widthPx, height: session.video.heightPx },
@@ -85,7 +98,7 @@ export class ExportService {
       project.background.aspect
     )
 
-    const fileName = suggestedFileName(session.title, session.createdAt, plan.speed)
+    const fileName = suggestedFileName(session.title, session.createdAt, plan.speed, project.export.preset)
     const outputPath = await this.deps.chooseOutputPath(fileName)
     if (!outputPath) throw new ExportError(appError('export-cancelled'))
 
@@ -347,8 +360,8 @@ function baseName(filePath: string): string {
   return filePath.slice(filePath.lastIndexOf('/') + 1)
 }
 
-/** `Display 1 2026-10-03 21.29 2x.mp4`, safe on every file system. */
-export function suggestedFileName(title: string, createdAt: string, speed: number): string {
+/** `Display 1 2026-10-03 21.29 2x Reels.mp4`, safe on every file system. */
+export function suggestedFileName(title: string, createdAt: string, speed: number, preset: ExportPreset = 'custom'): string {
   const date = new Date(createdAt)
   const pad = (value: number): string => String(value).padStart(2, '0')
   const stamp = Number.isNaN(date.getTime())
@@ -357,7 +370,8 @@ export function suggestedFileName(title: string, createdAt: string, speed: numbe
   const printable = [...title].filter((character) => character.charCodeAt(0) >= 32).join('')
   const safeTitle = printable.replace(/[/\\:*?"<>|]/g, '-').trim().slice(0, 80) || 'Gravação'
   const suffix = speed === 1 ? '' : ` ${String(speed).replace('.', ',')}x`
-  return `${safeTitle}${stamp}${suffix}.mp4`
+  const platform = preset === 'custom' ? '' : ` ${PRESET_SUFFIXES[preset]}`
+  return `${safeTitle}${stamp}${suffix}${platform}.mp4`
 }
 
 function toExportError(error: unknown): ExportError {

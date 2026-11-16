@@ -1,4 +1,6 @@
 import type { ExportPlan } from '@engine/export/exportPlan'
+import type { ExportSettings, FrameAspect } from './project'
+import { isFrameAspect, parseExportSettings } from './project'
 
 /**
  * A video track as the exporter reads it: where each encoded frame sits in
@@ -41,4 +43,20 @@ export interface ExportResult {
   exportId: string
   fileName: string
   sizeBytes: number
+}
+
+/**
+ * Settings an export runs with in place of the project's — how a batch
+ * exports one file per platform without touching the project.
+ */
+export interface ExportOverrides {
+  export: ExportSettings
+  aspect: FrameAspect
+}
+
+export function parseExportOverrides(value: unknown): ExportOverrides | null {
+  if (typeof value !== 'object' || value === null) return null
+  const { export: settings, aspect } = value as Record<string, unknown>
+  if (!isFrameAspect(aspect)) return null
+  return { export: parseExportSettings(settings), aspect }
 }

@@ -15,7 +15,8 @@ import type { FilterRenderProgress, FilterRenderRequest, FilterTrack } from '../
 import type {
   MusicTrack, EditorSession } from '../models/editor'
 import type { IpcResult } from '../models/errors'
-import type { ExportJob, ExportResult, ExportTrackName } from '../models/export'
+import type {
+  ExportOverrides, ExportJob, ExportResult, ExportTrackName } from '../models/export'
 import type { MeetRoom, MeetSettings } from '../models/meet'
 import type { PermissionKind, PermissionReport } from '../models/permissions'
 import type { Project } from '../models/project'
@@ -106,7 +107,11 @@ export interface IpcInvokeContract {
     result: IpcResult<AssistantReply>
   }
 
-  'export:start': { args: [sessionId: string]; result: IpcResult<ExportJob> }
+  'export:start': { args: [sessionId: string, overrides: ExportOverrides | null]; result: IpcResult<ExportJob> }
+  'export:save-frame': {
+    args: [sessionId: string, timeMs: number, png: Uint8Array]
+    result: IpcResult<{ fileName: string } | null>
+  }
   'export:read-chunk': {
     args: [exportId: string, track: ExportTrackName, offset: number, length: number]
     result: Uint8Array
@@ -274,8 +279,13 @@ export interface ScreenRxApi {
     cancel(): Promise<void>
   }
   export: {
-    /** Asks where to save and starts the encoder; the caller then renders and sends every frame. */
-    start(sessionId: string): Promise<IpcResult<ExportJob>>
+    /**
+     * Asks where to save and starts the encoder; the caller then renders and sends every frame.
+     * With `overrides`, the file is made with those settings instead of the project's (a batch).
+     */
+    start(sessionId: string, overrides?: ExportOverrides | null): Promise<IpcResult<ExportJob>>
+    /** Asks where to save one frame of the finished video, already drawn as a PNG, as a cover. `null` when cancelled. */
+    saveFrame(sessionId: string, timeMs: number, png: Uint8Array): Promise<IpcResult<{ fileName: string } | null>>
     readChunk(exportId: string, track: ExportTrackName, offset: number, length: number): Promise<Uint8Array>
     writeFrame(exportId: string, frame: Uint8Array): Promise<IpcResult<null>>
     finish(exportId: string): Promise<IpcResult<ExportResult>>

@@ -2,6 +2,7 @@ import { formatTimecode } from '@shared/format'
 import type { AssistantAction } from '@shared/models/assistant'
 import type { CaptionLanguage } from '@shared/models/project'
 import { CAPTION_LANGUAGE_NAMES } from '@engine/captions/captionTranslation'
+import { platformPreset } from '@engine/export/platformPresets'
 import { BACKGROUND_PRESETS } from '@engine/rendering/backgrounds'
 import type { EditorStore } from './EditorStore'
 import { FRAME_ASPECT_LABELS } from './frameAspects'
@@ -95,6 +96,12 @@ export function applyAssistantActions(
           store.setBackground({ presetId: action.presetId })
           const preset = BACKGROUND_PRESETS.find((candidate) => candidate.id === action.presetId)
           did(preset ? `Fundo ${preset.name}` : 'Sem fundo', true)
+          break
+        }
+        case 'export-preset': {
+          store.applyExportPreset(action.preset)
+          const platform = platformPreset(action.preset)
+          did(platform ? `Exportação para ${platform.label}` : 'Exportação com ajustes manuais', true)
           break
         }
         case 'format':

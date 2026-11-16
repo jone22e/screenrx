@@ -54,7 +54,7 @@ describe('parseProject', () => {
 
   it('repairs export settings rather than rejecting the project', () => {
     const parsed = parseProject({ ...createProject(sessionId), export: { speed: -3 } }, sessionId)
-    expect(parsed?.export).toEqual({ format: 'mp4', quality: 'high', compression: 0, fps: 30, speed: 1, loudness: 'off' })
+    expect(parsed?.export).toEqual({ format: 'mp4', quality: 'high', compression: 0, fps: 30, speed: 1, loudness: 'off', preset: 'custom' })
     const level = (compression: unknown) =>
       parseProject({ ...createProject(sessionId), export: { ...DEFAULT_EXPORT_SETTINGS, compression } }, sessionId)?.export.compression
     expect(level(3)).toBe(3)

@@ -7,7 +7,7 @@ import type {
 } from '@shared/models/assistant'
 import { isAudioTrackKind } from '@shared/models/assistant'
 import type { TranscriptWord } from '@shared/models/captions'
-import { CAPTION_ANIMATIONS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, FRAME_ASPECTS, FRAME_FITS, MUSIC_DUCKINGS } from '@shared/models/project'
+import { CAPTION_ANIMATIONS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, EXPORT_PRESETS, FRAME_ASPECTS, FRAME_FITS, MUSIC_DUCKINGS } from '@shared/models/project'
 import { EXPORT_CONFIG } from '../export/exportConfig'
 import { BACKGROUND_PRESETS } from '../rendering/backgrounds'
 import { TRIM_CONFIG } from '../timeline/trimConfig'
@@ -39,6 +39,7 @@ const ACTION_TYPES = [
   'caption-animation',
   'background',
   'format',
+  'export-preset',
   'framing',
   'webcam',
   'mute',
@@ -98,6 +99,7 @@ Actions and their fields:
 - "caption-animation": how a caption comes on screen. value = "none", "pop" or "fade".
 - "background": value = ${BACKGROUND_PRESETS.map((preset) => `"${preset.id}" (${preset.name})`).join(', ')} or "none".
 - "format": the shape of the finished video. value = "native" (the recording's own), "9:16" (vertical: Reels, TikTok, Shorts), "1:1" (square) or "4:5" (portrait, feed).
+- "export-preset": sets the export up for a platform — its resolution, codec, frame rate and shape (Reels, TikTok and Shorts become vertical). value = ${EXPORT_PRESETS.filter((preset) => preset !== 'custom').map((preset) => `"${preset}"`).join(', ')} ("x" is X/Twitter) or "custom".
 - "framing": how the recording goes into a format of another shape. value = "fit" (all of it, smaller, over the background), "fill" (enlarged to fill the frame; a part of it is used), "follow-mouse" (fills, and the part in use follows the pointer), "follow-zoom" (fills, and it follows the zooms) or "follow-object" (fills, and it follows an object the user marked; the user has to mark it).
 - "webcam": value = "show" or "hide".
 - "mute" / "unmute": value = "microphone" or "system".
@@ -141,6 +143,7 @@ function describeEdit(edit: AssistantEditState): string {
       ? `Captions: ${edit.captionsVisible ? 'shown' : 'hidden'}, language ${edit.captionLanguage ?? 'original'}, length ${edit.captionLength}, mode ${edit.captionMode}`
       : 'Captions: none generated yet (the user generates them in the Legendas tab)',
     `Background: ${edit.backgroundId ?? 'none'}`,
+    `Export preset: ${edit.exportPreset}`,
     edit.hasWebcam ? `Webcam: ${edit.webcamVisible ? 'shown' : 'hidden'}` : 'Webcam: not recorded',
     `Microphone: ${onOff(!edit.microphoneMuted)}, volume ${level(edit.microphoneVolume)}`,
     edit.hasSystemAudio ? `System audio: ${onOff(!edit.systemAudioMuted)}, volume ${level(edit.systemAudioVolume)}` : 'System audio: not recorded',
@@ -328,6 +331,12 @@ export function parseAssistantResponse(
                 ? '4:5'
                 : text
         if ((FRAME_ASPECTS as readonly string[]).includes(aspect ?? '')) actions.push({ type: 'format', aspect: aspect as (typeof FRAME_ASPECTS)[number] })
+        break
+      }
+      case 'export-preset': {
+        const preset =
+          text === 'instagram' ? 'reels' : text === 'twitter' ? 'x' : text === 'youtube shorts' ? 'shorts' : text === 'none' ? 'custom' : text
+        if (includes(EXPORT_PRESETS, preset)) actions.push({ type: 'export-preset', preset })
         break
       }
       case 'framing': {

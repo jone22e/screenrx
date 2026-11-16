@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { EXPORT_CONFIG } from '@engine/export/exportConfig'
 import { createExportPlan, estimatedFileBytes } from '@engine/export/exportPlan'
+import type { PlatformPreset } from '@engine/export/platformPresets'
+import { PLATFORM_PRESETS, applyPlatformPreset, platformPreset, presetWarnings } from '@engine/export/platformPresets'
 import { formatBytes, formatClock } from '@shared/format'
-import type { ExportResult } from '@shared/models/export'
-import type { ExportCompression, ExportFps } from '@shared/models/project'
+import type { ExportOverrides, ExportResult } from '@shared/models/export'
+import type { ExportCompression, ExportFps, ExportPreset } from '@shared/models/project'
 import { EXPORT_COMPRESSION_LEVELS, EXPORT_FRAME_RATES } from '@shared/models/project'
 import { FRAME_ASPECT_LABELS } from './frameAspects'
 import { ExportAbortedError, ExportFailedError, renderExport } from '../export/renderExport'
@@ -14,11 +16,17 @@ interface Props {
   onClose: () => void
 }
 
+/** One file of a batch: which platform, and what it is made with. */
+interface BatchItem {
+  label: string
+  overrides: ExportOverrides | null
+}
+
 type Phase =
   | { kind: 'settings' }
-  | { kind: 'rendering'; exportId: string | null; framesDone: number; frameCount: number }
-  | { kind: 'done'; result: ExportResult }
-  | { kind: 'failed'; message: string }
+  | { kind: 'rendering'; exportId: string | null; framesDone: number; frameCount: number; item: number; total: number; label: string }
+  | { kind: 'done'; results: ExportResult[] }
+  | { kind: 'failed'; message: string; results: ExportResult[] }
 
 const FPS_HINTS: Record<ExportFps, string> = {
   24: 'Aparência de cinema. O arquivo é o menor e o mais rápido de exportar.',
@@ -41,37 +49,48 @@ const COMPRESSION_LABELS: Record<ExportCompression, { label: string; hint: strin
 export function ExportDialog({ store, onClose }: Props) {
   const { exportSettings, timeMap, background } = useSyncExternalStore(store.subscribe, store.getState)
   const [phase, setPhase] = useState<Phase>({ kind: 'settings' })
+  // Other platforms to make a file for in the same go, each with its own settings and shape.
+  const [batch, setBatch] = useState<ReadonlySet<Exclude<ExportPreset, 'custom'>>>(() => new Set())
   const abort = useRef<AbortController | null>(null)
   const { session } = store
 
   // Closing the editor mid-export must not leave an encoder running.
   useEffect(() => () => abort.current?.abort(), [])
 
-  const plan = createExportPlan(
-    { width: session.video.widthPx, height: session.video.heightPx },
-    timeMap,
-    exportSettings,
-    background.aspect
-  )
+  const sourceSize = { width: session.video.widthPx, height: session.video.heightPx }
+  const plan = createExportPlan(sourceSize, timeMap, exportSettings, background.aspect)
+  const withAudio = session.audio.length > 0 || store.getState().musicTrack !== null
+  const platform = platformPreset(exportSettings.preset)
+  const warnings = platform ? presetWarnings(platform, plan, estimatedFileBytes(plan, withAudio), background.aspect) : []
 
-  const run = async (): Promise<void> => {
-    const controller = new AbortController()
-    abort.current = controller
-    setPhase({ kind: 'rendering', exportId: null, framesDone: 0, frameCount: plan.frameCount })
-    // The encoder reads the project from disk, so it must be up to date.
-    await store.flush()
+  /** The settings and shape a platform's file in the batch is made with. */
+  const overridesFor = (preset: PlatformPreset): ExportOverrides => ({
+    export: applyPlatformPreset(exportSettings, preset),
+    aspect: preset.aspect ?? background.aspect
+  })
 
-    const started = await window.screenrx.export.start(session.sessionId)
+  const toggleBatch = (preset: Exclude<ExportPreset, 'custom'>): void => {
+    setBatch((current) => {
+      const next = new Set(current)
+      if (next.has(preset)) next.delete(preset)
+      else next.add(preset)
+      return next
+    })
+  }
+
+  /** Exports one file; returns the result, or `null` when the user gave up on it. Throws on failure. */
+  const exportOne = async (item: BatchItem, index: number, total: number, signal: AbortSignal): Promise<ExportResult | null> => {
+    setPhase({ kind: 'rendering', exportId: null, framesDone: 0, frameCount: plan.frameCount, item: index, total, label: item.label })
+    const started = await window.screenrx.export.start(session.sessionId, item.overrides)
     if (!started.ok) {
-      setPhase(
-        started.error.code === 'export-cancelled'
-          ? { kind: 'settings' }
-          : { kind: 'failed', message: started.error.message }
-      )
-      return
+      if (started.error.code === 'export-cancelled') return null
+      throw new ExportFailedError(started.error)
     }
     const job = started.value
-    const project = store.snapshot()
+    const base = store.snapshot()
+    const project = item.overrides
+      ? { ...base, export: item.overrides.export, background: { ...base.background, aspect: item.overrides.aspect } }
+      : base
     try {
       await renderExport(
         job,
@@ -79,20 +98,47 @@ export function ExportDialog({ store, onClose }: Props) {
         project,
         store.getState().objectTrack,
         (framesDone) =>
-          setPhase({ kind: 'rendering', exportId: job.exportId, framesDone, frameCount: job.plan.frameCount }),
-        controller.signal
+          setPhase({ kind: 'rendering', exportId: job.exportId, framesDone, frameCount: job.plan.frameCount, item: index, total, label: item.label }),
+        signal
       )
       const finished = await window.screenrx.export.finish(job.exportId)
-      setPhase(finished.ok ? { kind: 'done', result: finished.value } : { kind: 'failed', message: finished.error.message })
+      if (!finished.ok) throw new ExportFailedError(finished.error)
+      return finished.value
     } catch (error) {
       await window.screenrx.export.cancel(job.exportId)
-      if (error instanceof ExportAbortedError) setPhase({ kind: 'settings' })
-      else if (error instanceof ExportFailedError) setPhase({ kind: 'failed', message: error.appError.message })
-      else setPhase({ kind: 'failed', message: 'A exportação falhou.' })
+      throw error
+    }
+  }
+
+  const run = async (): Promise<void> => {
+    const controller = new AbortController()
+    abort.current = controller
+    // The encoder reads the project from disk, so it must be up to date.
+    await store.flush()
+    const items: BatchItem[] = [
+      { label: platform ? platform.label : 'Vídeo', overrides: null },
+      ...PLATFORM_PRESETS.filter((preset) => batch.has(preset.id) && preset.id !== exportSettings.preset).map((preset) => ({
+        label: preset.label,
+        overrides: overridesFor(preset)
+      }))
+    ]
+    const results: ExportResult[] = []
+    try {
+      for (const [index, item] of items.entries()) {
+        const result = await exportOne(item, index + 1, items.length, controller.signal)
+        if (result === null) break
+        results.push(result)
+      }
+      setPhase(results.length === 0 ? { kind: 'settings' } : { kind: 'done', results })
+    } catch (error) {
+      if (error instanceof ExportAbortedError) setPhase(results.length === 0 ? { kind: 'settings' } : { kind: 'done', results })
+      else if (error instanceof ExportFailedError) setPhase({ kind: 'failed', message: error.appError.message, results })
+      else setPhase({ kind: 'failed', message: 'A exportação falhou.', results })
     }
   }
 
   const rendering = phase.kind === 'rendering'
+  const batchCount = PLATFORM_PRESETS.filter((preset) => batch.has(preset.id) && preset.id !== exportSettings.preset).length
   return (
     <div className="dialog-backdrop" role="presentation">
       <div className="dialog" role="dialog" aria-modal="true" aria-label="Exportar vídeo">
@@ -100,6 +146,42 @@ export function ExportDialog({ store, onClose }: Props) {
 
         {phase.kind === 'settings' && (
           <>
+            <div className="dialog-field">
+              <span className="dialog-label">Para onde vai</span>
+              <div className="presets" role="radiogroup" aria-label="Plataforma">
+                <button
+                  className="preset"
+                  role="radio"
+                  aria-checked={exportSettings.preset === 'custom'}
+                  onClick={() => store.applyExportPreset('custom')}
+                >
+                  Manual
+                </button>
+                {PLATFORM_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    className="preset"
+                    role="radio"
+                    aria-checked={exportSettings.preset === preset.id}
+                    title={preset.hint}
+                    onClick={() => store.applyExportPreset(preset.id)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+              </div>
+              <p className="panel-hint">
+                {platform
+                  ? platform.hint
+                  : 'Escolha a plataforma para acertar resolução, codec, quadros por segundo e o formato de uma vez. Os ajustes abaixo continuam livres.'}
+              </p>
+              {warnings.map((warning) => (
+                <p key={warning.kind} className="dialog-warning" role="alert">
+                  {warning.message}
+                </p>
+              ))}
+            </div>
+
             <div className="dialog-field">
               <span className="dialog-label">Velocidade</span>
               <div className="chips" role="radiogroup" aria-label="Velocidade de exportação">
@@ -130,7 +212,7 @@ export function ExportDialog({ store, onClose }: Props) {
                     className="chip"
                     role="radio"
                     aria-checked={fps === exportSettings.fps}
-                    onClick={() => store.setExportSettings({ fps })}
+                    onClick={() => store.setExportSettings({ fps, preset: 'custom' })}
                   >
                     {fps} fps
                   </button>
@@ -148,7 +230,7 @@ export function ExportDialog({ store, onClose }: Props) {
                     className="chip"
                     role="radio"
                     aria-checked={quality === exportSettings.quality}
-                    onClick={() => store.setExportSettings({ quality })}
+                    onClick={() => store.setExportSettings({ quality, preset: 'custom' })}
                   >
                     {quality === 'high' ? 'Alta' : 'Padrão'}
                   </button>
@@ -168,7 +250,9 @@ export function ExportDialog({ store, onClose }: Props) {
                 max={EXPORT_COMPRESSION_LEVELS.length - 1}
                 step={1}
                 value={exportSettings.compression}
-                onChange={(event) => store.setExportSettings({ compression: Number(event.target.value) as ExportCompression })}
+                onChange={(event) =>
+                  store.setExportSettings({ compression: Number(event.target.value) as ExportCompression, preset: 'custom' })
+                }
               />
               <div className="dialog-slider-ends" aria-hidden="true">
                 <span>Nenhuma</span>
@@ -195,16 +279,32 @@ export function ExportDialog({ store, onClose }: Props) {
               </div>
               <div>
                 <dt>Tamanho estimado</dt>
-                <dd>≈ {formatBytes(estimatedFileBytes(plan, session.audio.length > 0))}</dd>
+                <dd>≈ {formatBytes(estimatedFileBytes(plan, withAudio))}</dd>
               </div>
             </dl>
+
+            <div className="dialog-field">
+              <span className="dialog-label">Exportar também para</span>
+              <div className="batch-list">
+                {PLATFORM_PRESETS.filter((preset) => preset.id !== exportSettings.preset).map((preset) => (
+                  <label key={preset.id} className="check">
+                    <input type="checkbox" checked={batch.has(preset.id)} onChange={() => toggleBatch(preset.id)} />
+                    <span>{preset.label}</span>
+                  </label>
+                ))}
+              </div>
+              <p className="panel-hint">
+                Um arquivo a mais por plataforma, cada um no formato e nos ajustes dela, um depois do outro. O nome de
+                cada arquivo já vem com a plataforma; é só confirmar onde salvar.
+              </p>
+            </div>
 
             <div className="dialog-actions">
               <button className="panel-button" onClick={onClose}>
                 Cancelar
               </button>
               <button className="panel-button panel-button-primary" onClick={() => void run()}>
-                Exportar MP4
+                {batchCount > 0 ? `Exportar ${batchCount + 1} arquivos` : 'Exportar MP4'}
               </button>
             </div>
           </>
@@ -213,6 +313,7 @@ export function ExportDialog({ store, onClose }: Props) {
         {rendering && (
           <>
             <p className="panel-hint">
+              {phase.total > 1 && `Arquivo ${phase.item} de ${phase.total} · ${phase.label} · `}
               {phase.exportId === null
                 ? 'Preparando…'
                 : `Renderizando quadro ${phase.framesDone} de ${phase.frameCount}`}
@@ -226,24 +327,29 @@ export function ExportDialog({ store, onClose }: Props) {
           </>
         )}
 
+        {(phase.kind === 'done' || phase.kind === 'failed') && phase.results.length > 0 && (
+          <div className="dialog-results">
+            {phase.results.map((result) => (
+              <p key={result.exportId} className="dialog-result">
+                <strong>{result.fileName}</strong>
+                <span className="panel-hint">{formatBytes(result.sizeBytes)}</span>
+              </p>
+            ))}
+          </div>
+        )}
+
         {phase.kind === 'done' && (
-          <>
-            <p className="dialog-result">
-              <strong>{phase.result.fileName}</strong>
-              <span className="panel-hint">{formatBytes(phase.result.sizeBytes)}</span>
-            </p>
-            <div className="dialog-actions">
-              <button
-                className="panel-button"
-                onClick={() => void window.screenrx.export.reveal(phase.result.exportId)}
-              >
-                Mostrar no Finder
-              </button>
-              <button className="panel-button panel-button-primary" onClick={onClose}>
-                Concluir
-              </button>
-            </div>
-          </>
+          <div className="dialog-actions">
+            <button
+              className="panel-button"
+              onClick={() => void window.screenrx.export.reveal((phase.results[phase.results.length - 1] as ExportResult).exportId)}
+            >
+              Mostrar no Finder
+            </button>
+            <button className="panel-button panel-button-primary" onClick={onClose}>
+              Concluir
+            </button>
+          </div>
         )}
 
         {phase.kind === 'failed' && (

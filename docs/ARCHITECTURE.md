@@ -367,8 +367,11 @@ gravação inteira: `cameraWithin` o leva para dentro da parte usada; `frameToSo
 faz o inverso no clique de foco. "Fundo: Aurora · Alterar em Fundo" leva à
 ferramenta Fundo. **Áreas seguras** (só no 9:16): um interruptor, preferência do
 Mac (`common/safeAreas.ts`, localStorage), **desligado até o usuário ligar**, faz
-o `PreviewPlayer` marcar no preview as faixas que a interface dos apps cobre (10%
-no topo, 20% embaixo, coluna de botões à direita) — hachuradas, tracejadas e com
+o `PreviewPlayer` marcar no preview as faixas que a interface dos apps cobre
+(`engine/rendering/safeZones.ts`: 10% no topo, 20% embaixo, coluna de botões à
+direita; as posições "Topo" e "Base" das legendas vêm de `captionPlacementY`, que
+no 9:16 as põe fora dessas faixas, e `setBackground` leva a legenda junto ao
+trocar o formato) — hachuradas, tracejadas e com
 nome, porque uma tinta lisa sobre o vídeo foi lida como "manchas" no vídeo (Jone,
 2026-10-09); nunca sai na exportação. O rodapé mostra a saída
 ("1080 × 1920 · 30 fps", pelo plano de exportação). O preview redimensiona o canvas
@@ -909,6 +912,26 @@ FFmpeg: codifica H.264 uma única vez, processa o áudio, gera o MP4
 
 - O renderer desenha cada quadro de saída diretamente no seu instante final. Uma
   exportação em 2× tem metade dos quadros; não existe render em 1× recodificado.
+- **Plataforma** (`ExportSettings.preset`, primeiro campo do diálogo): Reels,
+  TikTok, Shorts, YouTube, LinkedIn, X ou "Manual". `engine/export/platformPresets.ts`
+  guarda, por plataforma, o que ela quer (formato, qualidade, compactação, fps) e
+  o que recusa (duração e tamanho máximos, publicados por cada uma em 2026).
+  `EditorStore.applyExportPreset` aplica os ajustes e o formato em um passo de
+  desfazer; mexer em fps, qualidade ou compactação depois volta o preset a
+  "Manual". `presetWarnings` compara o plano com os limites e o diálogo mostra
+  avisos (duração, tamanho estimado, formato); nada é impedido. O nome do
+  arquivo ganha a plataforma (`… Reels.mp4`). O assistente tem a ação
+  `export-preset`.
+- **Lote** ("Exportar também para"): o diálogo exporta um arquivo por plataforma
+  marcada, um após o outro, cada um com `ExportOverrides` (ajustes e formato da
+  plataforma) passados ao `export:start`; o `ExportService` monta o plano com
+  o projeto sobreposto e o renderer desenha com o mesmo projeto sobreposto, então
+  o `project.json` não muda. Cada arquivo abre o diálogo de salvar com o nome
+  já com a plataforma.
+- **Capa** (botão "Capa" no `Transport`): `PreviewPlayer.captureFrame` desenha o
+  quadro atual com `composeFrame` no tamanho do plano de exportação (sem as
+  guias do preview) e o envia como PNG a `export:save-frame`, que abre o diálogo
+  de salvar em Imagens com o nome da gravação e o instante.
 - **Compactação** (`ExportSettings.compression`, 0 a 4, controle deslizante no
   diálogo): os níveis estão em `EXPORT_CONFIG.compressionLevels` — 0 e 1 são H.264
   (100% e 72% do bitrate), 2 a 4 são HEVC/H.265 (55%, 40% e 30%), com o áudio

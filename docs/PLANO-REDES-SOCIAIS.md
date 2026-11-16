@@ -123,7 +123,18 @@ timeline. Assistente: `mute` já existe; ganha `volume` e `music-ducking`.
 Pronto quando: música importada toca abaixo da fala, abaixa quando há voz,
 entra e sai com fade, e a exportação mede −14 LUFS no `ffmpeg -af ebur128`.
 
-## Fase C — Presets por plataforma, zonas seguras e capa (P)
+## Fase C — Presets por plataforma, zonas seguras e capa (P) — FEITA em 2026-11-16
+
+O que entrou: presets Reels, TikTok, Shorts, YouTube, LinkedIn e X no diálogo
+de exportação (ajustes + formato em um passo), avisos de duração, tamanho e
+formato, exportação em lote por `ExportOverrides` sem mexer no projeto, sufixo
+da plataforma no nome do arquivo, zonas seguras movidas para o motor com
+"Topo"/"Base" das legendas fora das faixas no 9:16, botão "Capa" no transport
+(PNG no tamanho da exportação, salvo em Imagens) e ação `export-preset` do
+assistente. Não feito: moldura de celular no preview (fase H). Verificado por
+testes; o diálogo, o lote e a capa não foram clicados no app.
+
+Plano original, para referência:
 
 Modelo: `ExportSettings` ganha `preset: 'custom' | 'reels' | 'tiktok' | 'shorts' | 'youtube' | 'linkedin' | 'x'`.
 Tabela em `src/engine/export/platformPresets.ts`: aspecto sugerido, largura

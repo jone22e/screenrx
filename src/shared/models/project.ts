@@ -83,6 +83,7 @@ export interface ExportSettings {
    */
   speed: number
   loudness: ExportLoudness
+  preset: ExportPreset
 }
 
 /**
@@ -192,6 +193,11 @@ export const DEFAULT_MUSIC: MusicSettings = { volume: 0.25, ducking: 'light', lo
 
 /** Final loudness of the exported audio: as mixed, or normalized to what the social platforms expect (−14 LUFS). */
 export type ExportLoudness = 'off' | 'social'
+
+/** Where the video is going, which sets resolution, codec and frame rate and tells what the platform refuses; `custom` is by hand. */
+export type ExportPreset = 'custom' | 'reels' | 'tiktok' | 'shorts' | 'youtube' | 'linkedin' | 'x'
+export const EXPORT_PRESETS: readonly ExportPreset[] = ['custom', 'reels', 'tiktok', 'shorts', 'youtube', 'linkedin', 'x']
+export const isExportPreset = (value: unknown): value is ExportPreset => (EXPORT_PRESETS as readonly unknown[]).includes(value)
 
 /** Languages captions can be translated into. */
 export type CaptionLanguage = 'en' | 'es' | 'zh' | 'pt'
@@ -340,7 +346,8 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   compression: 0,
   fps: 30,
   speed: 1,
-  loudness: 'social'
+  loudness: 'social',
+  preset: 'custom'
 }
 
 export const BACKGROUND_LIMITS = { maxPaddingRatio: 0.16, maxCornerRadiusRatio: 0.05 } as const
@@ -408,6 +415,8 @@ export const DEFAULT_BACKGROUND: BackgroundSettings = {
   cornerRadiusRatio: 0.014,
   shadow: true
 }
+
+export const isFrameAspect = (value: unknown): value is FrameAspect => (FRAME_ASPECTS as readonly unknown[]).includes(value)
 
 export function createProject(sessionId: string, effects: TimelineEffect[] = []): Project {
   return {
@@ -707,7 +716,6 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
     effects.push(effect)
   }
 
-  const settings = isRecord(value.export) ? value.export : {}
   return {
     schemaVersion: PROJECT_SCHEMA_VERSION,
     sessionId,
@@ -723,20 +731,27 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
         isRecord(value.dub) && includes(CAPTION_LANGUAGES, value.dub.language) ? value.dub.language : null
     },
     filters: parseFilterSettings(value.filters),
-    export: {
-      format: 'mp4',
-      quality: settings.quality === 'standard' ? 'standard' : 'high',
-      // The first version of this was 'normal' | 'compact'.
-      compression: includes(EXPORT_COMPRESSION_LEVELS, settings.compression)
-        ? settings.compression
-        : settings.compression === 'compact'
-          ? 2
-          : DEFAULT_EXPORT_SETTINGS.compression,
-      // Projects saved before the frame rate could be chosen were exported at the default.
-      fps: isExportFps(settings.fps) ? settings.fps : DEFAULT_EXPORT_SETTINGS.fps,
-      speed: isFiniteNumber(settings.speed) && settings.speed > 0 ? settings.speed : 1,
-      // Projects saved before the loudness could be chosen go out as they were mixed.
-      loudness: settings.loudness === 'social' ? 'social' : 'off'
-    }
+    export: parseExportSettings(value.export)
+  }
+}
+
+/** Export settings as saved; whatever is not well-formed takes the default. */
+export function parseExportSettings(value: unknown): ExportSettings {
+  const settings = isRecord(value) ? value : {}
+  return {
+    format: 'mp4',
+    quality: settings.quality === 'standard' ? 'standard' : 'high',
+    // The first version of this was 'normal' | 'compact'.
+    compression: includes(EXPORT_COMPRESSION_LEVELS, settings.compression)
+      ? settings.compression
+      : settings.compression === 'compact'
+        ? 2
+        : DEFAULT_EXPORT_SETTINGS.compression,
+    // Projects saved before the frame rate could be chosen were exported at the default.
+    fps: isExportFps(settings.fps) ? settings.fps : DEFAULT_EXPORT_SETTINGS.fps,
+    speed: isFiniteNumber(settings.speed) && settings.speed > 0 ? settings.speed : 1,
+    // Projects saved before the loudness could be chosen go out as they were mixed.
+    loudness: settings.loudness === 'social' ? 'social' : 'off',
+    preset: isExportPreset(settings.preset) ? settings.preset : 'custom'
   }
 }

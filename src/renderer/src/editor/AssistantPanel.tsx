@@ -38,6 +38,7 @@ function editStateOf(store: EditorStore): AssistantEditState {
     captionLength: state.captions.length,
     captionMode: state.captions.style.mode,
     backgroundId: state.background.presetId,
+    exportPreset: state.exportSettings.preset,
     hasWebcam: session.webcam !== null,
     webcamVisible: state.webcam.visible,
     hasSystemAudio: session.audio.some((track) => track.kind === 'systemAudio'),

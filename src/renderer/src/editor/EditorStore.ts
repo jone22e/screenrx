@@ -1,4 +1,6 @@
 import { CAPTION_CONFIG } from '@engine/captions/captionConfig'
+import { applyPlatformPreset, platformPreset } from '@engine/export/platformPresets'
+import { captionPlacementOf, captionPlacementY } from '@engine/rendering/safeZones'
 import type { SpeechSpan } from '@engine/audio/musicLevel'
 import { speechSpans } from '@engine/audio/musicLevel'
 import { buildCues, clipCue, cueText, fitCue, rewordCue } from '@engine/captions/captionCues'
@@ -21,6 +23,7 @@ import type { ObjectTrack, ObjectTrackRequest } from '@shared/models/telemetry'
 import type { EditorSession, MusicTrack } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
 import type {
+  ExportPreset,
   MusicSettings,
   AudioSettings,
   AudioTrackKind,
@@ -587,7 +590,31 @@ export class EditorStore {
       paddingRatio: clamp(merged.paddingRatio, 0, BACKGROUND_LIMITS.maxPaddingRatio),
       cornerRadiusRatio: clamp(merged.cornerRadiusRatio, 0, BACKGROUND_LIMITS.maxCornerRadiusRatio)
     }
-    this.commit({ ...this.project, background }, this.selected(), gestureKey)
+    // A caption at a one-click place follows the shape: what was "bottom" stays out of the app's own caption band.
+    const previous = this.project.background.aspect
+    const placement = captionPlacementOf(this.project.captions.style.position, previous)
+    const captions =
+      background.aspect !== previous && placement !== null
+        ? { ...this.project.captions, style: { ...this.project.captions.style, position: { x: 0.5, y: captionPlacementY(placement, background.aspect) } } }
+        : this.project.captions
+    this.commit({ ...this.project, background, captions }, this.selected(), gestureKey)
+  }
+
+  /**
+   * Sets the export up for a platform: its resolution, codec and frame rate,
+   * and the shape it plays best, as one undo step. `custom` only marks the
+   * settings as the user's own.
+   */
+  applyExportPreset(preset: ExportPreset): void {
+    const platform = platformPreset(preset)
+    if (!platform) {
+      this.setExportSettings({ preset: 'custom' })
+      return
+    }
+    this.runAsOneStep(() => {
+      this.setExportSettings(applyPlatformPreset(this.project.export, platform))
+      if (platform.aspect !== null && platform.aspect !== this.project.background.aspect) this.setBackground({ aspect: platform.aspect })
+    })
   }
 
   setWebcam(change: Partial<WebcamSettings>, gestureKey: string | null = null): void {

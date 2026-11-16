@@ -2,7 +2,7 @@ import { captionAt } from '@engine/captions/captionCues'
 import { textsAt } from '@engine/captions/textOverlays'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import { outputSizeFor } from '@engine/rendering/frameLayout'
-import { SAFE_AREA_BANDS } from '../common/safeAreas'
+import { safeZones } from '@engine/rendering/safeZones'
 import type { ColorSettings } from '@shared/models/filters'
 import type { TimeMap } from '@engine/time/timeMapping'
 import { keptSourceTime, nextKeptSourceTime, outputDurationMs, sourceTimeToTimelineTime, timelineTimeToOutputTime } from '@engine/time/timeMapping'
@@ -25,6 +25,7 @@ import type {
   ZoomEffect,
   CaptionStyle
 } from '@shared/models/project'
+import type { FrameInput } from '../rendering/composeFrame'
 import { composeFrame, drawCaption } from '../rendering/composeFrame'
 
 /** The preview canvas never needs more pixels than this, whatever the recording's size. */
@@ -484,13 +485,25 @@ export class PreviewPlayer {
       this.settings.webcam.visible &&
       webcam.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
 
+    const regions = composeFrame(this.context, this.output, this.frameInputAt(timeMs, showWebcam ? webcam : null))
+    this.drawnCaption = regions.caption
+    this.drawnTexts = regions.texts
+    if (this.settings.safeAreas) this.drawSafeAreas()
+    const selected = regions.texts.find((text) => text.id === this.settings.selectedTextId)
+    const selectedText = selected ? textsAt(this.settings.texts, timeMs).find((text) => text.id === selected.id) : null
+    if (selected && selectedText) this.drawTextSelection(selected.box, selectedText)
+    if (this.guides.vertical || this.guides.horizontal) this.drawGuides()
+    for (const listener of this.timeListeners) listener(timeMs)
+  }
+
+  /** Everything `composeFrame` needs for the instant `timeMs`, from the elements as they stand. */
+  private frameInputAt(timeMs: number, webcam: HTMLVideoElement | null): FrameInput {
     const { captions } = this.settings
     const caption = captionAt(captions, timeMs)
-
-    const regions = composeFrame(this.context, this.output, {
+    return {
       screen: this.video,
       screenSize: { width: this.video.videoWidth, height: this.video.videoHeight },
-      webcam: showWebcam
+      webcam: webcam
         ? {
             image: webcam,
             size: { width: webcam.videoWidth, height: webcam.videoHeight },
@@ -504,15 +517,24 @@ export class PreviewPlayer {
       color: this.settings.color,
       caption: caption === null ? null : { text: caption.text, style: captions.style, timing: caption },
       texts: textsAt(this.settings.texts, timeMs)
-    })
-    this.drawnCaption = regions.caption
-    this.drawnTexts = regions.texts
-    if (this.settings.safeAreas && this.settings.background.aspect === '9:16') this.drawSafeAreas()
-    const selected = regions.texts.find((text) => text.id === this.settings.selectedTextId)
-    const selectedText = selected ? textsAt(this.settings.texts, timeMs).find((text) => text.id === selected.id) : null
-    if (selected && selectedText) this.drawTextSelection(selected.box, selectedText)
-    if (this.guides.vertical || this.guides.horizontal) this.drawGuides()
-    for (const listener of this.timeListeners) listener(timeMs)
+    }
+  }
+
+  /**
+   * The frame on screen now, drawn again at `size` (the exported video's) as
+   * a PNG: a cover for the post. The same drawing as the preview and the
+   * export, without the preview's own guides.
+   */
+  async captureFrame(size: Size): Promise<Blob> {
+    if (this.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) throw new Error('No frame to capture yet')
+    const canvas = new OffscreenCanvas(size.width, size.height)
+    const context = canvas.getContext('2d', { alpha: false })
+    if (!context) throw new Error('Canvas 2D is unavailable')
+    context.imageSmoothingQuality = 'high'
+    const webcam = this.webcam
+    const showWebcam = webcam !== null && this.settings.webcam.visible && webcam.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+    composeFrame(context, size, this.frameInputAt(this.currentTimeMs, showWebcam ? webcam : null))
+    return canvas.convertToBlob({ type: 'image/png' })
   }
 
   /**
@@ -525,7 +547,7 @@ export class PreviewPlayer {
     const { width, height } = this.output
     const line = Math.max(1, width / 1080)
     const fontPx = Math.max(11, Math.round(width / 40))
-    for (const band of SAFE_AREA_BANDS) {
+    for (const band of safeZones(this.settings.background.aspect)) {
       const rect = { x: band.x * width, y: band.y * height, width: band.width * width, height: band.height * height }
       context.save()
       context.beginPath()

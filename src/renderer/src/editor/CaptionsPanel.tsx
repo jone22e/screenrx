@@ -1,6 +1,8 @@
 import type { CSSProperties } from 'react'
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { CAPTION_FONTS, CAPTION_POSITIONS } from '@engine/captions/captionConfig'
+import { CAPTION_FONTS } from '@engine/captions/captionConfig'
+import type { CaptionPlacement } from '@engine/rendering/safeZones'
+import { captionPlacementOf, captionPlacementY } from '@engine/rendering/safeZones'
 import { cueAt } from '@engine/captions/captionCues'
 import { CAPTION_LANGUAGE_NAMES, translationTargets } from '@engine/captions/captionTranslation'
 import { formatSubtitles, parseSubtitles, subtitleCues } from '@engine/captions/subtitles'
@@ -64,9 +66,7 @@ const BACKDROPS: ReadonlyArray<{ value: CaptionBackdrop; label: string }> = [
   { value: 'none', label: 'Nada' }
 ]
 
-type Placement = keyof typeof CAPTION_POSITIONS
-
-const PLACEMENTS: ReadonlyArray<{ value: Placement; label: string }> = [
+const PLACEMENTS: ReadonlyArray<{ value: CaptionPlacement; label: string }> = [
   { value: 'top', label: 'Topo' },
   { value: 'middle', label: 'Meio' },
   { value: 'bottom', label: 'Base' }
@@ -378,9 +378,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
     if (language === null || captions.translations[language]) store.setCaptionLanguage(language)
     else translate(language)
   }
-  const placement = PLACEMENTS.find(
-    (option) => style.position.x === 0.5 && style.position.y === CAPTION_POSITIONS[option.value]
-  )
+  const placement = PLACEMENTS.find((option) => option.value === captionPlacementOf(style.position, state.background.aspect))
 
   return (
     <>
@@ -606,10 +604,12 @@ export function CaptionsPanel({ session, store, player }: Props) {
           value={placement?.value ?? 'free'}
           options={PLACEMENTS}
           onChange={(value) =>
-            value !== 'free' && store.setCaptionStyle({ position: { x: 0.5, y: CAPTION_POSITIONS[value] } })
+            value !== 'free' && store.setCaptionStyle({ position: { x: 0.5, y: captionPlacementY(value, state.background.aspect) } })
           }
         />
-        <p className="panel-hint">Ou arraste no vídeo.</p>
+        <p className="panel-hint">
+          Ou arraste no vídeo.{state.background.aspect === '9:16' && ' No vertical, "Base" fica acima da legenda do próprio app.'}
+        </p>
       </Section>
 
       <Section title={`Texto (${captions.cues.length})`}>

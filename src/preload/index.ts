@@ -100,7 +100,8 @@ const api: ScreenRxApi = {
     cancel: () => invoke('ai:cancel')
   },
   export: {
-    start: (sessionId) => invoke('export:start', sessionId),
+    start: (sessionId, overrides = null) => invoke('export:start', sessionId, overrides),
+    saveFrame: (sessionId, timeMs, png) => invoke('export:save-frame', sessionId, timeMs, png),
     readChunk: (exportId, track, offset, length) => invoke('export:read-chunk', exportId, track, offset, length),
     writeFrame: (exportId, frame) => invoke('export:write-frame', exportId, frame),
     finish: (exportId) => invoke('export:finish', exportId),

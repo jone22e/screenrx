@@ -41,15 +41,3 @@ class SafeAreasStore {
 export const safeAreas = new SafeAreasStore()
 
 export const useSafeAreas = (): boolean => useSyncExternalStore(safeAreas.subscribe, safeAreas.getState)
-
-/**
- * Where the apps' interface sits over a 9:16 video, as shares of the output:
- * the status bar and title at the top, the caption and music at the bottom,
- * the column of buttons on the right. Each is named, so the marks explain
- * themselves on the preview.
- */
-export const SAFE_AREA_BANDS: ReadonlyArray<{ x: number; y: number; width: number; height: number; label: string }> = [
-  { x: 0, y: 0, width: 1, height: 0.1, label: 'Topo do app' },
-  { x: 0, y: 0.8, width: 1, height: 0.2, label: 'Legenda e música do app' },
-  { x: 0.84, y: 0.35, width: 0.16, height: 0.45, label: 'Botões' }
-]

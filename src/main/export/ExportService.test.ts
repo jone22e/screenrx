@@ -13,7 +13,7 @@ const audio = (paths: string[], extra: Partial<ExportAudio> = {}): ExportAudio =
 
 const map = buildTimeMap(60_000, [])
 const plan = (speed: number, fps: 24 | 30 | 60 = 30) =>
-  createExportPlan({ width: 3600, height: 2338 }, map, { format: 'mp4', quality: 'standard', compression: 0, fps, speed, loudness: 'off' })
+  createExportPlan({ width: 3600, height: 2338 }, map, { format: 'mp4', quality: 'standard', compression: 0, fps, speed, loudness: 'off', preset: 'custom' })
 
 const valueAfter = (args: string[], flag: string): string | undefined => args[args.indexOf(flag) + 1]
 
@@ -38,7 +38,7 @@ describe('encodeArguments', () => {
   })
 
   it('writes the compact file as HEVC tagged for QuickTime, by hardware or software', () => {
-    const compact = createExportPlan({ width: 1920, height: 1080 }, map, { format: 'mp4', quality: 'high', compression: 2, fps: 30, speed: 1, loudness: 'off' })
+    const compact = createExportPlan({ width: 1920, height: 1080 }, map, { format: 'mp4', quality: 'high', compression: 2, fps: 30, speed: 1, loudness: 'off', preset: 'custom' })
     const hardware = encodeArguments(compact, 'hevc_videotoolbox', audio(['/s/microphone.m4a']), map, '/tmp/o.part')
     expect(valueAfter(hardware, '-c:v')).toBe('hevc_videotoolbox')
     expect(valueAfter(hardware, '-b:v')).toBe(String(compact.videoBitrate))
@@ -81,6 +81,8 @@ describe('suggestedFileName', () => {
     const createdAt = new Date(2026, 9, 3, 21, 29).toISOString()
     expect(suggestedFileName('Display 1', createdAt, 1)).toBe('Display 1 2026-10-03 21.29.mp4')
     expect(suggestedFileName('Display 1', createdAt, 1.5)).toBe('Display 1 2026-10-03 21.29 1,5x.mp4')
+    expect(suggestedFileName('Display 1', createdAt, 1, 'reels')).toBe('Display 1 2026-10-03 21.29 Reels.mp4')
+    expect(suggestedFileName('Display 1', createdAt, 2, 'x')).toBe('Display 1 2026-10-03 21.29 2x X.mp4')
   })
 
   it('never produces path separators or other unsafe characters', () => {

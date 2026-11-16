@@ -3242,3 +3242,72 @@ kbd {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* The cover button at the end of the transport, and the word on what became of the last cover. */
+.transport-cover {
+  margin-left: auto;
+  gap: 6px;
+  width: auto;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.transport-note {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+
+/* Platforms in the export dialog. */
+.presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.preset {
+  padding: 7px 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+}
+
+.preset:hover {
+  color: var(--text);
+}
+
+.preset[aria-checked='true'] {
+  color: #fff;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.dialog-warning {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #fde68a;
+  background: rgba(250, 204, 21, 0.1);
+  border: 1px solid rgba(250, 204, 21, 0.3);
+  border-radius: 8px;
+}
+
+.batch-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px 12px;
+  margin-top: 6px;
+}
+
+.dialog-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
