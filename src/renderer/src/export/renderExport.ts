@@ -1,6 +1,7 @@
 import { captionAt } from '@engine/captions/captionCues'
 import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
-import { textsAt } from '@engine/captions/textOverlays'
+import { textsWithMotionAt } from '@engine/captions/textOverlays'
+import { dipDarknessAt } from '@engine/time/transitions'
 import { frameSourceTimeMs } from '@engine/export/exportPlan'
 import { layersAt } from '@engine/rendering/layerLayout'
 import { clickRipplesAt, drawnCursorAt, drawnCursorPath } from '@engine/rendering/cursorRender'
@@ -9,9 +10,12 @@ import { cameraAt } from '@engine/zoom/zoomCamera'
 import type { EditorSession } from '@shared/models/editor'
 import type { AppError } from '@shared/models/errors'
 import type { ExportJob } from '@shared/models/export'
-import type { ImageLayer, Project } from '@shared/models/project'
+import { clipTrackName } from '@shared/models/export'
+import type { Size } from '@engine/rendering/frameLayout'
+import type { FrameInput } from '../rendering/composeFrame'
+import type { Layer, Project } from '@shared/models/project'
 import type { ObjectTrack } from '@shared/models/telemetry'
-import { zoomsOf } from '@shared/models/project'
+import { trimsOf, zoomsOf } from '@shared/models/project'
 import { composeFrame } from '../rendering/composeFrame'
 import { TrackFrameReader } from './TrackFrameReader'
 
@@ -52,6 +56,7 @@ export async function renderExport(
   const api = window.screenrx.export
   const map = buildTimeMap(session.durationMs, project.effects)
   const zooms = zoomsOf(project)
+  const trims = trimsOf(project)
   const cursorPath = smoothCursorPath(session.cursor, session.durationMs)
   const objectPath = objectTrack ? smoothCursorPath(objectTrack.samples, session.durationMs) : []
   const { captions } = project
@@ -77,6 +82,34 @@ export async function renderExport(
   const webcam = job.webcam
     ? new TrackFrameReader(job.webcam, (offset, length) => api.readChunk(exportId, 'webcam', offset, length))
     : null
+  // One reader per b-roll clip; a clip reads forward, so a layer that shows it later restarts it past the keyframe before.
+  const clipReaders = new Map(
+    job.clips.map(({ file, track }) => [
+      file,
+      new TrackFrameReader(track, (offset, length) => api.readChunk(exportId, clipTrackName(file), offset, length))
+    ])
+  )
+  const clipFrames = new Map<string, VideoFrame>()
+
+  /** The pictures of the layers on screen: images as decoded, clips at the frame their layer asks for. */
+  const layerPictures = async (layers: readonly Layer[], sourceMs: number): Promise<FrameInput['layers']> => {
+    const shown: Array<{ layer: Layer; image: CanvasImageSource; size: Size }> = []
+    for (const layer of layers) {
+      if (layer.kind === 'video') {
+        const reader = clipReaders.get(layer.file)
+        if (!reader) continue
+        const frame = await reader.frameAt((layer.offsetMs + (sourceMs - layer.startMs)) * 1000)
+        if (frame) {
+          clipFrames.set(layer.file, frame)
+          shown.push({ layer, image: frame, size: { width: frame.displayWidth, height: frame.displayHeight } })
+        }
+        continue
+      }
+      const picture = pictures.get(layer.file)
+      if (picture) shown.push({ layer, image: picture, size: { width: picture.naturalWidth, height: picture.naturalHeight } })
+    }
+    return shown
+  }
 
   try {
     for (let index = 0; index < plan.frameCount; index++) {
@@ -103,11 +136,9 @@ export async function renderExport(
         background: project.background,
         color: project.filters.color,
         caption: caption === null ? null : { text: caption.text, style: captions.style, timing: caption },
-        texts: textsAt(project.texts, sourceMs),
-        layers: layersAt(project.layers, sourceMs).flatMap((layer) => {
-          const picture = pictures.get(layer.file)
-          return picture ? [{ layer, image: picture, size: { width: picture.naturalWidth, height: picture.naturalHeight } }] : []
-        }),
+        texts: textsWithMotionAt(project.texts, sourceMs),
+        darkness: dipDarknessAt(trims, sourceMs),
+        layers: await layerPictures(layersAt(project.layers, sourceMs), sourceMs),
         cursor: drawnCursor
           ? {
               position: drawnCursorAt(drawnCursor, sourceMs),
@@ -131,13 +162,14 @@ export async function renderExport(
   } finally {
     screen.close()
     webcam?.close()
+    for (const reader of clipReaders.values()) reader.close()
   }
 }
 
 /** Decodes the images the layers show; one that cannot be loaded is simply not drawn, as in the preview. */
-async function loadPictures(layers: readonly ImageLayer[], images: EditorSession['images']): Promise<Map<string, HTMLImageElement>> {
+async function loadPictures(layers: readonly Layer[], images: EditorSession['images']): Promise<Map<string, HTMLImageElement>> {
   const pictures = new Map<string, HTMLImageElement>()
-  const files = [...new Set(layers.map((layer) => layer.file))]
+  const files = [...new Set(layers.filter((layer) => layer.kind === 'image').map((layer) => layer.file))]
   await Promise.all(
     files.map(async (file) => {
       const url = images.find((image) => image.file === file)?.url

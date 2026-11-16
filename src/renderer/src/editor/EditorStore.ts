@@ -2,6 +2,9 @@ import { CAPTION_CONFIG } from '@engine/captions/captionConfig'
 import { applyPlatformPreset, platformPreset } from '@engine/export/platformPresets'
 import { captionPlacementOf, captionPlacementY } from '@engine/rendering/safeZones'
 import { SPEED_CONFIG, isSpeedFactor } from '@engine/timeline/speedConfig'
+import type { TextTemplate } from '@engine/rendering/textTemplates'
+import type { ProjectTemplate } from '@shared/models/template'
+import { applyTemplateTo, templateFromProject } from '@shared/models/template'
 import type { SpeechSpan } from '@engine/audio/musicLevel'
 import { speechSpans } from '@engine/audio/musicLevel'
 import { buildCues, clipCue, cueText, fitCue, rewordCue } from '@engine/captions/captionCues'
@@ -21,9 +24,13 @@ import type { DubProgress, DubRequest, DubTrack } from '@shared/models/dub'
 import type { ColorSettings, FilterRenderRequest, FilterSettings, FilterTrack, RenderedFilter, RenderedFilterName } from '@shared/models/filters'
 import { COLOR_LIMITS, DEFAULT_COLOR, needsRenderedTrack, renderKey } from '@shared/models/filters'
 import type { ObjectTrack, ObjectTrackRequest } from '@shared/models/telemetry'
-import type { EditorImage, EditorSession, MusicTrack } from '@shared/models/editor'
+import type { EditorClip, EditorImage, EditorSession, MusicTrack } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
 import type {
+  Layer,
+  VideoLayer,
+  TextMotion,
+  TrimTransition,
   CursorSettings,
   ImageLayer,
   Marker,
@@ -48,6 +55,8 @@ import type {
   ZoomEffect
 } from '@shared/models/project'
 import {
+  DEFAULT_TEXT_MOTION,
+  TEXT_MOTION_LIMITS,
   CURSOR_LIMITS,
   DEFAULT_IMAGE_LAYER,
   LAYER_LIMITS,
@@ -90,10 +99,12 @@ export interface EditorState {
   captions: CaptionSettings
   /** Texts written over the video, sorted by start. */
   texts: readonly TextOverlay[]
-  /** Images over the video, bottom first. */
-  layers: readonly ImageLayer[]
+  /** Images and clips over the video, bottom first. */
+  layers: readonly Layer[]
   /** The session's images; not part of the project. */
   images: readonly EditorImage[]
+  /** The session's b-roll clips; not part of the project. */
+  clips: readonly EditorClip[]
   /** The drawn pointer. */
   cursor: CursorSettings
   audio: AudioSettings
@@ -229,6 +240,7 @@ export class EditorStore {
   private dubs: DubTrack[]
   private musicTrack: MusicTrack | null
   private images: EditorImage[]
+  private clips: EditorClip[]
   private speech: SpeechSpan[]
   private objectTrack: ObjectTrack | null
   private tracking: { fraction: number } | null = null
@@ -265,6 +277,7 @@ export class EditorStore {
     this.dubs = [...session.dubs]
     this.musicTrack = session.music
     this.images = [...session.images]
+    this.clips = [...session.clips]
     this.speech = speechSpans(session.transcript?.words ?? [])
     this.filterTrack = session.filterTrack
     this.objectTrack = session.track
@@ -286,7 +299,7 @@ export class EditorStore {
     return this.state.trims.find((trim) => trim.id === this.state.selectedTrimId) ?? null
   }
 
-  get selectedLayer(): ImageLayer | null {
+  get selectedLayer(): Layer | null {
     return this.state.layers.find((layer) => layer.id === this.state.selectedLayerId) ?? null
   }
 
@@ -353,13 +366,13 @@ export class EditorStore {
   // --- texts --------------------------------------------------------------------
 
   /** Writes a text over the video from `timeMs`, for a few seconds, and selects it. Returns its id. */
-  addText(timeMs: number, content = 'Seu texto', style: CaptionStyle = DEFAULT_TEXT_STYLE): string {
+  addText(timeMs: number, content = 'Seu texto', style: CaptionStyle = DEFAULT_TEXT_STYLE, durationMs: number = TEXT_LIMITS.defaultDurationMs, motion?: Pick<TextOverlay, 'enter' | 'exit'>): string {
     const startMs = clamp(timeMs, 0, Math.max(0, this.session.durationMs - TEXT_LIMITS.minDurationMs))
-    return this.addTextSpan({ startMs, endMs: startMs + TEXT_LIMITS.defaultDurationMs }, content, style)
+    return this.addTextSpan({ startMs, endMs: startMs + durationMs }, content, style, motion)
   }
 
   /** Writes a text over the video during `span`. Returns its id. */
-  addTextSpan(span: TimeSpan, content: string, style: CaptionStyle = DEFAULT_TEXT_STYLE): string {
+  addTextSpan(span: TimeSpan, content: string, style: CaptionStyle = DEFAULT_TEXT_STYLE, motion?: Pick<TextOverlay, 'enter' | 'exit'>): string {
     const startMs = clamp(span.startMs, 0, this.session.durationMs)
     const endMs = clamp(Math.max(span.endMs, startMs + TEXT_LIMITS.minDurationMs), 0, this.session.durationMs)
     const text: TextOverlay = {
@@ -367,10 +380,25 @@ export class EditorStore {
       startMs,
       endMs: Math.max(endMs, Math.min(startMs + TEXT_LIMITS.minDurationMs, this.session.durationMs)),
       text: content.slice(0, TEXT_LIMITS.maxTextLength),
-      style: { ...style, position: { ...style.position } }
+      style: { ...style, position: { ...style.position } },
+      enter: { ...(motion?.enter ?? DEFAULT_TEXT_MOTION) },
+      exit: { ...(motion?.exit ?? DEFAULT_TEXT_MOTION) }
     }
     this.commitTexts([...this.project.texts, text], text.id, null)
     return text.id
+  }
+
+  /** Adds a ready-made text (title, lower third…) at `timeMs`, with its own look, motion and length. */
+  addTextFromTemplate(template: TextTemplate, timeMs: number): string {
+    return this.addText(timeMs, template.placeholder, template.style, template.durationMs, { enter: template.enter, exit: template.exit })
+  }
+
+  /** How a text comes on (`enter`) or goes off (`exit`) screen. */
+  setTextMotion(textId: string, edge: 'enter' | 'exit', change: Partial<TextMotion>, gestureKey: string | null = null): void {
+    this.editText(textId, gestureKey === null ? null : `${gestureKey}:${textId}`, (text) => {
+      const merged = { ...text[edge], ...change }
+      return { ...text, [edge]: { ...merged, durationMs: clamp(merged.durationMs, 0, TEXT_MOTION_LIMITS.maxDurationMs) } }
+    })
   }
 
   setTextContent(textId: string, content: string): void {
@@ -415,6 +443,18 @@ export class EditorStore {
     )
   }
 
+  // --- templates ------------------------------------------------------------------
+
+  /** Puts a template's look and settings over the project, as one undo step. */
+  applyTemplate(template: ProjectTemplate): void {
+    this.commit(applyTemplateTo(this.project, template), this.selected(), null)
+  }
+
+  /** The project's look and settings as a template, named `name`. */
+  templateNamed(name: string): ProjectTemplate {
+    return templateFromProject(this.project, name, `tpl-${crypto.randomUUID()}`, new Date().toISOString())
+  }
+
   // --- drawn pointer --------------------------------------------------------------
 
   setCursor(change: Partial<CursorSettings>, gestureKey: string | null = null): void {
@@ -430,6 +470,48 @@ export class EditorStore {
     this.images = [...images]
     this.state = { ...this.state, images: this.images }
     this.emit()
+  }
+
+  /** The session gained or lost b-roll clips; not an undo step. */
+  setClips(clips: readonly EditorClip[]): void {
+    this.clips = [...clips]
+    this.state = { ...this.state, clips: this.clips }
+    this.emit()
+  }
+
+  /**
+   * Lays a b-roll clip over the video from `timeMs`, as long as the clip (or
+   * to the end of the recording), filling the frame's width. Returns the
+   * layer's id.
+   */
+  addVideoLayer(file: string, timeMs: number): string {
+    const clip = this.clips.find((candidate) => candidate.file === file)
+    const duration = this.session.durationMs
+    const startMs = clamp(timeMs, 0, Math.max(0, duration - LAYER_LIMITS.minDurationMs))
+    const endMs = Math.min(duration, startMs + Math.max(clip?.durationMs ?? LAYER_LIMITS.minDurationMs, LAYER_LIMITS.minDurationMs))
+    const layer: VideoLayer = {
+      id: createLayerId(),
+      kind: 'video',
+      file,
+      startMs,
+      endMs,
+      position: { x: 0.5, y: 0.5 },
+      sizeRatio: 1,
+      rotationDeg: 0,
+      opacity: 1,
+      cornerRadiusRatio: 0,
+      offsetMs: 0
+    }
+    if (this.project.layers.length >= LAYER_LIMITS.maxLayers) return ''
+    this.commitLayers([...this.project.layers, layer], layer.id, null)
+    return layer.id
+  }
+
+  /** Where in the clip a b-roll layer starts playing. */
+  setLayerOffset(layerId: string, offsetMs: number, gestureKey: string | null = null): void {
+    this.editLayer(layerId, gestureKey === null ? null : `${gestureKey}:${layerId}`, (layer) =>
+      layer.kind === 'video' ? { ...layer, offsetMs: Math.max(0, offsetMs) } : layer
+    )
   }
 
   /**
@@ -469,13 +551,13 @@ export class EditorStore {
   }
 
   /** Slides an image in time, keeping its length within the recording. Images may overlap. */
-  moveLayer(original: ImageLayer, deltaMs: number): void {
+  moveLayer(original: Layer, deltaMs: number): void {
     const length = original.endMs - original.startMs
     const startMs = clamp(original.startMs + deltaMs, 0, Math.max(0, this.session.durationMs - length))
     this.editLayer(original.id, `layer-span:${original.id}`, (layer) => ({ ...layer, startMs, endMs: startMs + length }))
   }
 
-  resizeLayer(original: ImageLayer, edge: 'start' | 'end', timeMs: number): void {
+  resizeLayer(original: Layer, edge: 'start' | 'end', timeMs: number): void {
     const span =
       edge === 'start'
         ? { startMs: clamp(timeMs, 0, original.endMs - LAYER_LIMITS.minDurationMs), endMs: original.endMs }
@@ -490,7 +572,7 @@ export class EditorStore {
     const target = direction === 'up' ? index + 1 : index - 1
     if (index === -1 || target < 0 || target >= layers.length) return
     const [moved] = layers.splice(index, 1)
-    layers.splice(target, 0, moved as ImageLayer)
+    layers.splice(target, 0, moved as Layer)
     this.commitLayers(layers, layerId, null)
   }
 
@@ -722,6 +804,15 @@ export class EditorStore {
       TRIM_CONFIG.minDurationMs
     )
     this.editTrim(original.id, span)
+  }
+
+  /** What the picture does at a cut: jumps, or goes dark and comes back. */
+  setTrimTransition(trimId: string, transition: TrimTransition): void {
+    this.commitTrims(
+      this.state.trims.map((trim) => (trim.id === trimId ? { ...trim, transition } : trim)),
+      trimId,
+      null
+    )
   }
 
   removeTrim(trimId: string): void {
@@ -1541,12 +1632,12 @@ export class EditorStore {
     this.commitTexts(texts, textId, gestureKey)
   }
 
-  private editLayer(layerId: string, gestureKey: string | null, change: (layer: ImageLayer) => ImageLayer): void {
+  private editLayer(layerId: string, gestureKey: string | null, change: (layer: Layer) => Layer): void {
     const layers = this.project.layers.map((layer) => (layer.id === layerId ? change(layer) : layer))
     this.commitLayers(layers, layerId, gestureKey)
   }
 
-  private commitLayers(layers: readonly ImageLayer[], selectedLayerId: string | null, gestureKey: string | null): void {
+  private commitLayers(layers: readonly Layer[], selectedLayerId: string | null, gestureKey: string | null): void {
     this.commit({ ...this.project, layers: [...layers] }, { ...NOTHING_SELECTED, layerId: selectedLayerId }, gestureKey)
   }
 
@@ -1629,6 +1720,7 @@ export class EditorStore {
       texts: this.project.texts,
       layers: this.project.layers,
       images: this.images,
+      clips: this.clips,
       cursor: this.project.cursor,
       audio: this.project.audio,
       music: this.project.music,

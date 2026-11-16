@@ -74,6 +74,16 @@ export interface ImageAsset {
   heightPx: number
 }
 
+/** A clip of video the user brought into the session's `assets/` folder, as b-roll for the layers. */
+export interface VideoClipAsset {
+  file: string
+  name: string
+  sizeBytes: number
+  durationMs: number
+  widthPx: number
+  heightPx: number
+}
+
 /** Music the user brought into the session, as a track of its own (`music.m4a`). Replaced whole when another is chosen. */
 export interface MusicAsset extends AudioAsset {
   /** The name of the file it came from, for the editor to show. */
@@ -148,6 +158,7 @@ export interface RecordingSessionManifest {
     webcam?: WebcamAsset
     music?: MusicAsset
     images?: ImageAsset[]
+    videos?: VideoClipAsset[]
     cursor?: TelemetryAsset
     interactions?: TelemetryAsset
   }

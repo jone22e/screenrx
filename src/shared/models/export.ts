@@ -22,11 +22,15 @@ export interface ExportTrack {
   keyframes: boolean[]
 }
 
-export type ExportTrackName = 'screen' | 'webcam'
+/** The screen, the webcam, or a b-roll clip by its file name in `assets/` (`clip:<file>`). */
+export type ExportTrackName = 'screen' | 'webcam' | `clip:${string}`
 
 export function isExportTrackName(value: unknown): value is ExportTrackName {
-  return value === 'screen' || value === 'webcam'
+  if (value === 'screen' || value === 'webcam') return true
+  return typeof value === 'string' && value.startsWith('clip:') && value.length <= 300 && !/[/\\\0]/.test(value.slice(5))
 }
+
+export const clipTrackName = (file: string): ExportTrackName => `clip:${file}`
 
 /** An export in progress, as handed to the renderer that draws its frames. */
 export interface ExportJob {
@@ -37,6 +41,8 @@ export interface ExportJob {
   fileName: string
   screen: ExportTrack
   webcam: ExportTrack | null
+  /** The b-roll clips the layers show, by file name. */
+  clips: Array<{ file: string; track: ExportTrack }>
 }
 
 export interface ExportResult {

@@ -101,6 +101,14 @@ export class ProjectStore {
         widthPx: image.widthPx,
         heightPx: image.heightPx
       })),
+      clips: (manifest.assets.videos ?? []).map((clip) => ({
+        file: clip.file,
+        name: clip.name,
+        url: assetUrl(sessionId, clip.file),
+        durationMs: clip.durationMs,
+        widthPx: clip.widthPx,
+        heightPx: clip.heightPx
+      })),
       music: manifest.assets.music
         ? { url: trackUrl(sessionId, 'music'), durationMs: manifest.assets.music.durationMs, name: manifest.assets.music.name }
         : null,

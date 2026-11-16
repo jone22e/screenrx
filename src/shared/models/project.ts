@@ -47,9 +47,14 @@ export interface SpeedEffect extends TimelineEffectBase {
   speed: number
 }
 
+/** What the picture does at a cut: jumps (`cut`), or goes dark and comes back (`dip`). */
+export type TrimTransition = 'cut' | 'dip'
+
 /** A span removed from the timeline. */
 export interface TrimEffect extends TimelineEffectBase {
   type: 'trim'
+  /** Absent in cuts saved before transitions existed: a plain cut. */
+  transition?: TrimTransition
 }
 
 /** Annotation, blur, highlight and webcam effects join this union in later phases. */
@@ -280,9 +285,22 @@ export function spreadWords(text: string, startMs: number, endMs: number): Capti
   }))
 }
 
+/** How a text comes on or goes off screen. */
+export type TextMotionKind = 'none' | 'fade' | 'pop' | 'slide-up'
+export const TEXT_MOTION_KINDS: readonly TextMotionKind[] = ['none', 'fade', 'pop', 'slide-up']
+
+export interface TextMotion {
+  kind: TextMotionKind
+  durationMs: number
+}
+
+export const DEFAULT_TEXT_MOTION: TextMotion = { kind: 'none', durationMs: 300 }
+export const TEXT_MOTION_LIMITS = { maxDurationMs: 2000 } as const
+
 /**
  * A text the user writes over the video — a title, a call-out — shown during
- * its span, in a look of its own. Texts may overlap in time.
+ * its span, in a look of its own, with an entrance and an exit. Texts may
+ * overlap in time.
  */
 export interface TextOverlay {
   id: string
@@ -290,6 +308,8 @@ export interface TextOverlay {
   endMs: number
   text: string
   style: CaptionStyle
+  enter: TextMotion
+  exit: TextMotion
 }
 
 /**
@@ -315,7 +335,18 @@ export interface ImageLayer {
   cornerRadiusRatio: number
 }
 
-export type Layer = ImageLayer
+/**
+ * A clip of video laid over the recording (b-roll) during its span, placed
+ * like an image. It plays from `offsetMs` into the clip, forward with the
+ * recording, without its own sound.
+ */
+export interface VideoLayer extends Omit<ImageLayer, 'kind'> {
+  kind: 'video'
+  /** Where in the clip it starts playing, in ms. */
+  offsetMs: number
+}
+
+export type Layer = ImageLayer | VideoLayer
 
 /** How steady the drawn pointer's hand is. */
 export type CursorSmoothing = 'none' | 'light' | 'strong'
@@ -723,9 +754,24 @@ function parseTexts(value: unknown): TextOverlay[] {
     if (!isRecord(entry) || typeof entry.text !== 'string') continue
     const base = parseBase(entry)
     if (!base) continue
-    texts.push({ ...base, text: entry.text.slice(0, TEXT_LIMITS.maxTextLength), style: parseStyle(entry.style, DEFAULT_TEXT_STYLE) })
+    texts.push({
+      ...base,
+      text: entry.text.slice(0, TEXT_LIMITS.maxTextLength),
+      style: parseStyle(entry.style, DEFAULT_TEXT_STYLE),
+      enter: parseMotion(entry.enter),
+      exit: parseMotion(entry.exit)
+    })
   }
   return texts.sort((a, b) => a.startMs - b.startMs)
+}
+
+/** A text's entrance or exit as saved; texts saved before them come and go at once. */
+function parseMotion(value: unknown): TextMotion {
+  const motion = isRecord(value) ? value : {}
+  return {
+    kind: includes(TEXT_MOTION_KINDS, motion.kind) ? motion.kind : DEFAULT_TEXT_MOTION.kind,
+    durationMs: clampRatio(motion.durationMs, DEFAULT_TEXT_MOTION.durationMs, TEXT_MOTION_LIMITS.maxDurationMs)
+  }
 }
 
 /** The drawn pointer's settings as saved; projects saved before them get the default. */
@@ -745,12 +791,11 @@ function parseCursor(value: unknown): CursorSettings {
 function parseLayers(value: unknown): Layer[] {
   const layers: Layer[] = []
   for (const entry of Array.isArray(value) ? value.slice(0, LAYER_LIMITS.maxLayers) : []) {
-    if (!isRecord(entry) || entry.kind !== 'image') continue
+    if (!isRecord(entry) || (entry.kind !== 'image' && entry.kind !== 'video')) continue
     const base = parseBase(entry)
     if (!base || typeof entry.file !== 'string' || !/^[^/\\\0]{1,255}$/.test(entry.file) || entry.file === '.' || entry.file === '..') continue
-    layers.push({
+    const common = {
       ...base,
-      kind: 'image',
       file: entry.file,
       position: parseNormalizedPoint(entry.position, DEFAULT_IMAGE_LAYER.position),
       sizeRatio: isFiniteNumber(entry.sizeRatio)
@@ -759,7 +804,12 @@ function parseLayers(value: unknown): Layer[] {
       rotationDeg: isFiniteNumber(entry.rotationDeg) ? ((entry.rotationDeg % 360) + 360) % 360 : 0,
       opacity: clampRatio(entry.opacity, DEFAULT_IMAGE_LAYER.opacity, 1),
       cornerRadiusRatio: clampRatio(entry.cornerRadiusRatio, DEFAULT_IMAGE_LAYER.cornerRadiusRatio, LAYER_LIMITS.maxCornerRadiusRatio)
-    })
+    }
+    layers.push(
+      entry.kind === 'video'
+        ? { ...common, kind: 'video', offsetMs: isFiniteNumber(entry.offsetMs) && entry.offsetMs >= 0 ? entry.offsetMs : 0 }
+        : { ...common, kind: 'image' }
+    )
   }
   return layers
 }
@@ -831,7 +881,7 @@ function parseEffect(value: unknown): TimelineEffect | null {
         ? { ...base, type: 'speed', speed: value.speed }
         : null
     case 'trim':
-      return { ...base, type: 'trim' }
+      return { ...base, type: 'trim', transition: value.transition === 'dip' ? 'dip' : 'cut' }
     default:
       return null
   }

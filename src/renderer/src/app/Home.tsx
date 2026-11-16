@@ -13,7 +13,7 @@ import { UpdateNotice } from './UpdateNotice'
 import { VoiceModelNotice } from './VoiceModelNotice'
 import { usePermissions } from './hooks'
 import { openSettings } from '../common/settingsScreen'
-import { FilmIcon, GearIcon, GridIcon, ImportIcon, ListIcon, SearchIcon } from './icons'
+import { FilmIcon, GearIcon, GridIcon, ImportIcon, JoinIcon, ListIcon, SearchIcon } from './icons'
 
 interface Props {
   state: RecordingStateSnapshot
@@ -160,6 +160,22 @@ export function Home({ state, recordings, onEdit }: Props) {
   }
   const canImport = idle && !importing
 
+  // Joining recordings: the user picks two or more, in order; a new recording is made from them.
+  const [joining, setJoining] = useState<{ open: boolean; picked: string[]; busy: boolean; error: AppError | null }>({ open: false, picked: [], busy: false, error: null })
+  const togglePicked = (id: string): void =>
+    setJoining((current) => ({ ...current, picked: current.picked.includes(id) ? current.picked.filter((entry) => entry !== id) : [...current.picked, id] }))
+  const join = (): void => {
+    setJoining((current) => ({ ...current, busy: true, error: null }))
+    void window.screenrx.library.join(joining.picked).then((result) => {
+      if (result.ok) {
+        setJoining({ open: false, picked: [], busy: false, error: null })
+        onEdit(result.value.sessionId)
+      } else {
+        setJoining((current) => ({ ...current, busy: false, error: result.error }))
+      }
+    })
+  }
+
   // The search looks at titles here and asks the main process which transcripts contain the words.
   const needle = query.trim().toLocaleLowerCase()
   const [transcriptHits, setTranscriptHits] = useState<{ query: string; ids: ReadonlySet<string> }>({ query: '', ids: new Set() })
@@ -247,6 +263,15 @@ export function Home({ state, recordings, onEdit }: Props) {
         </button>
         <button
           className="bar-icon bar-icon-boxed"
+          aria-label="Juntar gravações"
+          title="Juntar duas ou mais gravações em uma só, uma depois da outra"
+          disabled={!canImport || (recordings?.filter((recording) => recording.status === 'completed').length ?? 0) < 2}
+          onClick={() => setJoining({ open: true, picked: [], busy: false, error: null })}
+        >
+          <JoinIcon />
+        </button>
+        <button
+          className="bar-icon bar-icon-boxed"
           aria-label="Importar vídeo"
           title={importing ? 'Importando…' : 'Importar um vídeo gravado fora do ScreenRx'}
           disabled={!canImport}
@@ -296,6 +321,49 @@ export function Home({ state, recordings, onEdit }: Props) {
         )}
 
         <MeetRooms idle={idle} />
+
+        {joining.open && (
+          <div className="dialog-backdrop" role="presentation">
+            <div className="dialog" role="dialog" aria-modal="true" aria-label="Juntar gravações">
+              <h2 className="dialog-title">Juntar gravações</h2>
+              <p className="panel-hint">
+                Marque as gravações na ordem em que devem ficar. Sai uma gravação nova, com o vídeo, o som e o rastro do mouse
+                emendados; as originais continuam na biblioteca. Vídeos de tamanhos diferentes são encaixados no tamanho da primeira.
+              </p>
+              <ul className="join-list">
+                {(recordings ?? [])
+                  .filter((recording) => recording.status === 'completed')
+                  .map((recording) => {
+                    const position = joining.picked.indexOf(recording.id)
+                    return (
+                      <li key={recording.id}>
+                        <label className="check join-row">
+                          <input type="checkbox" checked={position >= 0} disabled={joining.busy} onChange={() => togglePicked(recording.id)} />
+                          <span className="join-order">{position >= 0 ? position + 1 : ''}</span>
+                          <span className="join-title">{recording.title}</span>
+                          <span className="join-meta">{formatClock(recording.durationMs)}</span>
+                        </label>
+                      </li>
+                    )
+                  })}
+              </ul>
+              {joining.error && (
+                <p className="dialog-error" role="alert">
+                  {joining.error.message}
+                </p>
+              )}
+              {joining.busy && <p className="panel-hint">Juntando… O vídeo é recodificado inteiro, o que leva alguns minutos para gravações longas.</p>}
+              <div className="dialog-actions">
+                <button className="panel-button" disabled={joining.busy} onClick={() => setJoining({ open: false, picked: [], busy: false, error: null })}>
+                  Cancelar
+                </button>
+                <button className="panel-button panel-button-primary" disabled={joining.busy || joining.picked.length < 2} onClick={join}>
+                  Juntar {joining.picked.length >= 2 ? `${joining.picked.length} gravações` : ''}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {recordings !== null && total === 0 && (
           <div className="empty-state">

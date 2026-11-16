@@ -8,7 +8,7 @@ import { frameToSource, outputToFrame } from '../rendering/composeFrame'
 import type { EditorState, EditorStore } from './EditorStore'
 import type { PreviewSettings } from './PreviewPlayer'
 import { frameCorners, textSelectionFrame } from './PreviewPlayer'
-import { safeAreas } from '../common/safeAreas'
+import { phoneFrame, safeAreas } from '../common/safeAreas'
 import { PreviewPlayer } from './PreviewPlayer'
 
 interface Props {
@@ -51,6 +51,7 @@ const settingsOf = (state: EditorState, store: EditorStore): PreviewSettings => 
   timeMap: state.timeMap,
   zooms: state.zooms,
   speeds: state.speeds,
+  trims: state.trims,
   background: state.background,
   webcam: state.webcam,
   captions: state.captions,
@@ -59,8 +60,10 @@ const settingsOf = (state: EditorState, store: EditorStore): PreviewSettings => 
   layers: state.layers,
   selectedLayerId: state.selectedLayerId,
   images: store.session.images,
+  clips: store.session.clips,
   cursor: state.cursor,
   safeAreas: safeAreas.getState(),
+  phoneFrame: phoneFrame.getState(),
   objectTrack: state.objectTrack,
   audio: state.audio,
   dubUrl: state.dubs.find((dub) => dub.language === state.dub.language)?.url ?? null,
@@ -94,10 +97,12 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     // The player redraws itself whenever the project (or a preview preference) changes.
     const unsubscribe = store.subscribe(() => instance.update(settingsOf(store.getState(), store)))
     const unsubscribeSafeAreas = safeAreas.subscribe(() => instance.update(settingsOf(store.getState(), store)))
+    const unsubscribePhone = phoneFrame.subscribe(() => instance.update(settingsOf(store.getState(), store)))
     onPlayerReady(instance)
     return () => {
       unsubscribe()
       unsubscribeSafeAreas()
+      unsubscribePhone()
       stopListening()
       onPlayerReady(null)
       player.current = null

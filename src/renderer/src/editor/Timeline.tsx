@@ -5,7 +5,7 @@ import { moveZoom, resizeZoom } from '@engine/zoom/zoomEditing'
 import { formatClock, formatTimecode } from '@shared/format'
 import { DUB_TRACKS } from '@shared/models/media'
 import type { EditorSession } from '@shared/models/editor'
-import type { CaptionCue, ImageLayer, SpeedEffect, TextOverlay, TrimEffect, ZoomEffect } from '@shared/models/project'
+import type { CaptionCue, Layer, SpeedEffect, TextOverlay, TrimEffect, ZoomEffect } from '@shared/models/project'
 import type { EditorStore } from './EditorStore'
 import { Filmstrip } from './Filmstrip'
 import type { PreviewPlayer } from './PreviewPlayer'
@@ -50,7 +50,7 @@ type Drag = { kind: DragKind; originX: number } & (
   | { target: 'speed'; original: SpeedEffect }
   | { target: 'cue'; original: CaptionCue }
   | { target: 'text'; original: TextOverlay }
-  | { target: 'layer'; original: ImageLayer }
+  | { target: 'layer'; original: Layer }
 )
 
 /** A press on the video lane: a click seeks, a drag selects. */
@@ -476,7 +476,8 @@ export function Timeline({ session, store, player }: Props) {
   const roomy = (region: { startMs: number; endMs: number }): boolean =>
     ((region.endMs - region.startMs) / duration) * width >= REMOVE_MIN_WIDTH_PX
   const now = (): number => player.currentTimeMs
-  const imageName = (file: string): string => state.images.find((image) => image.file === file)?.name ?? file
+  const imageName = (file: string): string =>
+    state.images.find((image) => image.file === file)?.name ?? state.clips.find((clip) => clip.file === file)?.name ?? file
   const dragHandlers = { onPointerMove: continueDrag, onPointerUp: endDrag, onPointerCancel: endDrag }
 
   return (
@@ -934,7 +935,7 @@ export function Timeline({ session, store, player }: Props) {
                     {...dragHandlers}
                   />
                   <span className="region-icon" aria-hidden="true">
-                    <ImageIcon />
+                    {layer.kind === 'video' ? <FilmIcon /> : <ImageIcon />}
                   </span>
                   <span className="cue-label">{imageName(layer.file)}</span>
                   {layer.id === state.selectedLayerId && roomy(layer) && (

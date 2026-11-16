@@ -21,6 +21,9 @@ import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
 import { DubbingService } from './dub/DubbingService'
 import { FilterRenderService } from './filters/FilterRenderService'
 import { registerIpc } from './ipc/registerIpc'
+import { ClipImporter } from './library/ClipImporter'
+import { SessionJoiner } from './library/SessionJoiner'
+import { TemplateStore } from './project/TemplateStore'
 import { ImageImporter } from './library/ImageImporter'
 import { MusicImporter } from './library/MusicImporter'
 import { VideoImporter } from './library/VideoImporter'
@@ -290,6 +293,9 @@ async function bootstrap(): Promise<void> {
     importer: new VideoImporter({ ffmpeg, sessions, logger: createLogger('import') }),
     music: new MusicImporter({ ffmpeg, sessions, logger: createLogger('music') }),
     images: new ImageImporter({ ffmpeg, sessions, logger: createLogger('images') }),
+    clips: new ClipImporter({ ffmpeg, sessions, logger: createLogger('clips') }),
+    joiner: new SessionJoiner({ ffmpeg, sessions, logger: createLogger('join') }),
+    templates: new TemplateStore(app.getPath('userData'), createLogger('templates')),
     meet,
     meetSettings,
     updates,

@@ -45,6 +45,11 @@ import { writeFileAtomic } from '../filesystem/atomicWrite'
 import { toImportAppError } from '../library/VideoImporter'
 import type { MusicImporter } from '../library/MusicImporter'
 import type { ImageImporter } from '../library/ImageImporter'
+import type { ClipImporter } from '../library/ClipImporter'
+import type { SessionJoiner } from '../library/SessionJoiner'
+import type { TemplateStore } from '../project/TemplateStore'
+import { toJoinAppError } from '../library/SessionJoiner'
+import { toClipAppError } from '../library/ClipImporter'
 import { IMAGE_EXTENSIONS, toImageAppError } from '../library/ImageImporter'
 import { assetUrl } from '@shared/models/media'
 import { toMusicAppError } from '../library/MusicImporter'
@@ -83,6 +88,9 @@ export interface IpcDependencies {
   importer: VideoImporter
   music: MusicImporter
   images: ImageImporter
+  clips: ClipImporter
+  joiner: SessionJoiner
+  templates: TemplateStore
   meet: MeetRecorder
   meetSettings: MeetSettingsStore
   updates: UpdateService
@@ -137,6 +145,9 @@ export function registerIpc(deps: IpcDependencies): void {
     importer,
     music,
     images,
+    clips,
+    joiner,
+    templates,
     meet,
     meetSettings,
     updates,
@@ -302,6 +313,35 @@ export function registerIpc(deps: IpcDependencies): void {
       }
     }
     return { ok: true, value: { sessionIds } }
+  })
+
+  handle('templates:list', () => templates.list())
+  handle('templates:save', async ([value]) => {
+    try {
+      return { ok: true, value: await templates.save(value) }
+    } catch (error) {
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+  handle('templates:delete', async ([id]) => {
+    if (typeof id !== 'string' || id === '' || id.length > 64) return { ok: false, error: appError('invalid-state', 'invalid template id') }
+    try {
+      return { ok: true, value: await templates.delete(id) }
+    } catch (error) {
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('library:join', async ([value]) => {
+    const ids = Array.isArray(value) ? value.filter((entry): entry is string => isSessionId(entry)) : []
+    if (ids.length < 2 || new Set(ids).size !== ids.length) return { ok: false, error: appError('invalid-state', 'join needs two or more different recordings') }
+    try {
+      const sessionId = await joiner.join(ids)
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: { sessionId } }
+    } catch (error) {
+      return { ok: false, error: toJoinAppError(error) }
+    }
   })
 
   handle('library:import-paths', async ([value]) => {
@@ -524,6 +564,40 @@ export function registerIpc(deps: IpcDependencies): void {
       }
     }
     return { ok: true, value: imported }
+  })
+
+  handle('clips:import', async ([sessionId]) => {
+    if (!isSessionId(sessionId)) return { ok: false, error: appError('invalid-state', 'invalid session id') }
+    const owner = windows.mainWindow
+    const options = {
+      title: 'Escolher vídeos',
+      buttonLabel: 'Adicionar',
+      properties: ['openFile', 'multiSelections'] as Array<'openFile' | 'multiSelections'>,
+      filters: [{ name: 'Vídeos', extensions: IMPORT_EXTENSIONS }]
+    }
+    const answer = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    if (answer.canceled) return { ok: true, value: [] }
+    const imported = []
+    for (const filePath of answer.filePaths) {
+      try {
+        const clip = await clips.import(sessionId, filePath)
+        imported.push({ ...clip, url: assetUrl(sessionId, clip.file) })
+      } catch (error) {
+        if (imported.length === 0) return { ok: false, error: toClipAppError(error) }
+        logger.warn('clip skipped', { sessionId, file: filePath, error: String(error) })
+      }
+    }
+    return { ok: true, value: imported.map(({ sizeBytes: _size, ...clip }) => clip) }
+  })
+
+  handle('clips:remove', async ([sessionId, file]) => {
+    if (!isSessionId(sessionId) || typeof file !== 'string') return { ok: false, error: appError('invalid-state', 'invalid clip') }
+    try {
+      await clips.remove(sessionId, file)
+      return { ok: true, value: null }
+    } catch (error) {
+      return { ok: false, error: toClipAppError(error) }
+    }
   })
 
   handle('images:remove', async ([sessionId, file]) => {

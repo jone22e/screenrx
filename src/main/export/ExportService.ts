@@ -11,7 +11,11 @@ import type { AppError } from '@shared/models/errors'
 import { needsRenderedTrack, renderKey } from '@shared/models/filters'
 import { appError } from '@shared/models/errors'
 import type { ExportJob, ExportOverrides, ExportResult, ExportTrack, ExportTrackName } from '@shared/models/export'
+import { clipTrackName } from '@shared/models/export'
 import { DUB_TRACKS } from '@shared/models/media'
+import { SESSION_FILES } from '@shared/config/recording'
+import path from 'node:path'
+import { isSafeFileName, resolveInside } from '../filesystem/safePaths'
 import type { Logger } from '../logging/logger'
 import type { ProjectStore } from '../project/ProjectStore'
 import type { SessionStore } from '../recording/SessionStore'
@@ -120,6 +124,17 @@ export class ExportService {
         files.webcam = await openTrack(webcamPath)
       }
 
+      // Every b-roll clip a layer shows, read like the screen track.
+      const clips: ExportJob['clips'] = []
+      const clipFiles = [...new Set(project.layers.filter((layer) => layer.kind === 'video').map((layer) => layer.file))]
+      for (const file of clipFiles) {
+        const clip = session.clips.find((candidate) => candidate.file === file)
+        if (!clip || !isSafeFileName(file)) continue
+        const clipPath = resolveInside(path.join(sessions.directoryOf(sessionId), SESSION_FILES.assets), file)
+        clips.push({ file, track: await this.describeTrack(clipPath, clip) })
+        files[clipTrackName(file)] = await openTrack(clipPath)
+      }
+
       // A track muted in the edit is simply not given to the encoder. A dubbing in
       // use takes the place of the recorded voice.
       const dub = session.dubs.find((track) => track.language === project.dub.language)
@@ -149,7 +164,7 @@ export class ExportService {
         music: music !== null,
         loudness: audio.loudness
       })
-      return { exportId: id, plan, encoder, fileName: baseName(outputPath), screen, webcam }
+      return { exportId: id, plan, encoder, fileName: baseName(outputPath), screen, webcam, clips }
     } catch (error) {
       await closeTracks(files)
       throw toExportError(error)
@@ -286,7 +301,7 @@ async function openTrack(filePath: string): Promise<{ handle: FileHandle; size: 
 }
 
 async function closeTracks(files: ActiveExport['files']): Promise<void> {
-  await Promise.all(Object.values(files).map((file) => file.handle.close().catch(() => undefined)))
+  await Promise.all(Object.values(files).map((file) => file?.handle.close().catch(() => undefined)))
 }
 
 /** The codec's arguments: hardware encoders take a bitrate, the software ones a quality. */

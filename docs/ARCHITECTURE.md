@@ -87,6 +87,9 @@ src/
   library/VideoImporter.ts       traz um vídeo gravado fora do app para a biblioteca
   library/MusicImporter.ts       traz um arquivo de áudio como a trilha de música da sessão
   library/ImageImporter.ts       copia imagens para a pasta assets/ da sessão, para as camadas
+  library/ClipImporter.ts        traz um clipe de vídeo (b-roll) para assets/, H.264 sem som
+  library/SessionJoiner.ts       junta gravações em uma nova (vídeo, áudio e telemetria emendados)
+  project/TemplateStore.ts       modelos de projeto do usuário (userData/templates.json)
   update/UpdateService.ts        atualização automática: consulta, baixa e instala (electron-updater)
     captions/DictationService      ditado do assistente: WAV → texto pelo transcritor nativo
   tracking/ObjectTrackingService segue um objeto marcado pelo vídeo (helper screenrx-track, Vision) → track.json
@@ -511,7 +514,25 @@ Backspace remove o selecionado. O desenho reaproveita `drawCaption`
 (`textsAt`). O assistente também escreve textos ("text"). **Não verificado:** só
 por testes e leitura; nenhum arrasto nem exportação real com textos.
 
-### Camadas de imagem (aba "Camadas")
+### Animações de texto e transições nos cortes
+
+- **Textos** (`TextOverlay.enter` / `exit`: `none`, `fade`, `pop`, `slide-up`,
+  com duração até 2 s): `engine/rendering/animation.ts` dá a transformação
+  (escala, alpha, deslocamento) de um texto em cada instante — a saída é a
+  entrada tocada ao contrário — e `textsWithMotionAt` entrega os textos do
+  instante já transformados; `drawCaption` recebe a transformação e a combina
+  com a entrada das legendas. **Textos prontos** (`textTemplates.ts`: Título,
+  Subtítulo, Lower third, Chamada) trazem estilo, posição, movimento e duração;
+  a ferramenta Texto os oferece ao lado de "Adicionar texto".
+- **Cortes** (`TrimEffect.transition`: `cut` ou `dip`; ausente = seco):
+  `engine/time/transitions.ts` dá o escurecimento (0…1) em cada instante de
+  origem — 0,2 s antes do corte indo ao preto, 0,2 s depois voltando — e o
+  `composeFrame` pinta o quadro de preto nessa proporção por último. Em tempo
+  de origem o preview (que pula o corte) e a exportação concordam. A ferramenta
+  Cortes mostra "Passagem" para o corte selecionado. Crossfade não entrou: exige
+  dois quadros no mesmo instante.
+
+### Camadas de imagem e de vídeo (aba "Camadas")
 
 ```
 arquivo do usuário → ImageImporter: cópia em <sessão>/assets/<uuid>.<ext> + assets.images no manifesto
@@ -540,12 +561,54 @@ project.layers (ImageLayer: arquivo, intervalo, centro, largura, rotação, opac
   O `PreviewPlayer` carrega cada arquivo uma vez (`HTMLImageElement`, então SVG
   também) e redesenha quando chega; a exportação decodifica todos antes do
   primeiro quadro. Uma imagem que não carrega simplesmente não é desenhada, nos dois.
+- **B-roll** (`VideoLayer`, `kind: 'video'`, com `offsetMs`): um clipe trazido
+  por "Vídeo…" vai para `assets/<uuid>.mp4` como H.264 sem som
+  (`ClipImporter`, copiado ou reencodado como na importação de vídeo; manifesto
+  `assets.videos`); o protocolo de mídia serve um `.mp4` da pasta `assets/` em
+  faixas, como as trilhas. A camada entra do play pela duração do clipe,
+  preenchendo a largura, e toca para a frente com a gravação a partir de
+  `offsetMs` ("Começar o clipe em"); o som do clipe não entra na mixagem. No
+  preview, um `<video>` por clipe segue o relógio da camada (`placeClip`); na
+  exportação, um `TrackFrameReader` por clipe (`ExportJob.clips`,
+  `export:read-chunk` com `clip:<arquivo>`), decodificando para a frente. A
+  faixa "Imagens" mostra os dois tipos.
 - **Interface.** Aba Camadas: lista (a primeira por cima), subir/descer, remover,
   e para a selecionada tamanho, opacidade, rotação, cantos e "O vídeo todo". No
   preview: arrastar move, um canto da moldura redimensiona (como os textos; os
   textos e a legenda ficam por cima das imagens no clique). Linha do tempo: faixa
   "Imagens" (só quando há alguma), regiões arrastáveis e redimensionáveis.
   `⌫` remove a selecionada.
+
+### Juntar gravações (biblioteca)
+
+"Juntar gravações" (ícone na barra da biblioteca, diálogo com a ordem marcada)
+faz **uma gravação nova** a partir de duas ou mais (`SessionJoiner`): os
+`screen.mp4` emendados pelo filtro `concat` do FFmpeg, cada um encaixado no
+tamanho do primeiro (letterbox preto) e reencodado em H.264; microfone e som do
+sistema emendados com silêncio onde uma gravação não tem a trilha
+(`FfmpegService.concatVideos` / `concatAudio`); `cursor.json` e
+`interactions.json` deslocados no tempo e levados ao quadro encaixado, então
+zoom automático e cursor desenhado continuam valendo; `cursorInVideo` fica
+verdadeiro se qualquer parte tinha o cursor na imagem. As partes não são
+tocadas; a nova abre no editor como uma gravação importada (fonte `file`,
+rótulo "A + B"). É a forma escolhida para "vários clipes no mesmo projeto": o
+modelo de tempo continua de uma gravação só, e o resultado é um arquivo
+comum, com cortes, legendas e tudo o mais aplicados ao conjunto.
+
+### Modelos de projeto e moldura de celular
+
+- **Modelos** (`shared/models/template.ts`, `main/project/TemplateStore.ts` em
+  `userData/templates.json`): fundo e formato, estilo/tamanho/visibilidade das
+  legendas, cursor, câmera, ajustes da música (não o arquivo) e ajustes de
+  exportação (sem a velocidade). "Salvar este visual como modelo…" e a lista
+  ficam na ferramenta Formato (`TemplatesSection`); aplicar é um passo de
+  desfazer (`applyTemplateTo`: mantém cues, idioma, arquivo de música e
+  velocidade do projeto). O parser passa cada modelo pelo `parseProject`, então
+  um modelo quebrado é reparado como um projeto seria.
+- **Moldura de celular** (preferência do Mac, `phoneFrame` ao lado de
+  `safeAreas`, desligada por padrão): no 9:16 o `PreviewPlayer` desenha cantos
+  arredondados, barra de status, coluna de botões, linhas de legenda e música e
+  o indicador inferior, só no preview.
 
 ### Dublagem com a voz de quem gravou
 

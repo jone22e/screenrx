@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
 const KEY = 'screenrx.preview.safe-areas'
+const PHONE_KEY = 'screenrx.preview.phone-frame'
 
 /**
  * Whether the preview marks the parts of a vertical video that the social
@@ -12,9 +13,9 @@ class SafeAreasStore {
   private shown: boolean
   private readonly listeners = new Set<() => void>()
 
-  constructor() {
+  constructor(private readonly key: string = KEY) {
     try {
-      this.shown = window.localStorage.getItem(KEY) === 'on'
+      this.shown = window.localStorage.getItem(this.key) === 'on'
     } catch {
       this.shown = false
     }
@@ -30,7 +31,7 @@ class SafeAreasStore {
   set(shown: boolean): void {
     this.shown = shown
     try {
-      window.localStorage.setItem(KEY, shown ? 'on' : 'off')
+      window.localStorage.setItem(this.key, shown ? 'on' : 'off')
     } catch {
       // Not remembering the choice is no reason to fail.
     }
@@ -41,3 +42,8 @@ class SafeAreasStore {
 export const safeAreas = new SafeAreasStore()
 
 export const useSafeAreas = (): boolean => useSyncExternalStore(safeAreas.subscribe, safeAreas.getState)
+
+/** Whether the preview shows a vertical video inside a phone, with the apps' bars drawn over it. Off until asked for; never exported. */
+export const phoneFrame = new SafeAreasStore(PHONE_KEY)
+
+export const usePhoneFrame = (): boolean => useSyncExternalStore(phoneFrame.subscribe, phoneFrame.getState)

@@ -111,3 +111,11 @@ export const SparklesIcon = () => (
     <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18" />
   </Icon>
 )
+
+export const JoinIcon = () => (
+  <Icon size={15}>
+    <rect x="3" y="7" width="7" height="10" rx="1.5" />
+    <rect x="14" y="7" width="7" height="10" rx="1.5" />
+    <path d="M10 12h4" />
+  </Icon>
+)

@@ -1,4 +1,4 @@
-import type { ImageLayer } from '@shared/models/project'
+import type { Layer } from '@shared/models/project'
 import type { Rect, Size } from './frameLayout'
 
 /** Where an image layer sits on the output, in output pixels, before its rotation. */
@@ -13,7 +13,7 @@ export interface ImageLayerLayout extends Rect {
  * the edge — a sticker half out of frame is a choice — but its centre stays
  * inside the output, so it can always be grabbed.
  */
-export function layoutImageLayer(output: Size, layer: ImageLayer, image: Size): ImageLayerLayout {
+export function layoutImageLayer(output: Size, layer: Layer, image: Size): ImageLayerLayout {
   const width = Math.max(1, layer.sizeRatio * output.width)
   const height = image.width > 0 && image.height > 0 ? (width * image.height) / image.width : width
   const centerX = Math.min(Math.max(layer.position.x, 0), 1) * output.width
@@ -29,7 +29,7 @@ export function layoutImageLayer(output: Size, layer: ImageLayer, image: Size): 
 }
 
 /** The layers on screen at `timeMs` (source time), bottom first: the order they are drawn in. */
-export function layersAt(layers: readonly ImageLayer[], timeMs: number): ImageLayer[] {
+export function layersAt(layers: readonly Layer[], timeMs: number): Layer[] {
   return layers.filter((layer) => timeMs >= layer.startMs && timeMs < layer.endMs)
 }
 

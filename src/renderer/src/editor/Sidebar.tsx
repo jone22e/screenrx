@@ -6,7 +6,7 @@ import { ZOOM_LIMITS } from '@engine/zoom/zoomConfig'
 import { SPEED_CONFIG } from '@engine/timeline/speedConfig'
 import { formatTimecode } from '@shared/format'
 import type { EditorSession } from '@shared/models/editor'
-import type { WebcamCorner, WebcamShape } from '@shared/models/project'
+import type { TrimTransition, WebcamCorner, WebcamShape } from '@shared/models/project'
 import { BACKGROUND_LIMITS, FRAME_LIMITS, MARKER_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
 import { AssistantPanel } from './AssistantPanel'
 import { AudioPanel } from './AudioPanel'
@@ -22,7 +22,8 @@ import { TextPanel } from './TextPanel'
 import { AspectShapeIcon, FRAME_ASPECT_RATIOS, FRAME_FIT_ICONS } from './frameAspectIcons'
 import { FRAME_ALIGN_OPTIONS, FRAME_ASPECT_OPTIONS, FRAME_FIT_HINTS, FRAME_FIT_OPTIONS, FRAME_FOLLOW_OPTIONS, aspectLabel, fitChoiceOf } from './frameAspects'
 import { createExportPlan } from '@engine/export/exportPlan'
-import { safeAreas, useSafeAreas } from '../common/safeAreas'
+import { phoneFrame, safeAreas, usePhoneFrame, useSafeAreas } from '../common/safeAreas'
+import { TemplatesSection } from './TemplatesSection'
 import { Section, Segmented, Slider } from './panelControls'
 import {
   BackdropIcon,
@@ -55,6 +56,10 @@ type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'layers' | 'cur
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
 const speedChip = (value: number): string => `${String(value).replace('.', ',')}×`
+const TRANSITIONS: ReadonlyArray<{ value: TrimTransition; label: string }> = [
+  { value: 'cut', label: 'Seca' },
+  { value: 'dip', label: 'Escurecer' }
+]
 const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
 const seconds = (ms: number): string => `${decimal(ms / 1000)} s`
 
@@ -138,6 +143,7 @@ function CutsPanel({ session, store, player }: Props) {
   const removedMs = session.durationMs - timeMap.timelineDurationMs
   const selectedMs = selection ? selection.endMs - selection.startMs : 0
   const selectedSpeed = speeds.find((region) => region.id === state.selectedSpeedId) ?? null
+  const selectedTrim = trims.find((trim) => trim.id === state.selectedTrimId) ?? null
   // The factor the next speed region gets; the selected region's, once there is one.
   const [factor, setFactor] = useState<number>(SPEED_CONFIG.defaultFactor)
   const currentFactor = selectedSpeed?.speed ?? factor
@@ -175,6 +181,22 @@ function CutsPanel({ session, store, player }: Props) {
         </div>
         <p className="panel-hint">Arraste na timeline ou marque com <kbd>I</kbd> e <kbd>O</kbd>.</p>
       </Section>
+
+      {selectedTrim && (
+        <Section title="Corte selecionado" aside={`${formatTimecode(selectedTrim.startMs)} – ${formatTimecode(selectedTrim.endMs)}`}>
+          <Segmented
+            label="Passagem"
+            value={selectedTrim.transition ?? 'cut'}
+            options={TRANSITIONS}
+            onChange={(transition) => store.setTrimTransition(selectedTrim.id, transition)}
+          />
+          <p className="panel-hint">
+            {selectedTrim.transition === 'dip'
+              ? 'A imagem escurece antes do corte e volta depois, em 0,4 s.'
+              : 'A imagem pula direto de um lado do corte ao outro.'}
+          </p>
+        </Section>
+      )}
 
       <SuggestionsPanel store={store} player={player} />
 
@@ -385,6 +407,7 @@ function ZoomPanel({ session, store, player }: Props) {
 function FormatPanel({ session, store, player, onOpenBackground }: Props & { onOpenBackground: () => void }) {
   const { background, timeMap, exportSettings, objectTrack, tracking, trackNotice, markingObject } = useSyncExternalStore(store.subscribe, store.getState)
   const safe = useSafeAreas()
+  const phone = usePhoneFrame()
   const source = { width: session.video.widthPx, height: session.video.heightPx }
   const plan = createExportPlan(source, timeMap, exportSettings, background.aspect)
   const vertical = background.aspect !== 'native'
@@ -527,8 +550,17 @@ function FormatPanel({ session, store, player, onOpenBackground }: Props & { onO
             </span>
             <input type="checkbox" role="switch" checked={safe} onChange={(event) => safeAreas.set(event.target.checked)} />
           </label>
+          <label className="switch-row">
+            <span className="switch-row-text">
+              <strong>Ver dentro de um celular</strong>
+              <span>Desenha no preview a tela de um celular com as barras e os botões do app por cima, como o post será visto. Não sai na exportação.</span>
+            </span>
+            <input type="checkbox" role="switch" checked={phone} onChange={(event) => phoneFrame.set(event.target.checked)} />
+          </label>
         </Section>
       )}
+
+      <TemplatesSection store={store} />
 
       <div className="format-output">
         <span>Saída</span>

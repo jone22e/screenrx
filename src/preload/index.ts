@@ -61,6 +61,7 @@ const api: ScreenRxApi = {
     rename: (sessionId, title) => invoke('library:rename', sessionId, title),
     import: () => invoke('library:import'),
     importFiles: (files) => invoke('library:import-paths', files.map((file) => webUtils.getPathForFile(file))),
+    join: (sessionIds) => invoke('library:join', sessionIds),
     search: (query) => invoke('library:search', query),
     onChanged: (listener) => subscribe('library:changed', () => listener())
   },
@@ -78,9 +79,18 @@ const api: ScreenRxApi = {
     exportSubtitles: (sessionId, format, content) => invoke('captions:export-subtitles', sessionId, format, content),
     importSubtitles: () => invoke('captions:import-subtitles')
   },
+  templates: {
+    list: () => invoke('templates:list'),
+    save: (template) => invoke('templates:save', template),
+    delete: (id) => invoke('templates:delete', id)
+  },
   images: {
     import: (sessionId) => invoke('images:import', sessionId),
     remove: (sessionId, file) => invoke('images:remove', sessionId, file)
+  },
+  clips: {
+    import: (sessionId) => invoke('clips:import', sessionId),
+    remove: (sessionId, file) => invoke('clips:remove', sessionId, file)
   },
   music: {
     import: (sessionId) => invoke('music:import', sessionId),

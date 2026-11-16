@@ -1,5 +1,6 @@
 import { captionAt } from '@engine/captions/captionCues'
-import { textsAt } from '@engine/captions/textOverlays'
+import { textsAt, textsWithMotionAt } from '@engine/captions/textOverlays'
+import { dipDarknessAt } from '@engine/time/transitions'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import { outputSizeFor } from '@engine/rendering/frameLayout'
 import { safeZones } from '@engine/rendering/safeZones'
@@ -18,9 +19,11 @@ import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
 import type { EditorSession } from '@shared/models/editor'
 import type { ObjectTrack } from '@shared/models/telemetry'
 import type {
+  Layer,
+  VideoLayer,
+  TrimEffect,
   CursorSettings,
   CursorSmoothing,
-  ImageLayer,
   SpeedEffect,
   MusicSettings,
   AudioSettings,
@@ -77,21 +80,27 @@ export interface PreviewSettings {
   zooms: readonly ZoomEffect[]
   /** Stretches played faster or slower, sorted: the preview plays them at their factor, as the export will. */
   speeds: readonly SpeedEffect[]
+  /** The cuts, sorted, for the dips at their edges. */
+  trims: readonly TrimEffect[]
   background: BackgroundSettings
   webcam: WebcamSettings
   captions: CaptionSettings
   texts: readonly TextOverlay[]
   /** The text picked in the editor: it gets a frame with handles, drawn only here, never exported. */
   selectedTextId: string | null
-  /** Images over the video, bottom first, and the one picked in the editor. */
-  layers: readonly ImageLayer[]
+  /** Images and clips over the video, bottom first, and the one picked in the editor. */
+  layers: readonly Layer[]
   selectedLayerId: string | null
   /** Where each image of the session is served from, by file name. */
   images: ReadonlyArray<{ file: string; url: string }>
+  /** Where each b-roll clip is served from, and how long it is, by file name. */
+  clips: ReadonlyArray<{ file: string; url: string; durationMs: number }>
   /** The drawn pointer's settings; drawn only for recordings made without the system cursor in the picture. */
   cursor: CursorSettings
   /** Whether to shade where a vertical video is covered by the apps' interface; drawn only here. */
   safeAreas: boolean
+  /** Whether to draw a phone around a vertical video, with the apps' bars over it; drawn only here. */
+  phoneFrame: boolean
   /** Where the marked object goes, for the frame that follows it. */
   objectTrack: ObjectTrack | null
   /** Which audio tracks are heard. */
@@ -127,6 +136,8 @@ export interface PreviewSettings {
  */
 /** How far the music may stray from the clock before it is seeked. */
 const MUSIC_DRIFT_SEC = 0.25
+/** How far a b-roll clip may stray from its layer's clock before it is seeked. */
+const CLIP_DRIFT_SEC = 0.2
 
 export class PreviewPlayer {
   private readonly video: HTMLVideoElement
@@ -158,6 +169,8 @@ export class PreviewPlayer {
   private drawnLayers: Array<{ id: string; box: Rect }> = []
   /** The session's images as loaded; a file is fetched the first time a layer asks for it. */
   private readonly pictures = new Map<string, HTMLImageElement>()
+  /** The b-roll clips, one player each, created the first time a layer shows the clip. */
+  private readonly clipPlayers = new Map<string, HTMLVideoElement>()
   /** The pointer's path as drawn, for the smoothing in use; computed again when that changes. */
   private drawnCursor: { smoothing: CursorSmoothing; path: Array<NormalizedPoint | null> } | null = null
   private readonly timeListeners = new Set<(timeMs: number) => void>()
@@ -358,7 +371,7 @@ export class PreviewPlayer {
     this.webcam?.removeEventListener('seeked', this.render)
     this.webcam?.removeEventListener('loadeddata', this.render)
     // Releases the decoders and the streams.
-    for (const element of [this.video, ...this.companions, ...(this.music ? [this.music.element] : [])]) {
+    for (const element of [this.video, ...this.companions, ...(this.music ? [this.music.element] : []), ...this.clipPlayers.values()]) {
       element.pause()
       element.removeAttribute('src')
       element.load()
@@ -519,6 +532,7 @@ export class PreviewPlayer {
     const selectedLayer = regions.layers.find((layer) => layer.id === this.settings.selectedLayerId)
     if (selectedLayer) this.drawLayerSelection(selectedLayer.box)
     if (this.settings.safeAreas) this.drawSafeAreas()
+    if (this.settings.phoneFrame && this.settings.background.aspect === '9:16') this.drawPhoneFrame()
     const selected = regions.texts.find((text) => text.id === this.settings.selectedTextId)
     const selectedText = selected ? textsAt(this.settings.texts, timeMs).find((text) => text.id === selected.id) : null
     if (selected && selectedText) this.drawTextSelection(selected.box, selectedText)
@@ -546,9 +560,10 @@ export class PreviewPlayer {
       background: this.settings.background,
       color: this.settings.color,
       caption: caption === null ? null : { text: caption.text, style: captions.style, timing: caption },
-      texts: textsAt(this.settings.texts, timeMs),
+      texts: textsWithMotionAt(this.settings.texts, timeMs),
       layers: this.picturesFor(layersAt(this.settings.layers, timeMs)),
-      cursor: this.cursorAt(timeMs)
+      cursor: this.cursorAt(timeMs),
+      darkness: dipDarknessAt(this.settings.trims, timeMs)
     }
   }
 
@@ -567,9 +582,21 @@ export class PreviewPlayer {
   }
 
   /** The images of the layers given, as far as they have loaded; a missing one is fetched and the frame drawn again when it arrives. */
-  private picturesFor(layers: readonly ImageLayer[]): FrameInput['layers'] {
-    const shown: Array<{ layer: ImageLayer; image: CanvasImageSource; size: Size }> = []
+  private picturesFor(layers: readonly Layer[]): FrameInput['layers'] {
+    const shown: Array<{ layer: Layer; image: CanvasImageSource; size: Size }> = []
+    const timeMs = this.currentTimeMs
+    const clipsShown = new Set<string>()
     for (const layer of layers) {
+      if (layer.kind === 'video') {
+        const clip = this.clipPlayerFor(layer.file)
+        if (!clip) continue
+        clipsShown.add(layer.file)
+        this.placeClip(clip, layer, timeMs)
+        if (clip.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && clip.videoWidth > 0) {
+          shown.push({ layer, image: clip, size: { width: clip.videoWidth, height: clip.videoHeight } })
+        }
+        continue
+      }
       let picture = this.pictures.get(layer.file)
       if (!picture) {
         const url = this.settings.images.find((image) => image.file === layer.file)?.url
@@ -584,7 +611,46 @@ export class PreviewPlayer {
         shown.push({ layer, image: picture, size: { width: picture.naturalWidth, height: picture.naturalHeight } })
       }
     }
+    // A clip no layer shows right now stands still.
+    for (const [file, clip] of this.clipPlayers) if (!clipsShown.has(file) && !clip.paused) clip.pause()
     return shown
+  }
+
+  /** The player of a b-roll clip, made the first time it is needed. */
+  private clipPlayerFor(file: string): HTMLVideoElement | null {
+    let clip = this.clipPlayers.get(file)
+    if (clip) return clip
+    const url = this.settings.clips.find((candidate) => candidate.file === file)?.url
+    if (!url) return null
+    clip = document.createElement('video')
+    clip.muted = true
+    clip.playsInline = true
+    clip.preload = 'auto'
+    clip.src = url
+    clip.addEventListener('loadeddata', () => this.render(), { once: true })
+    clip.addEventListener('seeked', () => {
+      if (!this.playing) this.render()
+    })
+    this.clipPlayers.set(file, clip)
+    return clip
+  }
+
+  /** Puts a clip where its layer says for `timeMs`, and plays or pauses it with the recording. */
+  private placeClip(clip: HTMLVideoElement, layer: VideoLayer, timeMs: number): void {
+    const wantedSec = (layer.offsetMs + (timeMs - layer.startMs)) / 1000
+    if (Number.isFinite(clip.duration) && wantedSec >= clip.duration) {
+      if (!clip.paused) clip.pause()
+      return
+    }
+    if (Math.abs(clip.currentTime - wantedSec) > CLIP_DRIFT_SEC || !this.playing) {
+      if (Math.abs(clip.currentTime - wantedSec) > 0.02) clip.currentTime = wantedSec
+    }
+    if (this.playing && clip.paused) {
+      clip.playbackRate = this.video.playbackRate
+      void clip.play().catch(() => undefined)
+    } else if (!this.playing && !clip.paused) {
+      clip.pause()
+    }
   }
 
   /** A dashed frame with corner handles around the picked image, drawn only on the preview. */
@@ -693,6 +759,57 @@ export class PreviewPlayer {
   }
 
   /** The output's centre lines, over everything — on the preview only. */
+  /**
+   * A phone around the vertical video, as the post will be seen: the
+   * status bar, the column of buttons and the caption and music lines of
+   * the apps, drawn as outlines over the picture. Preview only.
+   */
+  private drawPhoneFrame(): void {
+    const context = this.context
+    const { width, height } = this.output
+    const unit = width / 1080
+    context.save()
+    // Rounded screen corners, as a phone has: the corners of the picture go black.
+    const radius = 90 * unit
+    context.beginPath()
+    context.rect(0, 0, width, height)
+    context.roundRect(0, 0, width, height, radius)
+    context.fillStyle = '#000'
+    context.fill('evenodd')
+    // Status bar: the time on the left, the battery on the right.
+    context.fillStyle = 'rgba(255, 255, 255, 0.92)'
+    context.font = `600 ${38 * unit}px system-ui, -apple-system, sans-serif`
+    context.textBaseline = 'middle'
+    context.textAlign = 'left'
+    context.fillText('9:41', 80 * unit, 60 * unit)
+    context.strokeStyle = 'rgba(255, 255, 255, 0.92)'
+    context.lineWidth = 3 * unit
+    context.strokeRect(width - 130 * unit, 44 * unit, 48 * unit, 26 * unit)
+    context.fillRect(width - 126 * unit, 48 * unit, 36 * unit, 18 * unit)
+    // The column of buttons on the right: heart, comment, share, more.
+    const column = width - 90 * unit
+    for (const y of [0.52, 0.6, 0.68, 0.76]) {
+      context.beginPath()
+      context.arc(column, y * height, 34 * unit, 0, Math.PI * 2)
+      context.lineWidth = 4 * unit
+      context.strokeStyle = 'rgba(255, 255, 255, 0.85)'
+      context.stroke()
+    }
+    // Account name, caption and music lines at the bottom left.
+    context.fillStyle = 'rgba(255, 255, 255, 0.85)'
+    context.fillRect(60 * unit, 0.84 * height, 260 * unit, 22 * unit)
+    context.fillStyle = 'rgba(255, 255, 255, 0.6)'
+    context.fillRect(60 * unit, 0.84 * height + 44 * unit, 560 * unit, 18 * unit)
+    context.fillRect(60 * unit, 0.84 * height + 78 * unit, 420 * unit, 18 * unit)
+    context.fillRect(60 * unit, 0.84 * height + 124 * unit, 300 * unit, 18 * unit)
+    // The home indicator.
+    context.fillStyle = 'rgba(255, 255, 255, 0.9)'
+    context.beginPath()
+    context.roundRect(width / 2 - 140 * unit, height - 34 * unit, 280 * unit, 10 * unit, 5 * unit)
+    context.fill()
+    context.restore()
+  }
+
   private drawGuides(): void {
     const context = this.context
     const { width, height } = this.output
@@ -831,6 +948,7 @@ export class PreviewPlayer {
         companion.pause()
       }
     }
+    if (!playing) for (const clip of this.clipPlayers.values()) clip.pause()
     if (this.music) {
       if (playing) {
         this.placeMusic(this.currentTimeMs, true)

@@ -1,8 +1,10 @@
 import { useSyncExternalStore } from 'react'
 import { CAPTION_FONTS } from '@engine/captions/captionConfig'
 import { formatTimecode } from '@shared/format'
-import type { CaptionBackdrop, CaptionFont } from '@shared/models/project'
-import { CAPTION_FONT_IDS, CAPTION_LIMITS, TEXT_LIMITS } from '@shared/models/project'
+import { TEXT_MOTION_LABELS } from '@engine/rendering/animation'
+import { TEXT_TEMPLATES } from '@engine/rendering/textTemplates'
+import type { CaptionBackdrop, CaptionFont, TextMotionKind } from '@shared/models/project'
+import { CAPTION_FONT_IDS, CAPTION_LIMITS, TEXT_LIMITS, TEXT_MOTION_KINDS, TEXT_MOTION_LIMITS } from '@shared/models/project'
 import type { EditorStore } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
 import { PlusIcon, TrashIcon } from './icons'
@@ -21,6 +23,9 @@ const BACKDROPS: ReadonlyArray<{ value: CaptionBackdrop; label: string }> = [
 ]
 
 const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
+const seconds = (ms: number): string => `${(ms / 1000).toFixed(1).replace('.', ',')} s`
+
+const MOTIONS: ReadonlyArray<{ value: TextMotionKind; label: string }> = TEXT_MOTION_KINDS.map((kind) => ({ value: kind, label: TEXT_MOTION_LABELS[kind] }))
 
 /**
  * Texts written over the video: titles, call-outs. Each has its own span,
@@ -32,11 +37,11 @@ export function TextPanel({ store, player }: Props) {
   const { texts, selectedTextId } = state
   const selected = texts.find((text) => text.id === selectedTextId) ?? null
 
-  const add = (): void => {
-    const id = store.addText(player?.currentTimeMs ?? 0)
+  const show = (id: string): void => {
     const text = store.getState().texts.find((candidate) => candidate.id === id)
     if (text && player) player.seek(text.startMs)
   }
+  const add = (): void => show(store.addText(player?.currentTimeMs ?? 0))
 
   return (
     <>
@@ -44,6 +49,32 @@ export function TextPanel({ store, player }: Props) {
         <button className="panel-button panel-button-primary" disabled={!player} onClick={add}>
           <PlusIcon /> Adicionar texto
         </button>
+        <div className="looks" role="group" aria-label="Textos prontos">
+          {TEXT_TEMPLATES.map((template) => (
+            <button
+              key={template.id}
+              className="look"
+              title={template.hint}
+              disabled={!player}
+              onClick={() => show(store.addTextFromTemplate(template, player?.currentTimeMs ?? 0))}
+            >
+              <span className="look-sample">
+                <span
+                  style={{
+                    fontFamily: CAPTION_FONTS[template.style.font].family,
+                    fontWeight: template.style.bold ? 700 : 500,
+                    color: template.style.color,
+                    textTransform: template.style.uppercase ? 'uppercase' : 'none',
+                    fontSize: template.id === 'title' ? 17 : 13
+                  }}
+                >
+                  Aa
+                </span>
+              </span>
+              <span className="look-name">{template.label}</span>
+            </button>
+          ))}
+        </div>
         {texts.length === 0 ? (
           <p className="panel-hint">Um título ou um aviso sobre o vídeo, no instante que você quiser.</p>
         ) : (
@@ -90,6 +121,45 @@ export function TextPanel({ store, player }: Props) {
               onBlur={() => store.endGesture()}
             />
             <p className="panel-hint">Arraste no vídeo para posicionar; na linha do tempo, para mudar quando aparece.</p>
+          </Section>
+
+          <Section title="Animação">
+            <Segmented
+              label="Entrada"
+              value={selected.enter.kind}
+              options={MOTIONS}
+              onChange={(kind) => store.setTextMotion(selected.id, 'enter', { kind })}
+            />
+            {selected.enter.kind !== 'none' && (
+              <Slider
+                label="Duração da entrada"
+                value={seconds(selected.enter.durationMs)}
+                min={100}
+                max={TEXT_MOTION_LIMITS.maxDurationMs}
+                step={50}
+                current={selected.enter.durationMs}
+                onChange={(durationMs) => store.setTextMotion(selected.id, 'enter', { durationMs }, 'text-enter')}
+                onCommit={() => store.endGesture()}
+              />
+            )}
+            <Segmented
+              label="Saída"
+              value={selected.exit.kind}
+              options={MOTIONS}
+              onChange={(kind) => store.setTextMotion(selected.id, 'exit', { kind })}
+            />
+            {selected.exit.kind !== 'none' && (
+              <Slider
+                label="Duração da saída"
+                value={seconds(selected.exit.durationMs)}
+                min={100}
+                max={TEXT_MOTION_LIMITS.maxDurationMs}
+                step={50}
+                current={selected.exit.durationMs}
+                onChange={(durationMs) => store.setTextMotion(selected.id, 'exit', { durationMs }, 'text-exit')}
+                onCommit={() => store.endGesture()}
+              />
+            )}
           </Section>
 
           <Section title="Estilo">

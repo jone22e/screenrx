@@ -159,6 +159,10 @@ describe('parseProject framing', () => {
     )
     expect(parsed?.texts.map((text) => text.id)).toEqual(['a', 'b'])
     expect(parsed?.texts[1]?.style).toMatchObject({ sizeRatio: 0.1, color: '#ffffff' })
+    expect(parsed?.texts[0]?.enter).toEqual({ kind: 'none', durationMs: 300 })
+    const motion = parseProject({ ...createProject(sessionId), texts: [{ id: 'm', startMs: 0, endMs: 1000, text: 'x', enter: { kind: 'pop', durationMs: 9000 }, exit: { kind: 'bounce' } }] }, sessionId)?.texts[0]
+    expect(motion?.enter).toEqual({ kind: 'pop', durationMs: 2000 })
+    expect(motion?.exit).toEqual({ kind: 'none', durationMs: 300 })
   })
 
   it('accepts a freely placed square webcam and repairs nonsense', () => {

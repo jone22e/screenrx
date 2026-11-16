@@ -58,15 +58,20 @@ export function serveMedia(sessions: SessionStore, thumbnails: ThumbnailService,
       return new Response(null, { status: 404 })
     }
 
-    // An image of the session's assets folder, whole: images are small and drawn at once.
+    // A file of the session's assets folder: an image, whole, or a b-roll clip, in ranges like a track.
+    let asset: { filePath: string; contentType: string } | null = null
     if (resource === 'asset') {
       const file = assetName === undefined ? '' : decodeURIComponent(assetName)
       if (!isSafeFileName(file)) return new Response(null, { status: 404 })
+      const extension = path.extname(file).slice(1).toLowerCase()
       try {
         const filePath = resolveInside(path.join(sessions.directoryOf(sessionId), SESSION_FILES.assets), file)
-        return new Response(await readFile(filePath), {
-          headers: { 'Content-Type': IMAGE_CONTENT_TYPES[path.extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream' }
-        })
+        if (extension !== 'mp4') {
+          return new Response(await readFile(filePath), {
+            headers: { 'Content-Type': IMAGE_CONTENT_TYPES[extension] ?? 'application/octet-stream' }
+          })
+        }
+        asset = { filePath, contentType: 'video/mp4' }
       } catch {
         return new Response(null, { status: 404 })
       }
@@ -82,16 +87,17 @@ export function serveMedia(sessions: SessionStore, thumbnails: ThumbnailService,
         return new Response(null, { status: 404 })
       }
     }
-    if (!isMediaTrack(resource)) return new Response(null, { status: 404 })
+    if (!asset && !isMediaTrack(resource)) return new Response(null, { status: 404 })
 
     let filePath: string
     let size: number
     try {
-      filePath = sessions.trackPathOf(sessionId, resource)
+      filePath = asset ? asset.filePath : sessions.trackPathOf(sessionId, resource as MediaTrack)
       size = (await stat(filePath)).size
     } catch {
       return new Response(null, { status: 404 })
     }
+    const contentType = asset ? asset.contentType : CONTENT_TYPES[resource as MediaTrack]
 
     const rangeHeader = request.headers.get('range')
     const range = parseByteRange(rangeHeader, size)
@@ -109,7 +115,7 @@ export function serveMedia(sessions: SessionStore, thumbnails: ThumbnailService,
     return new Response(Readable.toWeb(stream) as ReadableStream, {
       status: range ? 206 : 200,
       headers: {
-        'Content-Type': CONTENT_TYPES[resource],
+        'Content-Type': contentType,
         'Content-Length': String(end - start + 1),
         'Accept-Ranges': 'bytes',
         ...(range && { 'Content-Range': `bytes ${start}-${end}/${size}` })

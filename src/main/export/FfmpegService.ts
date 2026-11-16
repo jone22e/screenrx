@@ -330,6 +330,69 @@ export class FfmpegService {
     ])
   }
 
+  /**
+   * Joins video files one after the other into `outputPath`, as H.264 in
+   * MP4 without sound: each is fitted into `width`×`height` (letterboxed on
+   * black when its shape differs) at `fps`. The whole is re-encoded.
+   */
+  async concatVideos(
+    inputs: ReadonlyArray<{ path: string }>,
+    outputPath: string,
+    options: { width: number; height: number; fps: number; bitrate: number }
+  ): Promise<void> {
+    const { width, height, fps, bitrate } = options
+    const even = (value: number): number => Math.max(2, Math.round(value / 2) * 2)
+    const w = even(width)
+    const h = even(height)
+    const fitted = inputs.map(
+      (_, index) =>
+        `[${index}:v]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=${fps},format=yuv420p[v${index}]`
+    )
+    const filter = `${fitted.join(';')};${inputs.map((_, index) => `[v${index}]`).join('')}concat=n=${inputs.length}:v=1:a=0[v]`
+    const codec =
+      (await this.selectH264Encoder()) === 'h264_videotoolbox'
+        ? ['-c:v', 'h264_videotoolbox', '-b:v', String(bitrate), '-profile:v', 'high', '-allow_sw', '1']
+        : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-profile:v', 'high']
+    await this.run(this.binaries.ffmpeg, [
+      '-v', 'error', '-y',
+      ...inputs.flatMap((input) => ['-i', input.path]),
+      '-filter_complex', filter,
+      '-map', '[v]', '-an',
+      ...codec,
+      '-g', String(fps),
+      '-movflags', '+faststart',
+      '-f', 'mp4',
+      outputPath
+    ])
+  }
+
+  /**
+   * Joins audio files one after the other into `outputPath` as AAC in MP4;
+   * a part without a file is that long a silence, so the whole lines up
+   * with the joined video.
+   */
+  async concatAudio(parts: ReadonlyArray<{ path: string | null; durationMs: number }>, outputPath: string): Promise<void> {
+    const inputs = parts.flatMap((part) =>
+      part.path ? ['-i', part.path] : ['-f', 'lavfi', '-t', (part.durationMs / 1000).toFixed(3), '-i', 'anullsrc=r=48000:cl=stereo']
+    )
+    const shaped = parts.map((part, index) => {
+      const length = (part.durationMs / 1000).toFixed(3)
+      // A recorded part is padded or trimmed to its video's length, so the pieces stay in step.
+      return `[${index}:a]aformat=sample_rates=48000:channel_layouts=stereo,apad=whole_dur=${length},atrim=end=${length},asetpts=PTS-STARTPTS[a${index}]`
+    })
+    const filter = `${shaped.join(';')};${parts.map((_, index) => `[a${index}]`).join('')}concat=n=${parts.length}:v=0:a=1[a]`
+    await this.run(this.binaries.ffmpeg, [
+      '-v', 'error', '-y',
+      ...inputs,
+      '-filter_complex', filter,
+      '-map', '[a]',
+      '-c:a', 'aac', '-b:a', '192k',
+      '-movflags', '+faststart',
+      '-f', 'mp4',
+      outputPath
+    ])
+  }
+
   /** The duration of a media file, in milliseconds. */
   async durationOf(filePath: string): Promise<number> {
     const output = await this.run(this.binaries.ffprobe, [

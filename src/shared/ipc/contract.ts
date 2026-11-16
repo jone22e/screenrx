@@ -12,7 +12,9 @@ import type {
 import type { CaptureDevices } from '../models/devices'
 import type { DubProgress, DubRequest, DubStatus, DubTrack } from '../models/dub'
 import type { FilterRenderProgress, FilterRenderRequest, FilterTrack } from '../models/filters'
+import type { ProjectTemplate } from '../models/template'
 import type {
+  EditorClip,
   EditorImage,
   MusicTrack, EditorSession } from '../models/editor'
 import type { IpcResult } from '../models/errors'
@@ -58,6 +60,10 @@ export interface IpcInvokeContract {
   'library:rename': { args: [sessionId: string, title: string]; result: IpcResult<null> }
   'library:import': { args: []; result: IpcResult<{ sessionIds: string[] }> }
   'library:import-paths': { args: [paths: string[]]; result: IpcResult<{ sessionIds: string[] }> }
+  'library:join': { args: [sessionIds: string[]]; result: IpcResult<{ sessionId: string }> }
+  'templates:list': { args: []; result: ProjectTemplate[] }
+  'templates:save': { args: [template: ProjectTemplate]; result: IpcResult<ProjectTemplate[]> }
+  'templates:delete': { args: [id: string]; result: IpcResult<ProjectTemplate[]> }
   'library:search': { args: [query: string]; result: string[] }
 
   'editor:open': { args: [sessionId: string]; result: IpcResult<EditorSession> }
@@ -91,6 +97,8 @@ export interface IpcInvokeContract {
   'music:import': { args: [sessionId: string]; result: IpcResult<MusicTrack | null> }
   'images:import': { args: [sessionId: string]; result: IpcResult<EditorImage[]> }
   'images:remove': { args: [sessionId: string, file: string]; result: IpcResult<null> }
+  'clips:import': { args: [sessionId: string]; result: IpcResult<EditorClip[]> }
+  'clips:remove': { args: [sessionId: string, file: string]; result: IpcResult<null> }
   'music:remove': { args: [sessionId: string]; result: IpcResult<null> }
   'dub:cancel': { args: []; result: void }
   'filters:render': { args: [sessionId: string, request: FilterRenderRequest]; result: IpcResult<FilterTrack> }
@@ -202,6 +210,11 @@ export interface ScreenRxApi {
     import(): Promise<IpcResult<{ sessionIds: string[] }>>
     /** Brings video files dropped on the window into the library, as `import` does for chosen ones. */
     importFiles(files: File[]): Promise<IpcResult<{ sessionIds: string[] }>>
+    /**
+     * Makes one new recording out of several, in the order given: video, audio and pointer telemetry
+     * joined end to end, fitted into the first one's frame. The parts stay as they are.
+     */
+    join(sessionIds: string[]): Promise<IpcResult<{ sessionId: string }>>
     /** The ids of the recordings whose transcript contains the words; the title is matched by the caller. */
     search(query: string): Promise<string[]>
     onChanged(listener: () => void): Unsubscribe
@@ -232,10 +245,22 @@ export interface ScreenRxApi {
     /** Asks for an SRT or WebVTT file and returns its text, to be read into captions. `null` when cancelled. */
     importSubtitles(): Promise<IpcResult<{ fileName: string; content: string } | null>>
   }
+  templates: {
+    /** The user's project templates, newest first. */
+    list(): Promise<ProjectTemplate[]>
+    /** Saves a template (replacing one with the same id) and returns the list. */
+    save(template: ProjectTemplate): Promise<IpcResult<ProjectTemplate[]>>
+    delete(id: string): Promise<IpcResult<ProjectTemplate[]>>
+  }
   images: {
     /** Asks for image files and copies each into the session. Resolves with the ones brought in (none when cancelled). */
     import(sessionId: string): Promise<IpcResult<EditorImage[]>>
     /** Deletes one of the session's images. */
+    remove(sessionId: string, file: string): Promise<IpcResult<null>>
+  }
+  clips: {
+    /** Asks for video files and brings each in as b-roll (H.264, no sound). Resolves with the ones brought in. */
+    import(sessionId: string): Promise<IpcResult<EditorClip[]>>
     remove(sessionId: string, file: string): Promise<IpcResult<null>>
   }
   music: {

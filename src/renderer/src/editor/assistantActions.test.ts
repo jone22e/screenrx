@@ -22,6 +22,7 @@ function session(overrides: Partial<EditorSession> = {}): EditorSession {
     dubs: [],
     music: null,
     images: [],
+    clips: [],
     cursorInVideo: true,
     filterTrack: null,
     transcript: null,

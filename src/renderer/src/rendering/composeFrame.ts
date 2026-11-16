@@ -10,11 +10,13 @@ import type { NormalizedRect } from '@engine/rendering/frameLayout'
 import { centeredSquare, layoutFrame, layoutWebcam, sourceCrop } from '@engine/rendering/frameLayout'
 import { layoutImageLayer, rotatedBounds } from '@engine/rendering/layerLayout'
 import type { ClickRipple } from '@engine/rendering/cursorRender'
+import type { TextTransform } from '@engine/rendering/animation'
+import { STILL_TRANSFORM } from '@engine/rendering/animation'
 import { ARROW_OUTLINE, CURSOR_DRAW } from '@engine/rendering/cursorRender'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { viewToSource, visibleRect } from '@engine/zoom/zoomCamera'
 import type { ColorSettings } from '@shared/models/filters'
-import type { BackgroundSettings, CaptionStyle, CursorSettings, ImageLayer, NormalizedPoint, WebcamSettings } from '@shared/models/project'
+import type { BackgroundSettings, CaptionStyle, CursorSettings, Layer, NormalizedPoint, WebcamSettings } from '@shared/models/project'
 
 export interface FrameInput {
   screen: CanvasImageSource
@@ -31,10 +33,12 @@ export interface FrameInput {
   color: ColorSettings | null
   /** The caption on screen at this instant, when there is one and captions are shown, and where in it the instant falls. */
   caption: { text: string; style: CaptionStyle; timing: CaptionTiming } | null
-  /** The user's texts on screen at this instant, drawn over the caption in this order. */
-  texts: ReadonlyArray<{ id: string; text: string; style: CaptionStyle }>
+  /** The user's texts on screen at this instant, drawn over the caption in this order, each as its entrance or exit transforms it. */
+  texts: ReadonlyArray<{ id: string; text: string; style: CaptionStyle; motion?: TextTransform }>
+  /** How dark the whole frame is because of a dip at a cut: 0 clear, 1 black. */
+  darkness?: number
   /** Images on screen at this instant, bottom first, each with its picture as loaded; one not loaded yet is left out. */
-  layers: ReadonlyArray<{ layer: ImageLayer; image: CanvasImageSource; size: Size }>
+  layers: ReadonlyArray<{ layer: Layer; image: CanvasImageSource; size: Size }>
   /** The pointer to draw over the recording, with the clicks still rippling; `null` when none is drawn. */
   cursor: { position: NormalizedPoint | null; settings: CursorSettings; ripples: readonly ClickRipple[] } | null
 }
@@ -68,7 +72,8 @@ export function drawCaption(
   output: Size,
   text: string,
   style: CaptionStyle,
-  timing: CaptionTiming | null = null
+  timing: CaptionTiming | null = null,
+  motion: TextTransform = STILL_TRANSFORM
 ): Rect | null {
   context.save()
   context.font = captionFontCss(style, captionFontPx(style, output))
@@ -81,15 +86,17 @@ export function drawCaption(
   }
   const { box, fontPx } = layout
 
-  // The entrance: the whole caption swells or fades in around its centre.
+  // The entrance of a caption, or the motion of a text: the block swells, fades or slides around its centre.
   const entrance = timing ? captionEntrance(style.animation, timing.sinceStartMs) : null
-  if (entrance && (entrance.scale !== 1 || entrance.alpha !== 1)) {
+  const scale = (entrance?.scale ?? 1) * motion.scale
+  const alpha = (entrance?.alpha ?? 1) * motion.alpha
+  if (scale !== 1 || alpha !== 1 || motion.offsetY !== 0) {
     const centerX = box.x + box.width / 2
     const centerY = box.y + box.height / 2
-    context.translate(centerX, centerY)
-    context.scale(entrance.scale, entrance.scale)
+    context.translate(centerX, centerY + motion.offsetY * output.height)
+    context.scale(scale, scale)
     context.translate(-centerX, -centerY)
-    context.globalAlpha = entrance.alpha
+    context.globalAlpha = alpha
   }
 
   if (style.backdrop === 'box') {
@@ -337,8 +344,17 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
     : null
   const texts: FrameRegions['texts'] = []
   for (const item of input.texts) {
-    const box = drawCaption(context, output, item.text, item.style)
+    const box = drawCaption(context, output, item.text, item.style, null, item.motion)
     if (box) texts.push({ id: item.id, box })
+  }
+
+  // A dip at a cut: the whole frame goes dark and comes back.
+  if (input.darkness && input.darkness > 0) {
+    context.save()
+    context.globalAlpha = Math.min(1, input.darkness)
+    context.fillStyle = '#000'
+    context.fillRect(0, 0, output.width, output.height)
+    context.restore()
   }
   return { caption, texts, layers }
 }

@@ -245,7 +245,14 @@ incluí-lo.
 Pronto quando: gravação nova exporta com cursor grande e suave e clique
 destacado; gravação antiga mostra a aba desativada com o motivo.
 
-## Fase F — Animações de texto e transições (M)
+## Fase F — Animações de texto e transições (M) — FEITA em 2026-11-16
+
+Entrada e saída dos textos (fade, pop, subir) com duração, quatro textos
+prontos (Título, Subtítulo, Lower third, Chamada), passagem "escurecer" nos
+cortes. Crossfade ficou de fora (dois quadros no mesmo instante). Verificado
+por testes; não usado no app.
+
+Plano original, para referência:
 
 - `TextOverlay` ganha `enter` / `exit: { kind: 'none' | 'fade' | 'pop' | 'slide-up'; durationMs }`.
   `captionAnimation.ts` da fase A vira `src/engine/rendering/animation.ts`,
@@ -262,7 +269,14 @@ destacado; gravação antiga mostra a aba desativada com o motivo.
 Pronto quando: um título entra com pop e sai com fade; um corte com `dip`
 exporta igual ao preview.
 
-## Fase G2 — B-roll: vídeo por cima (G)
+## Fase G2 — B-roll: vídeo por cima (G) — FEITA em 2026-11-16
+
+Clipes importados para `assets/` (H.264, sem som), camada `video` com
+"Começar o clipe em", `<video>` por clipe no preview e `TrackFrameReader`
+por clipe na exportação. Desvio: o som do b-roll não entra na mixagem.
+Verificado por testes (importador com FFmpeg real); não usado no app.
+
+Plano original, para referência:
 
 `Layer` ganha `kind: 'video'` (asset `.mp4` importado como em `VideoImporter`,
 com as mesmas regras de H.264 8 bits). Preview: um `<video>` por camada
@@ -271,7 +285,17 @@ camada. Áudio do b-roll entra no grafo com volume próprio.
 
 Pronto quando: um trecho de 5 s de outro vídeo cobre a tela e exporta.
 
-## Fase G3 — Vários clipes no mesmo projeto (G)
+## Fase G3 — Vários clipes no mesmo projeto (G) — FEITA na forma de "Juntar gravações", 2026-11-16
+
+Em vez de mudar o modelo de tempo, a biblioteca ganhou "Juntar gravações":
+uma gravação nova emendada pelo FFmpeg (vídeo encaixado no tamanho da
+primeira, áudio com silêncio onde falta, telemetria deslocada), que abre no
+editor como qualquer outra. É o caminho que o próprio plano apontava até o
+uso pedir o modelo por clipe; a linha do tempo com clipes independentes não
+foi feita. Verificado por teste com FFmpeg real (duas gravações de tamanhos
+diferentes); o diálogo não foi usado no app.
+
+Plano original, para referência:
 
 A única fase que muda os espaços de tempo. `Project` passa a ter
 `clips: Array<{ sessionId; inMs; outMs }>` em sequência; o tempo de origem
@@ -283,7 +307,14 @@ passa a ser "por clipe". Exportação e preview trocam de leitor na fronteira.
 estáveis e o uso pedir. Até lá, "juntar duas gravações" pode ser feito na
 biblioteca com FFmpeg (`concat`) como uma importação.
 
-## Fase H — Miudezas que se espalham (P cada)
+## Fase H — Miudezas que se espalham (P cada) — FEITA em 2026-11-16
+
+SRT/VTT entraram na Fase A; modelos de projeto (ferramenta Formato,
+`userData/templates.json`) e moldura de celular no preview (preferência do
+Mac, desligada por padrão) entraram agora. Verificado por testes; não usado
+no app.
+
+Plano original, para referência:
 
 - **SRT / VTT**: exportar as legendas (`captions.exportSubtitles`) e importar
   um arquivo como cues. Entra junto com a fase A.

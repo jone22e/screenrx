@@ -14,6 +14,16 @@ export interface EditorImage {
   heightPx: number
 }
 
+/** A b-roll clip of the session as the editor sees it. */
+export interface EditorClip {
+  file: string
+  name: string
+  url: string
+  durationMs: number
+  widthPx: number
+  heightPx: number
+}
+
 /** The session's music file, as the editor and the preview see it. */
 export interface MusicTrack {
   url: string
@@ -52,6 +62,8 @@ export interface EditorSession {
   music: MusicTrack | null
   /** Images brought into the session, for the layers; each with the address it is served at. */
   images: EditorImage[]
+  /** Clips of video brought into the session as b-roll. */
+  clips: EditorClip[]
   /** The screen track with rendered effects, when one has been made, and what it was made from. */
   filterTrack: FilterTrack | null
   /** Speech-to-text of the session's audio, when it has been transcribed. */
