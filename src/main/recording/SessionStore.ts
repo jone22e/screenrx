@@ -1,8 +1,9 @@
-import { mkdir, readFile, readdir, rm, rmdir, stat } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, rmdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { SESSION_FILES } from '@shared/config/recording'
 import { suggestTitle, transcriptPreview } from '@engine/captions/transcriptPreview'
-import type { TranscriptWord } from '@shared/models/captions'
+import type { Transcript, TranscriptWord } from '@shared/models/captions'
+import { parseTranscript } from '@shared/models/captions'
 import type { AppError } from '@shared/models/errors'
 import type { MediaTrack } from '@shared/models/media'
 import { thumbnailUrl } from '@shared/models/media'
@@ -16,10 +17,11 @@ import {
   SESSION_SCHEMA_VERSION,
   createSessionId,
   isSessionId,
+  normalizeSeriesName,
   normalizeSessionTitle
 } from '@shared/models/session'
 import { writeJsonAtomic } from '../filesystem/atomicWrite'
-import { resolveInside } from '../filesystem/safePaths'
+import { isSafeFileName, resolveInside } from '../filesystem/safePaths'
 import type { Logger } from '../logging/logger'
 
 export class InvalidSessionIdError extends Error {
@@ -28,6 +30,9 @@ export class InvalidSessionIdError extends Error {
     this.name = 'InvalidSessionIdError'
   }
 }
+
+/** The list of series the user made, next to the recordings. */
+const SERIES_FILE = 'series.json'
 
 export interface NewSession {
   source: SessionSource
@@ -135,6 +140,80 @@ export class SessionStore {
     if (!manifest) return false
     await this.write(withTitle(manifest, title))
     return true
+  }
+
+  /** Puts a recording in a series, or takes it out of any when `series` is `null`. The series is kept in the list too. */
+  async setSeries(sessionId: string, series: string | null): Promise<boolean> {
+    const manifest = await this.read(sessionId)
+    if (!manifest) return false
+    const next = { ...manifest }
+    if (series === null) delete next.series
+    else next.series = series
+    await this.write(next)
+    if (series !== null) await this.addSeries(series)
+    return true
+  }
+
+  /**
+   * The series the user made, in the order made, kept in `series.json` next
+   * to the recordings so a series exists before (and after) any recording is
+   * in it. Recordings may also name a series that is not here.
+   */
+  async listSeries(): Promise<string[]> {
+    try {
+      const raw = JSON.parse(await readFile(path.join(this.root, SERIES_FILE), 'utf8')) as { names?: unknown[] }
+      return (raw.names ?? []).filter((name): name is string => typeof name === 'string' && name.trim() !== '')
+    } catch {
+      return []
+    }
+  }
+
+  async addSeries(name: string): Promise<void> {
+    const names = await this.listSeries()
+    if (names.includes(name)) return
+    await mkdir(this.root, { recursive: true })
+    await writeJsonAtomic(path.join(this.root, SERIES_FILE), { names: [...names, name] })
+  }
+
+  /** Forgets a series; recordings that name it keep it. */
+  async removeSeries(name: string): Promise<void> {
+    const names = await this.listSeries()
+    if (!names.includes(name)) return
+    await writeJsonAtomic(path.join(this.root, SERIES_FILE), { names: names.filter((entry) => entry !== name) })
+  }
+
+  /** The transcript as saved, `null` when there is none. */
+  async readTranscript(sessionId: string): Promise<Transcript | null> {
+    try {
+      return parseTranscript(JSON.parse(await readFile(path.join(this.directoryOf(sessionId), SESSION_FILES.transcript), 'utf8')))
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * Gives a recording a cover of its own: the image is copied into the
+   * session folder under a name of its own (so the library never shows a
+   * cached old one), and the one before is removed. `null` removes the cover.
+   */
+  async setCover(sessionId: string, image: { bytes: Uint8Array; extension: string } | null): Promise<boolean> {
+    const manifest = await this.read(sessionId)
+    if (!manifest) return false
+    const next = { ...manifest }
+    delete next.cover
+    if (image) {
+      next.cover = `cover-${Date.now()}.${image.extension}`
+      await writeFile(path.join(this.directoryOf(sessionId), next.cover), image.bytes)
+    }
+    await this.write(next)
+    if (manifest.cover && manifest.cover !== next.cover) await rm(path.join(this.directoryOf(sessionId), manifest.cover), { force: true })
+    return true
+  }
+
+  /** The cover's path, `null` when the session has none. */
+  async coverPathOf(sessionId: string): Promise<string | null> {
+    const manifest = await this.read(sessionId)
+    return manifest?.cover ? path.join(this.directoryOf(sessionId), manifest.cover) : null
   }
 
   /** Notes that the recording was exported now. */
@@ -324,8 +403,13 @@ function parseManifest(value: unknown, expectedId: string): RecordingSessionMani
     manifest.assets !== null &&
     Array.isArray(manifest.diagnostics)
   if (!valid) return null
-  // A name that is not a usable string is dropped rather than failing the whole manifest.
-  return withTitle(manifest as RecordingSessionManifest, normalizeSessionTitle(manifest.title))
+  // A name, series or cover that is not usable is dropped rather than failing the whole manifest.
+  const parsed = withTitle(manifest as RecordingSessionManifest, normalizeSessionTitle(manifest.title))
+  const series = normalizeSeriesName(manifest.series)
+  if (series === null) delete parsed.series
+  else parsed.series = series
+  if (typeof manifest.cover !== 'string' || !isSafeFileName(manifest.cover) || !manifest.cover.startsWith('cover-')) delete parsed.cover
+  return parsed
 }
 
 /** A copy of the manifest with the given name, or without one when `title` is `null`. */
@@ -359,6 +443,8 @@ function toSummary(
     suggestedTitle: manifest.title === undefined && preview ? suggestTitle(preview) : null,
     transcriptPreview: preview,
     title: manifest.title ?? manifest.source.label,
+    series: manifest.series ?? null,
+    hasCover: manifest.cover !== undefined,
     sourceLabel: manifest.source.label,
     durationMs: manifest.clock.durationMs,
     sizeBytes: [screen, microphone, systemAudio, webcam].reduce((total, asset) => total + (asset?.sizeBytes ?? 0), 0),
@@ -367,6 +453,6 @@ function toSummary(
     hasSystemAudio: systemAudio !== undefined,
     hasWebcam: webcam !== undefined,
     hasWarnings: manifest.diagnostics.some((diagnostic) => diagnostic.level === 'warning'),
-    thumbnailUrl: screen && manifest.status === 'completed' ? thumbnailUrl(manifest.id) : null
+    thumbnailUrl: manifest.cover ? thumbnailUrl(manifest.id, manifest.cover) : screen && manifest.status === 'completed' ? thumbnailUrl(manifest.id) : null
   }
 }

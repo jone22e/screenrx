@@ -24,6 +24,8 @@ import { FilterRenderService } from './filters/FilterRenderService'
 import { registerIpc } from './ipc/registerIpc'
 import { ClipImporter } from './library/ClipImporter'
 import { SessionJoiner } from './library/SessionJoiner'
+import { SessionSplitter } from './library/SessionSplitter'
+import { EpisodePlannerService } from './ai/EpisodePlannerService'
 import { TemplateStore } from './project/TemplateStore'
 import { ImageImporter } from './library/ImageImporter'
 import { MusicImporter } from './library/MusicImporter'
@@ -304,6 +306,8 @@ async function bootstrap(): Promise<void> {
     images: new ImageImporter({ ffmpeg, sessions, logger: createLogger('images') }),
     clips: new ClipImporter({ ffmpeg, sessions, logger: createLogger('clips') }),
     joiner: new SessionJoiner({ ffmpeg, sessions, logger: createLogger('join') }),
+    splitter: new SessionSplitter({ ffmpeg, sessions, logger: createLogger('series'), onProgress: (progress) => windows.broadcast('library:split-progress', progress) }),
+    episodes: new EpisodePlannerService(ai, sessions, createLogger('ai')),
     templates: new TemplateStore(app.getPath('userData'), createLogger('templates')),
     meet,
     meetSettings,

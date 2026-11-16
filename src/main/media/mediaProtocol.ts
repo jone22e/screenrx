@@ -40,7 +40,8 @@ const CONTENT_TYPES: Record<MediaTrack, string> = {
 /** Must run before the app is ready. */
 export function registerMediaScheme(): void {
   protocol.registerSchemesAsPrivileged([
-    { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, stream: true } }
+    // CORS, so a video or image of the scheme drawn on a canvas leaves it exportable (a cover, a saved frame).
+    { scheme: MEDIA_SCHEME, privileges: { standard: true, secure: true, stream: true, corsEnabled: true } }
   ])
 }
 
@@ -50,6 +51,9 @@ export function registerMediaScheme(): void {
  * The renderer names a session, never a path, and the file is served in
  * ranges straight from disk — a long recording is never loaded into memory.
  */
+/** On every answer: the renderer asks with `crossorigin="anonymous"`, so what it draws stays exportable. */
+const CORS_HEADERS = { 'Access-Control-Allow-Origin': '*' } as const
+
 export function serveMedia(sessions: SessionStore, thumbnails: ThumbnailService, logger: Logger): void {
   protocol.handle(MEDIA_SCHEME, async (request) => {
     const url = new URL(request.url)
@@ -68,7 +72,7 @@ export function serveMedia(sessions: SessionStore, thumbnails: ThumbnailService,
         const filePath = resolveInside(path.join(sessions.directoryOf(sessionId), SESSION_FILES.assets), file)
         if (extension !== 'mp4') {
           return new Response(await readFile(filePath), {
-            headers: { 'Content-Type': IMAGE_CONTENT_TYPES[extension] ?? 'application/octet-stream' }
+            headers: { ...CORS_HEADERS, 'Content-Type': IMAGE_CONTENT_TYPES[extension] ?? 'application/octet-stream' }
           })
         }
         asset = { filePath, contentType: 'video/mp4' }
@@ -79,8 +83,16 @@ export function serveMedia(sessions: SessionStore, thumbnails: ThumbnailService,
 
     if (resource === 'thumbnail') {
       try {
+        // A cover of the user's choosing stands in for the poster frame.
+        const cover = await sessions.coverPathOf(sessionId)
+        if (cover) {
+          const extension = path.extname(cover).slice(1).toLowerCase()
+          return new Response(await readFile(cover), {
+            headers: { ...CORS_HEADERS, 'Content-Type': IMAGE_CONTENT_TYPES[extension] ?? 'image/jpeg', 'Cache-Control': 'max-age=3600' }
+          })
+        }
         return new Response(await readFile(await thumbnails.thumbnailOf(sessionId)), {
-          headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'max-age=3600' }
+          headers: { ...CORS_HEADERS, 'Content-Type': 'image/jpeg', 'Cache-Control': 'max-age=3600' }
         })
       } catch (error) {
         logger.warn('no thumbnail', { sessionId, error: String(error) })
@@ -102,7 +114,7 @@ export function serveMedia(sessions: SessionStore, thumbnails: ThumbnailService,
     const rangeHeader = request.headers.get('range')
     const range = parseByteRange(rangeHeader, size)
     if (rangeHeader && !range) {
-      return new Response(null, { status: 416, headers: { 'Content-Range': `bytes */${size}` } })
+      return new Response(null, { status: 416, headers: { ...CORS_HEADERS, 'Content-Range': `bytes */${size}` } })
     }
     const { start, end } = range ?? { start: 0, end: size - 1 }
 
@@ -115,6 +127,7 @@ export function serveMedia(sessions: SessionStore, thumbnails: ThumbnailService,
     return new Response(Readable.toWeb(stream) as ReadableStream, {
       status: range ? 206 : 200,
       headers: {
+        ...CORS_HEADERS,
         'Content-Type': contentType,
         'Content-Length': String(end - start + 1),
         'Accept-Ranges': 'bytes',

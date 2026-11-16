@@ -7,13 +7,16 @@ import type { RecordingProgress, RecordingSummary } from '@shared/models/session
 import { MeetRooms } from './MeetRooms'
 import { PermissionNotice } from './PermissionNotice'
 import { RecordingBanner } from './RecordingBanner'
-import { RecordingCard } from './RecordingCard'
+import { RecordingCard, SERIES_LIST_ID } from './RecordingCard'
+import { SeriesDialog } from './SeriesDialog'
 import { RecordingRow } from './RecordingRow'
+import { Shelf } from './Shelf'
 import { UpdateNotice } from './UpdateNotice'
 import { VoiceModelNotice } from './VoiceModelNotice'
 import { usePermissions } from './hooks'
 import { openSettings } from '../common/settingsScreen'
-import { FilmIcon, GearIcon, GridIcon, ImportIcon, JoinIcon, ListIcon, SearchIcon } from './icons'
+import { CloseIcon, FilmIcon, GearIcon, GridIcon, HomeIcon, ImportIcon, JoinIcon, ListIcon, PlusIcon, SearchIcon } from './icons'
+import { SESSION_SERIES_MAX_LENGTH } from '@shared/models/session'
 
 interface Props {
   state: RecordingStateSnapshot
@@ -28,8 +31,9 @@ const dayWithYearFormat = new Intl.DateTimeFormat('pt-BR', { day: 'numeric', mon
 type LibraryView = 'grid' | 'list'
 const VIEW_KEY = 'screenrx.library.view'
 
-type SortOrder = 'newest' | 'oldest' | 'name' | 'longest' | 'largest'
+type SortOrder = 'series' | 'newest' | 'oldest' | 'name' | 'longest' | 'largest'
 const SORT_LABELS: Record<SortOrder, string> = {
+  series: 'Por série',
   newest: 'Mais recentes',
   oldest: 'Mais antigas',
   name: 'Nome',
@@ -81,6 +85,28 @@ function groupByDay(recordings: RecordingSummary[]): Array<{ label: string; item
   return groups
 }
 
+/** The shelf for recordings in no series, after every series. */
+const NO_SERIES_LABEL = 'Sem série'
+
+/**
+ * One group per series, the series with the newest recording first and, in
+ * each, its recordings in the order made (a series is watched in order);
+ * then the series made but still empty; the recordings in no series come
+ * last, newest first.
+ */
+function groupBySeries(recordings: RecordingSummary[], made: readonly string[]): Array<{ label: string; items: RecordingSummary[] }> {
+  const bySeries = new Map<string, RecordingSummary[]>()
+  const loose: RecordingSummary[] = []
+  for (const recording of [...recordings].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+    if (recording.series === null) loose.push(recording)
+    else bySeries.set(recording.series, [...(bySeries.get(recording.series) ?? []), recording])
+  }
+  const groups = [...bySeries].map(([label, items]) => ({ label, items: [...items].reverse() }))
+  for (const name of made) if (!bySeries.has(name)) groups.push({ label: name, items: [] })
+  if (loose.length > 0) groups.push({ label: NO_SERIES_LABEL, items: loose })
+  return groups
+}
+
 function sorted(recordings: RecordingSummary[], order: SortOrder): RecordingSummary[] {
   const copy = [...recordings]
   switch (order) {
@@ -108,9 +134,40 @@ export function Home({ state, recordings, onEdit }: Props) {
   const permissions = usePermissions()
   const [query, setQuery] = useState('')
   const [view, setView] = useState<LibraryView>(readStoredView)
-  const [order, setOrder] = useState<SortOrder>('newest')
+  const [order, setOrder] = useState<SortOrder>('series')
   const [filter, setFilter] = useState<Filter>('all')
+  // The series the user made, empty ones included; the main process is the source.
+  const [madeSeries, setMadeSeries] = useState<string[]>([])
+  useEffect(() => {
+    const load = (): void => void window.screenrx.library.series().then(setMadeSeries)
+    load()
+    return window.screenrx.library.onChanged(load)
+  }, [])
+  // "Nova série": a name typed in place; `null` while the field is closed.
+  const [newSeries, setNewSeries] = useState<string | null>(null)
+  const addSeries = (): void => {
+    const name = (newSeries ?? '').trim()
+    setNewSeries(null)
+    if (name) void window.screenrx.library.addSeries(name)
+  }
+  // "Gerar série" for one recording.
+  const [seriesFrom, setSeriesFrom] = useState<string | null>(null)
+  const moveToSeries = (sessionId: string, series: string | null): void => {
+    void window.screenrx.library.setSeries(sessionId, series ?? '')
+  }
   const searchField = useRef<HTMLInputElement>(null)
+  const content = useRef<HTMLElement>(null)
+  // The search field opens beside the rail's magnifier; closing it clears the search.
+  const [searching, setSearching] = useState(false)
+  const closeSearch = (): void => {
+    setSearching(false)
+    setQuery('')
+  }
+  const goHome = (): void => {
+    closeSearch()
+    setFilter('all')
+    content.current?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
   useEffect(() => {
     try {
       window.localStorage.setItem(VIEW_KEY, view)
@@ -127,6 +184,7 @@ export function Home({ state, recordings, onEdit }: Props) {
       if (!(event.metaKey || event.ctrlKey)) return
       if (event.key.toLowerCase() === 'k') {
         event.preventDefault()
+        setSearching(true)
         searchField.current?.focus()
         searchField.current?.select()
       } else if (event.shiftKey && event.key.toLowerCase() === 'r' && idle) {
@@ -196,6 +254,7 @@ export function Home({ state, recordings, onEdit }: Props) {
         : filtered.filter(
             (recording) =>
               recording.title.toLocaleLowerCase().includes(needle) ||
+              (recording.series?.toLocaleLowerCase().includes(needle) ?? false) ||
               recording.sourceLabel.toLocaleLowerCase().includes(needle) ||
               (recording.transcriptPreview?.toLocaleLowerCase().includes(needle) ?? false) ||
               (transcriptHits.query === needle && transcriptHits.ids.has(recording.id))
@@ -206,19 +265,27 @@ export function Home({ state, recordings, onEdit }: Props) {
   const total = recordings?.length ?? 0
   const totalBytes = (recordings ?? []).reduce((sum, recording) => sum + recording.sizeBytes, 0)
   const totalMs = (recordings ?? []).reduce((sum, recording) => sum + recording.durationMs, 0)
-  const grouped = order === 'newest' || order === 'oldest'
+  const grouped = order === 'series' || order === 'newest' || order === 'oldest'
+  const groups = (items: RecordingSummary[]): Array<{ label: string; items: RecordingSummary[] }> =>
+    order === 'series' ? groupBySeries(items, needle === '' && filter === 'all' ? madeSeries : []) : groupByDay(items)
+  // Every series there is, for the field that puts a recording in one.
+  const seriesNames = useMemo(
+    () => [...new Set([...madeSeries, ...(recordings ?? []).flatMap((recording) => (recording.series ? [recording.series] : []))])].sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    [recordings, madeSeries]
+  )
+
+  const renderCards = (items: RecordingSummary[]) =>
+    items.map((recording) => (
+      <RecordingCard key={recording.id} recording={recording} highlighted={recording.id === state.lastCompletedSessionId} showSeries={order !== 'series'} onEdit={onEdit} onMakeSeries={setSeriesFrom} />
+    ))
 
   const renderItems = (items: RecordingSummary[]) =>
     view === 'grid' ? (
-      <div className="card-grid">
-        {items.map((recording) => (
-          <RecordingCard key={recording.id} recording={recording} highlighted={recording.id === state.lastCompletedSessionId} onEdit={onEdit} />
-        ))}
-      </div>
+      <div className="card-grid">{renderCards(items)}</div>
     ) : (
       <div className="row-list">
         {items.map((recording) => (
-          <RecordingRow key={recording.id} recording={recording} highlighted={recording.id === state.lastCompletedSessionId} onEdit={onEdit} />
+          <RecordingRow key={recording.id} recording={recording} highlighted={recording.id === state.lastCompletedSessionId} showSeries={order !== 'series'} onEdit={onEdit} onMakeSeries={setSeriesFrom} />
         ))}
       </div>
     )
@@ -247,20 +314,7 @@ export function Home({ state, recordings, onEdit }: Props) {
           <span className="brand-mark" aria-hidden="true" />
           ScreenRx
         </span>
-        <label className="search">
-          <SearchIcon />
-          <input
-            ref={searchField}
-            type="search"
-            placeholder="Buscar em títulos e transcrições"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <kbd className="search-shortcut">⌘K</kbd>
-        </label>
-        <button className="bar-icon" aria-label="Configurações" title="Configurações" onClick={openSettings}>
-          <GearIcon />
-        </button>
+        <span className="home-bar-space" />
         <button
           className="bar-icon bar-icon-boxed"
           aria-label="Juntar gravações"
@@ -286,7 +340,25 @@ export function Home({ state, recordings, onEdit }: Props) {
         </button>
       </header>
 
-      <main className="home-content">
+      {/* The rail on the left, as a streaming service has it: home, search, settings. */}
+      <nav className="home-rail" aria-label="Biblioteca">
+        <button className="home-rail-button" data-active={!searching && filter === 'all'} aria-label="Início" title="Início" onClick={goHome}>
+          <HomeIcon />
+        </button>
+        <button
+          className="home-rail-button"
+          data-active={searching}
+          aria-label="Buscar"
+          title="Buscar em títulos, séries e transcrições (⌘K)"
+          onClick={() => (searching ? closeSearch() : setSearching(true))}
+        >
+          <SearchIcon />
+        </button>
+        <button className="home-rail-button" aria-label="Configurações" title="Configurações" onClick={openSettings}>
+          <GearIcon />
+        </button>
+      </nav>
+      <main className="home-content" ref={content}>
         <RecordingBanner state={state} />
         <UpdateNotice idle={idle} />
         <VoiceModelNotice />
@@ -321,6 +393,10 @@ export function Home({ state, recordings, onEdit }: Props) {
         )}
 
         <MeetRooms idle={idle} />
+
+        {seriesFrom && (recordings ?? []).some((recording) => recording.id === seriesFrom) && (
+          <SeriesDialog recording={(recordings ?? []).find((recording) => recording.id === seriesFrom) as RecordingSummary} onClose={() => setSeriesFrom(null)} />
+        )}
 
         {joining.open && (
           <div className="dialog-backdrop" role="presentation">
@@ -396,6 +472,34 @@ export function Home({ state, recordings, onEdit }: Props) {
                 Gravações <span className="library-count">{total}</span>
               </h1>
               <div className="library-tools">
+                {order === 'series' &&
+                  (newSeries === null ? (
+                    <button className="bar-icon bar-icon-boxed series-add" title="Nova série" onClick={() => setNewSeries('')}>
+                      <PlusIcon /> Nova série
+                    </button>
+                  ) : (
+                    <input
+                      className="series-input series-new"
+                      type="text"
+                      value={newSeries}
+                      maxLength={SESSION_SERIES_MAX_LENGTH}
+                      autoFocus
+                      spellCheck={false}
+                      aria-label="Nome da nova série"
+                      placeholder="Nome da série"
+                      onChange={(event) => setNewSeries(event.target.value)}
+                      onBlur={addSeries}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          addSeries()
+                        } else if (event.key === 'Escape') {
+                          event.preventDefault()
+                          setNewSeries(null)
+                        }
+                      }}
+                    />
+                  ))}
                 {view === 'list' && (
                   <div className="filter-chips" role="radiogroup" aria-label="Filtro">
                     {FILTERS.map((option) => (
@@ -425,6 +529,29 @@ export function Home({ state, recordings, onEdit }: Props) {
               </div>
             </div>
 
+            {searching && (
+              <label className="home-search">
+                <SearchIcon />
+                <input
+                  ref={searchField}
+                  type="search"
+                  placeholder="Buscar em títulos, séries e transcrições"
+                  value={query}
+                  autoFocus
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      closeSearch()
+                    }
+                  }}
+                />
+                <button className="home-search-close" aria-label="Fechar a busca" title="Fechar a busca (Esc)" onClick={closeSearch}>
+                  <CloseIcon />
+                </button>
+              </label>
+            )}
+
             {view === 'list' && visible.length > 0 && (
               <div className="row-head" aria-hidden="true">
                 <span />
@@ -442,13 +569,34 @@ export function Home({ state, recordings, onEdit }: Props) {
               </p>
             )}
 
+            <datalist id={SERIES_LIST_ID}>
+              {seriesNames.map((name) => (
+                <option key={name} value={name} />
+              ))}
+            </datalist>
+
+            {/* By series or by date, the cards go on one shelf per group, side by side, as a streaming service lays them out. */}
             {grouped
-              ? groupByDay(visible).map((group) => (
-                  <section key={group.label} className="day">
-                    <h2 className="day-label">{group.label}</h2>
-                    {renderItems(group.items)}
-                  </section>
-                ))
+              ? groups(visible).map((group) =>
+                  view === 'grid' ? (
+                    <Shelf
+                      key={group.label}
+                      title={group.label}
+                      count={group.items.length}
+                      {...(order === 'series' && {
+                        onDropRecording: (sessionId: string) => moveToSeries(sessionId, group.label === NO_SERIES_LABEL ? null : group.label),
+                        ...(group.label !== NO_SERIES_LABEL && { onRemove: () => void window.screenrx.library.removeSeries(group.label) })
+                      })}
+                    >
+                      {renderCards(group.items)}
+                    </Shelf>
+                  ) : (
+                    <section key={group.label} className="day">
+                      <h2 className="day-label">{group.label}</h2>
+                      {renderItems(group.items)}
+                    </section>
+                  )
+                )
               : renderItems(visible)}
           </>
         )}

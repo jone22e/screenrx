@@ -889,8 +889,12 @@ pergunta ao main quais transcrições contêm o texto — `SessionStore.searchTr
 lê os `transcript.json` inteiros, com cache por mtime), engrenagem, importar
 (ícone) e **Nova gravação** (⌘⇧R). Um vídeo arrastado para a janela também é
 importado (`library:import-paths`, com o caminho obtido por `webUtils` no preload).
-Cabeçalho "Gravações N" com ordem (mais recentes, mais antigas, nome, duração,
-tamanho; só as duas primeiras agrupam por dia), grade/lista e, na lista, filtros
+A **barra lateral** à esquerda (`.home-rail`, flutuante, como num serviço de
+streaming) tem Início (limpa busca e filtro e volta ao topo), Buscar (abre o
+campo ao lado da lupa; ⌘K também; Esc fecha e limpa) e Configurações; a barra
+do topo fica com a marca, juntar, importar e Nova gravação.
+Cabeçalho "Gravações N" com ordem (por série, mais recentes, mais antigas, nome, duração,
+tamanho; só as três primeiras agrupam), grade/lista e, na lista, filtros
 (Todas, Em edição, Com legendas, Exportadas, Importadas) e colunas Nome · Status ·
 Duração · Tamanho. Cada gravação mostra até onde chegou (`RecordingSummary.progress`,
 o passo mais avançado: exportada › com legendas › em edição › importada; vem do
@@ -898,8 +902,41 @@ o passo mais avançado: exportada › com legendas › em edição › importada
 terminar uma exportação) e, quando ainda tem o nome da fonte e já foi transcrita,
 "Renomear para “…”" (`suggestTitle` sobre `transcriptPreview`, as primeiras
 palavras ditas, guardadas no `session.json` ao transcrever e preenchidas na primeira
-listagem para sessões antigas). Na grade, as ações (Editar, Finder, renomear,
-excluir) aparecem sobre a capa ao passar o mouse. Rodapé: total de gravações e
+listagem para sessões antigas). Cada gravação pode estar numa **série**
+(`series` no `session.json`, até 60 caracteres, `library:set-series`; o campo
+no cartão ou na linha oferece as séries que já existem) e ter uma **capa** própria
+(`cover` no manifesto: arquivo `cover-<ts>.<ext>` na pasta da sessão, servido
+no lugar do quadro em `…/<id>/thumbnail?cover=…`, nome novo a cada troca para
+o cache nunca mostrar a antiga; `library:choose-cover` escolhe uma imagem,
+`library:set-cover-frame` recebe um PNG, `library:clear-cover` remove). No
+editor, "Usar como capa" desenha o quadro na tela de novo fora da tela
+(`captureFrame`, como "Salvar quadro"; o canvas do preview não exporta, o vídeo
+do esquema de mídia o contamina) e manda como capa. A ordem padrão é **Por
+série**: uma prateleira por série, a da gravação mais recente primeiro, e
+"Sem série" por último; as ordens por data agrupam por dia. As séries também
+existem vazias: "Nova série" no cabeçalho guarda o nome em `series.json` ao
+lado das gravações (`library:series`, `library:add-series`,
+`library:remove-series`; pôr uma gravação numa série também a guarda lá), e
+uma prateleira vazia mostra onde soltar. Um cartão pode ser **arrastado** para
+uma prateleira (tipo de arrasto `application/x-screenrx-recording`; soltar em
+"Sem série" tira da série). **Gerar série** (ação do cartão, `SeriesDialog.tsx`):
+a IA lê a transcrição (`engine/ai/episodePrompt.ts`, índices de palavras como
+nas sugestões de corte; `EpisodePlannerService`; `library:plan-series`) e
+propõe nome da série e episódios de cerca da duração pedida (1, 3, 5 ou 10 min),
+que o usuário revisa (títulos, juntar ao anterior) antes de `library:split-series`
+cortar: `SessionSplitter` leva cada início ao keyframe anterior e **copia** o
+vídeo sem recodificar (segundos, mesmo tamanho), corta microfone e som do
+sistema no mesmo ponto, desloca telemetria e transcrição para começar em zero,
+e grava cada episódio como gravação própria ("N. Título", na série); progresso
+em `library:split-progress`; a original fica. Na grade agrupada,
+cada grupo é uma
+**prateleira** (`Shelf.tsx`, como num serviço de streaming): os cartões lado a
+lado numa fileira que rola na horizontal, com setas nas bordas que só aparecem
+quando há mais daquele lado (medido por `ResizeObserver` e `scroll`) e avançam
+uma página; o cartão sob o mouse cresce sobre os vizinhos, e as ações (Editar,
+Finder, renomear, excluir) aparecem sobre a capa. Cabem 5 por fileira (6 em
+janelas largas, 4 ou 3 em estreitas). Nome, sugestão de nome e hora · tamanho
+ficam cada um numa linha sob a capa. Rodapé: total de gravações e
 tempo, e espaço usado. As reuniões ao vivo do Screen Live viram um banner cada
 ("está ao vivo · começou há N min · N participantes") com Ignorar e Gravar reunião;
 sem reunião, nada aparece.

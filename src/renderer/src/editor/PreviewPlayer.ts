@@ -332,6 +332,7 @@ export class PreviewPlayer {
     this.video.pause()
   }
 
+
   /** Moves to `timeMs` — or, when that instant is cut, to where the edit resumes. */
   seek(timeMs: number): void {
     const wanted = Math.min(Math.max(timeMs, 0), this.session.durationMs)
@@ -512,6 +513,8 @@ export class PreviewPlayer {
     video.muted = true
     video.playsInline = true
     video.preload = 'auto'
+    // Asked for with CORS, so a frame drawn from it can leave the canvas (a cover, a saved frame).
+    video.crossOrigin = 'anonymous'
     video.src = url
     return video
   }
@@ -603,6 +606,7 @@ export class PreviewPlayer {
         if (!url) continue
         picture = new Image()
         picture.decoding = 'async'
+        picture.crossOrigin = 'anonymous'
         picture.addEventListener('load', () => this.render(), { once: true })
         picture.src = url
         this.pictures.set(layer.file, picture)
@@ -626,6 +630,7 @@ export class PreviewPlayer {
     clip.muted = true
     clip.playsInline = true
     clip.preload = 'auto'
+    clip.crossOrigin = 'anonymous'
     clip.src = url
     clip.addEventListener('loadeddata', () => this.render(), { once: true })
     clip.addEventListener('seeked', () => {
@@ -680,7 +685,7 @@ export class PreviewPlayer {
    * a PNG: a cover for the post. The same drawing as the preview and the
    * export, without the preview's own guides.
    */
-  async captureFrame(size: Size): Promise<Blob> {
+  async captureFrame(size: Size = this.output): Promise<Blob> {
     if (this.video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) throw new Error('No frame to capture yet')
     const canvas = new OffscreenCanvas(size.width, size.height)
     const context = canvas.getContext('2d', { alpha: false })

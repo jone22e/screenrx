@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { formatBytes, formatClock } from '@shared/format'
 import type { RecordingSummary } from '@shared/models/session'
-import { ProgressBadge, RecordingActions, RecordingBadges, SuggestedTitle } from './RecordingCard'
+import { ProgressBadge, RecordingActions, RecordingBadges, SeriesEditor, SuggestedTitle } from './RecordingCard'
 import { RecordingTitle } from './RecordingTitle'
 import { FilmIcon } from './icons'
 
 interface Props {
   recording: RecordingSummary
   highlighted: boolean
+  /** Whether to name the series on the row: not when the rows are already under it. */
+  showSeries: boolean
   onEdit: (sessionId: string) => void
+  onMakeSeries: (sessionId: string) => void
 }
 
 const timeFormat = new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' })
@@ -25,8 +28,9 @@ function when(createdAt: string): string {
 }
 
 /** One recording as a row of the list view: a small poster, the name, how far it has come, and the figures. */
-export function RecordingRow({ recording, highlighted, onEdit }: Props) {
+export function RecordingRow({ recording, highlighted, showSeries, onEdit, onMakeSeries }: Props) {
   const [renaming, setRenaming] = useState(false)
+  const [editingSeries, setEditingSeries] = useState(false)
   const editable = recording.status === 'completed'
 
   return (
@@ -34,8 +38,8 @@ export function RecordingRow({ recording, highlighted, onEdit }: Props) {
       className="row"
       data-highlight={highlighted}
       data-status={recording.status}
-      data-renaming={renaming}
-      onDoubleClick={() => editable && !renaming && onEdit(recording.id)}
+      data-renaming={renaming || editingSeries}
+      onDoubleClick={() => editable && !renaming && !editingSeries && onEdit(recording.id)}
     >
       <button
         className="row-poster"
@@ -56,8 +60,15 @@ export function RecordingRow({ recording, highlighted, onEdit }: Props) {
           <RecordingTitle recording={recording} editing={renaming} onDone={() => setRenaming(false)} />
           {!renaming && <RecordingBadges recording={recording} />}
         </span>
-        {!renaming && <SuggestedTitle recording={recording} />}
-        <span className="row-when">{when(recording.createdAt)}</span>
+        {!renaming && !editingSeries && <SuggestedTitle recording={recording} />}
+        {editingSeries ? (
+          <SeriesEditor key={recording.id} recording={recording} onDone={() => setEditingSeries(false)} />
+        ) : (
+          <span className="row-when">
+            {showSeries && recording.series && <span className="card-series">{recording.series}</span>}
+            {when(recording.createdAt)}
+          </span>
+        )}
       </span>
       <span className="row-cell row-status">
         <ProgressBadge recording={recording} />
@@ -65,7 +76,7 @@ export function RecordingRow({ recording, highlighted, onEdit }: Props) {
       <span className="row-cell row-figure">{formatClock(recording.durationMs)}</span>
       <span className="row-cell row-figure">{formatBytes(recording.sizeBytes)}</span>
       <span className="row-actions">
-        <RecordingActions recording={recording} onRename={() => setRenaming(true)} />
+        <RecordingActions recording={recording} onRename={() => setRenaming(true)} onSeries={() => setEditingSeries(true)} onMakeSeries={() => onMakeSeries(recording.id)} />
       </span>
     </div>
   )

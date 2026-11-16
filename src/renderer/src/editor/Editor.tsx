@@ -12,8 +12,7 @@ import type { PreviewPlayer } from './PreviewPlayer'
 import { Sidebar } from './Sidebar'
 import { Timeline } from './Timeline'
 import { Transport } from './Transport'
-import {
-  SparklesIcon, BackIcon, ExportIcon, RedoIcon, UndoIcon } from './icons'
+import { BackIcon, CoverIcon, ExportIcon, RedoIcon, SparklesIcon, UndoIcon } from './icons'
 import './editor.css'
 
 interface Props {
@@ -74,6 +73,22 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
   )
   const state = useSyncExternalStore(store.subscribe, store.getState)
   const [player, setPlayer] = useState<PreviewPlayer | null>(null)
+  // 'done' for a moment after the frame on screen became the cover, so the button says so.
+  const [cover, setCover] = useState<'idle' | 'saving' | 'done'>('idle')
+  const useFrameAsCover = (): void => {
+    if (!player || cover === 'saving') return
+    player.pause()
+    setCover('saving')
+    // Drawn again off screen (the preview canvas itself cannot be exported: the video taints it).
+    void player
+      .captureFrame()
+      .then(async (blob) => window.screenrx.library.setCoverFrame(session.sessionId, new Uint8Array(await blob.arrayBuffer())))
+      .then((result) => {
+        setCover(result.ok ? 'done' : 'idle')
+        if (result.ok) window.setTimeout(() => setCover('idle'), 2000)
+      })
+      .catch(() => setCover('idle'))
+  }
   const [exporting, setExporting] = useState(false)
   // With the settings screen over the editor, the keyboard is not the editor's.
   const settingsOpen = useSettingsOpen()
@@ -264,6 +279,15 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
           }}
         >
           <SparklesIcon /> Editar com IA
+        </button>
+        <button
+          className="tool-button"
+          title="O quadro que está na tela vira a capa desta gravação na biblioteca"
+          disabled={!player || cover === 'saving'}
+          data-done={cover === 'done'}
+          onClick={useFrameAsCover}
+        >
+          <CoverIcon /> {cover === 'done' ? 'Capa definida' : 'Usar como capa'}
         </button>
         <div className="tool-group">
           <button

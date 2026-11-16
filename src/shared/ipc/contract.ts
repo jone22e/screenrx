@@ -26,6 +26,7 @@ import type { PermissionKind, PermissionReport } from '../models/permissions'
 import type { Project } from '../models/project'
 import type { RecordingStateSnapshot } from '../models/recording'
 import type { RecordingSummary } from '../models/session'
+import type { SeriesPlan, SeriesProgress } from '../models/series'
 import type { CutSuggestionResult } from '../models/suggestions'
 import type { ObjectTrack, ObjectTrackRequest } from '../models/telemetry'
 import type { UpdateState } from '../models/update'
@@ -59,6 +60,15 @@ export interface IpcInvokeContract {
   'library:reveal': { args: [sessionId: string]; result: IpcResult<null> }
   'library:delete': { args: [sessionId: string]; result: IpcResult<{ deleted: boolean }> }
   'library:rename': { args: [sessionId: string, title: string]; result: IpcResult<null> }
+  'library:set-series': { args: [sessionId: string, series: string]; result: IpcResult<null> }
+  'library:choose-cover': { args: [sessionId: string]; result: IpcResult<{ changed: boolean }> }
+  'library:set-cover-frame': { args: [sessionId: string, png: Uint8Array]; result: IpcResult<null> }
+  'library:clear-cover': { args: [sessionId: string]; result: IpcResult<null> }
+  'library:series': { args: []; result: string[] }
+  'library:add-series': { args: [name: string]; result: IpcResult<null> }
+  'library:remove-series': { args: [name: string]; result: IpcResult<null> }
+  'library:plan-series': { args: [sessionId: string, choice: AiChoice, targetSec: number]; result: IpcResult<SeriesPlan> }
+  'library:split-series': { args: [sessionId: string, plan: SeriesPlan]; result: IpcResult<{ sessionIds: string[] }> }
   'library:import': { args: []; result: IpcResult<{ sessionIds: string[] }> }
   'library:import-paths': { args: [paths: string[]]; result: IpcResult<{ sessionIds: string[] }> }
   'library:join': { args: [sessionIds: string[]]; result: IpcResult<{ sessionId: string }> }
@@ -163,6 +173,7 @@ export interface IpcInvokeContract {
 export interface IpcEventContract {
   'recording:state-changed': RecordingStateSnapshot
   'library:changed': null
+  'library:split-progress': SeriesProgress
   'captions:progress': TranscriptionProgress
   'dub:progress': DubProgress
   'filters:progress': FilterRenderProgress
@@ -208,6 +219,24 @@ export interface ScreenRxApi {
     delete(sessionId: string): Promise<IpcResult<{ deleted: boolean }>>
     /** Gives the recording a name; an empty one brings the source's label back. */
     rename(sessionId: string, title: string): Promise<IpcResult<null>>
+    /** Puts the recording in a series; an empty name takes it out of any. */
+    setSeries(sessionId: string, series: string): Promise<IpcResult<null>>
+    /** Asks for an image file and makes it the recording's cover; `changed` is false when the dialog is cancelled. */
+    chooseCover(sessionId: string): Promise<IpcResult<{ changed: boolean }>>
+    /** Makes a frame, as PNG bytes, the recording's cover. */
+    setCoverFrame(sessionId: string, png: Uint8Array): Promise<IpcResult<null>>
+    /** Removes the cover, so the poster frame shows again. */
+    clearCover(sessionId: string): Promise<IpcResult<null>>
+    /** The series the user made, whether or not any recording is in them. */
+    series(): Promise<string[]>
+    addSeries(name: string): Promise<IpcResult<null>>
+    /** Forgets a series; recordings in it keep naming it. */
+    removeSeries(name: string): Promise<IpcResult<null>>
+    /** Asks the AI to split the recording into episodes of about `targetSec` each; nothing is cut yet. */
+    planSeries(sessionId: string, choice: AiChoice, targetSec: number): Promise<IpcResult<SeriesPlan>>
+    /** Makes each episode of the plan a recording of its own, in the series; the source stays. */
+    splitSeries(sessionId: string, plan: SeriesPlan): Promise<IpcResult<{ sessionIds: string[] }>>
+    onSplitProgress(listener: (progress: SeriesProgress) => void): () => void
     /**
      * Asks for video files recorded elsewhere and brings each into the library as a recording of its
      * own. Resolves with the ids imported (none when the dialog is cancelled); stops at the first

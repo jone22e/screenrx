@@ -6,6 +6,9 @@
   --text: #ececf1;
   --text-muted: #9a9ca6;
   --accent: #5b8cff;
+  /* Panels and the hairlines between them, the same in the library, the editor and the settings: the dialogs are shared. */
+  --panel: #1c1d22;
+  --hairline: rgba(255, 255, 255, 0.08);
   --record: #ff4d4f;
   --warning: #f0b232;
   --radius: 10px;

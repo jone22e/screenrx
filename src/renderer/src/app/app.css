@@ -96,10 +96,107 @@ body {
 /* --- home ----------------------------------------------------------------- */
 
 .home {
+  position: relative;
   display: flex;
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.home-bar-space {
+  flex: 1;
+}
+
+/* --- the rail: home, search and settings, floating on the left ------------------------ */
+
+.home-rail {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(34, 35, 41, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  transform: translateY(-50%);
+  backdrop-filter: blur(14px);
+}
+
+.home-rail-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.home-rail-button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.home-rail-button[data-active='true'] {
+  color: #111;
+  background: #fff;
+}
+
+/* The search field: over the shelves, under the heading, while the rail's magnifier is on. */
+.home-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(480px, 100%);
+  height: 40px;
+  margin: 4px 0 16px;
+  padding: 0 8px 0 14px;
+  color: var(--text-muted);
+  background: #15161a;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+}
+
+.home-search input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+
+.home-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.home-search-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+}
+
+.home-search-close:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .home-bar {
@@ -233,7 +330,8 @@ body {
 .home-content {
   flex: 1;
   overflow-y: auto;
-  padding: 28px 32px 40px;
+  /* Room on the left for the rail. */
+  padding: 28px 32px 40px 92px;
 }
 
 .library-header {
@@ -306,6 +404,232 @@ body {
   gap: 20px;
 }
 
+/* --- shelves: one row per group, cards side by side, paged with the arrows -------------- */
+
+.shelf {
+  --shelf-gap: 10px;
+  --shelf-columns: 5;
+  /* Room for a card to grow over its neighbours' edge without being clipped by the scroller. */
+  --shelf-bleed: 14px;
+  margin-top: 22px;
+}
+
+@media (width >= 1700px) {
+  .shelf {
+    --shelf-columns: 6;
+  }
+}
+
+@media (width < 1250px) {
+  .shelf {
+    --shelf-columns: 4;
+  }
+}
+
+@media (width < 940px) {
+  .shelf {
+    --shelf-columns: 3;
+  }
+}
+
+.shelf-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.shelf-chevron {
+  margin-left: -4px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-muted);
+}
+
+.shelf-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 2px;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.shelf:hover .shelf-remove,
+.shelf-remove:focus-visible {
+  opacity: 1;
+}
+
+.shelf-remove:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* A row with nothing in it: a dashed box, where a card can be dropped. */
+.shelf-empty {
+  margin: 0 0 8px;
+  padding: 26px 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+}
+
+.shelf[data-empty='true'] .shelf-body {
+  display: none;
+}
+
+/* A card dragged over the row: the row lights up to take it. */
+.shelf[data-dropping='true'] .shelf-scroller,
+.shelf[data-dropping='true'] .shelf-empty {
+  background: rgba(79, 124, 255, 0.08);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: 12px;
+}
+
+.card[draggable='true'] {
+  cursor: grab;
+}
+
+.card[draggable='true']:active {
+  cursor: grabbing;
+}
+
+.bar-icon.series-add {
+  gap: 6px;
+  width: auto;
+  padding: 0 10px 0 8px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.series-new {
+  width: 200px;
+  height: 28px;
+  font-size: 13px;
+}
+
+.shelf-count {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.shelf-body {
+  position: relative;
+  /* The arrows sit in the page gutter, over the edges of the row. */
+  margin: 0 calc(-1 * var(--shelf-bleed));
+}
+
+.shelf-scroller {
+  display: flex;
+  gap: var(--shelf-gap);
+  padding: var(--shelf-bleed);
+  overflow: auto hidden;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: var(--shelf-bleed);
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.shelf-scroller::-webkit-scrollbar {
+  display: none;
+}
+
+.shelf-scroller > .card {
+  flex: 0 0 calc((100% - var(--shelf-gap) * (var(--shelf-columns) - 1)) / var(--shelf-columns));
+  scroll-snap-align: start;
+  transition: transform 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transform-origin: center;
+  will-change: transform;
+}
+
+.shelf-scroller > .card:first-child {
+  transform-origin: left center;
+}
+
+.shelf-scroller > .card:last-child {
+  transform-origin: right center;
+}
+
+/* The card under the pointer comes forward, over its neighbours, with its actions on it. */
+.shelf-scroller > .card:hover,
+.shelf-scroller > .card:focus-within {
+  z-index: 3;
+  transform: scale(1.08);
+  transition-delay: 0.12s;
+}
+
+.shelf-scroller > .card:hover .card-poster,
+.shelf-scroller > .card:focus-within .card-poster {
+  transform: none;
+}
+
+.shelf-scroller > .card .card-info {
+  padding-top: 8px;
+}
+
+.shelf-arrow {
+  position: absolute;
+  top: var(--shelf-bleed);
+  bottom: calc(var(--shelf-bleed) + 44px);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  padding: 0;
+  color: #fff;
+  background: linear-gradient(to right, rgba(7, 8, 10, 0.92), rgba(7, 8, 10, 0));
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.shelf-arrow svg {
+  opacity: 0.8;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.shelf-arrow:hover svg {
+  opacity: 1;
+  transform: scale(1.25);
+}
+
+.shelf-arrow-before {
+  left: 0;
+  border-radius: 10px 0 0 10px;
+}
+
+.shelf-arrow-after {
+  right: 0;
+  background: linear-gradient(to left, rgba(7, 8, 10, 0.92), rgba(7, 8, 10, 0));
+  border-radius: 0 10px 10px 0;
+}
+
+/* Each arrow only where there is more that way, and only while the pointer is on the row (or it has focus). */
+.shelf[data-before='true']:hover .shelf-arrow-before,
+.shelf[data-before='true']:focus-within .shelf-arrow-before,
+.shelf[data-after='true']:hover .shelf-arrow-after,
+.shelf[data-after='true']:focus-within .shelf-arrow-after {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .card {
   min-width: 0;
 }
@@ -369,9 +693,11 @@ body {
   inset: 0;
   z-index: 2;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 10px;
+  padding: 8px;
   background: rgba(10, 10, 12, 0.55);
   opacity: 0;
   transition: opacity 0.15s ease;
@@ -405,9 +731,17 @@ body {
   background: #e8e8ee;
 }
 
+.card-hover-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: center;
+  max-width: 100%;
+}
+
 .card-hover .icon-button {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   color: #fff;
   background: rgba(255, 255, 255, 0.14);
   border-radius: 8px;
@@ -522,11 +856,25 @@ body {
   display: none;
 }
 
+/* Under the picture: the name, then the time and size, then the suggested name when there is one; each on a line, cut with an ellipsis. */
 .card-info {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
+  gap: 2px;
   padding: 10px 2px 0;
+}
+
+.card-info > .card-title {
+  align-self: stretch;
+}
+
+.card-info > .suggested-title {
+  order: 1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-text {
@@ -574,6 +922,131 @@ body {
 }
 
 /* --- renaming ------------------------------------------------------------- */
+
+/* The series field under a name: like the name's, lighter. */
+.series-input {
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: #15161a;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  outline: 0;
+}
+
+/* --- "Gerar série": the AI's episodes, looked over before the cut ----------------------- */
+
+.series-dialog {
+  width: 560px;
+  max-width: calc(100vw - 48px);
+}
+
+.series-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.series-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.series-name {
+  height: 32px;
+  padding: 0 10px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: #15161a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  outline: 0;
+}
+
+.series-name:focus {
+  border-color: var(--accent);
+}
+
+.episode-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.episode-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto 28px;
+  gap: 8px;
+  align-items: center;
+}
+
+.episode-number {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.episode-title {
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  font: inherit;
+  color: var(--text);
+  background: #15161a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  outline: 0;
+}
+
+.episode-title:focus {
+  border-color: var(--accent);
+}
+
+.episode-time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.series-working {
+  color: var(--accent);
+}
+
+.icon-button-ai {
+  color: var(--accent);
+}
+
+.card-series {
+  display: inline-block;
+  max-width: 60%;
+  margin-right: 8px;
+  padding: 0 6px;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
 
 .title-input {
   flex: 1;

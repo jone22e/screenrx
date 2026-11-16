@@ -27,9 +27,10 @@ export function isMediaTrack(value: unknown): value is MediaTrack {
   return (MEDIA_TRACKS as readonly unknown[]).includes(value)
 }
 
-/** URL of a poster frame of the session's screen track. */
-export function thumbnailUrl(sessionId: string): string {
-  return `${MEDIA_SCHEME}://session/${sessionId}/thumbnail`
+/** URL of the session's cover, or of a poster frame of its screen track. The cover's file name goes in the query so a new cover is never the cached old one. */
+export function thumbnailUrl(sessionId: string, cover?: string): string {
+  const base = `${MEDIA_SCHEME}://session/${sessionId}/thumbnail`
+  return cover ? `${base}?cover=${encodeURIComponent(cover)}` : base
 }
 
 /** URL of an image in a session's `assets/` folder. */

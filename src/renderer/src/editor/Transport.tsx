@@ -103,13 +103,13 @@ export function Transport({ player, store }: Props) {
       )}
       <button
         className="transport-button transport-cover"
-        aria-label="Salvar este quadro como capa"
-        title="Salva o quadro na tela como imagem PNG, no tamanho do vídeo exportado, para usar de capa"
+        aria-label="Salvar este quadro como imagem"
+        title="Salva o quadro na tela como imagem PNG, no tamanho do vídeo exportado, para usar de capa na publicação"
         disabled={cover.busy}
         onClick={() => void saveCover()}
       >
         <CameraIcon />
-        <span>Capa</span>
+        <span>Salvar quadro</span>
       </button>
       {cover.note && (
         <span className="transport-note" role="status">

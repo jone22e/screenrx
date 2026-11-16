@@ -25,8 +25,27 @@ export const GearIcon = () => (
   </Icon>
 )
 
-export const SearchIcon = () => (
+export const PlusIcon = () => (
   <Icon size={14}>
+    <path d="M12 5v14M5 12h14" />
+  </Icon>
+)
+
+export const HomeIcon = () => (
+  <Icon size={18}>
+    <path d="M3 11.5 12 4l9 7.5" />
+    <path d="M5 10v10h5v-6h4v6h5V10" />
+  </Icon>
+)
+
+export const CloseIcon = () => (
+  <Icon size={14}>
+    <path d="M6 6l12 12M18 6 6 18" />
+  </Icon>
+)
+
+export const SearchIcon = () => (
+  <Icon size={18}>
     <circle cx="11" cy="11" r="7" />
     <path d="m20 20-3.5-3.5" />
   </Icon>
@@ -74,6 +93,29 @@ export const FilmIcon = ({ size = 28 }: { size?: number }) => (
 export const EditIcon = () => (
   <Icon size={14}>
     <path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" />
+  </Icon>
+)
+
+export const CoverIcon = () => (
+  <Icon size={15}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <circle cx="9" cy="10" r="1.6" />
+    <path d="m21 16-5-5-8 8" />
+  </Icon>
+)
+
+export const CoverOffIcon = () => (
+  <Icon size={15}>
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="m21 16-5-5-8 8" />
+    <path d="M4 3l17 18" />
+  </Icon>
+)
+
+export const SeriesIcon = () => (
+  <Icon size={15}>
+    <rect x="3" y="8" width="18" height="12" rx="2" />
+    <path d="M6 8V5h12v3M9 5V3h6v2" />
   </Icon>
 )
 

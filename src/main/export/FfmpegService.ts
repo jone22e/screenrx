@@ -393,6 +393,45 @@ export class FfmpegService {
     ])
   }
 
+  /**
+   * One stretch of a video file, from `startMs` for `durationMs`, as MP4
+   * without sound. Copied as it is when `startMs` is a keyframe (instant,
+   * and the picture stays the same); otherwise re-encoded, so the cut
+   * lands on the frame asked for.
+   */
+  async cutVideo(inputPath: string, outputPath: string, startMs: number, durationMs: number, options: { copy: true } | { copy: false; bitrate: number }): Promise<void> {
+    const evenSize = ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-pix_fmt', 'yuv420p']
+    const codec = options.copy
+      ? ['-c:v', 'copy']
+      : (await this.selectH264Encoder()) === 'h264_videotoolbox'
+        ? ['-c:v', 'h264_videotoolbox', '-b:v', String(options.bitrate), '-profile:v', 'high', '-allow_sw', '1', ...evenSize]
+        : ['-c:v', 'libx264', '-preset', 'medium', '-crf', '18', '-profile:v', 'high', ...evenSize]
+    await this.run(this.binaries.ffmpeg, [
+      '-v', 'error', '-y',
+      '-ss', (startMs / 1000).toFixed(3), '-t', (durationMs / 1000).toFixed(3),
+      '-i', inputPath,
+      '-map', '0:v:0', '-an', '-sn', '-dn',
+      ...codec,
+      '-movflags', '+faststart',
+      '-f', 'mp4',
+      outputPath
+    ])
+  }
+
+  /** One stretch of an audio file, from `startMs` for `durationMs`, as AAC in MP4. */
+  async cutAudio(inputPath: string, outputPath: string, startMs: number, durationMs: number): Promise<void> {
+    await this.run(this.binaries.ffmpeg, [
+      '-v', 'error', '-y',
+      '-ss', (startMs / 1000).toFixed(3), '-t', (durationMs / 1000).toFixed(3),
+      '-i', inputPath,
+      '-map', '0:a:0', '-vn', '-sn', '-dn',
+      '-ar', '48000', '-ac', '2', '-c:a', 'aac', '-b:a', '192k',
+      '-movflags', '+faststart',
+      '-f', 'mp4',
+      outputPath
+    ])
+  }
+
   /** The duration of a media file, in milliseconds. */
   async durationOf(filePath: string): Promise<number> {
     const output = await this.run(this.binaries.ffprobe, [

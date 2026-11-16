@@ -16,7 +16,7 @@ import { appError } from '@shared/models/errors'
 import { isPermissionKind } from '@shared/models/permissions'
 import { parseProject } from '@shared/models/project'
 import type { PermissionKind, PermissionReport } from '@shared/models/permissions'
-import { isSessionId, normalizeSessionTitle } from '@shared/models/session'
+import { isSessionId, normalizeSeriesName, normalizeSessionTitle } from '@shared/models/session'
 import type { ProjectStore } from '../project/ProjectStore'
 import { isExportTrackName, parseExportOverrides } from '@shared/models/export'
 import { formatTimecode } from '@shared/format'
@@ -53,6 +53,14 @@ import type { TemplateStore } from '../project/TemplateStore'
 import { toJoinAppError } from '../library/SessionJoiner'
 import { toClipAppError } from '../library/ClipImporter'
 import { IMAGE_EXTENSIONS, toImageAppError } from '../library/ImageImporter'
+import type { SessionSplitter } from '../library/SessionSplitter'
+import { toSplitAppError } from '../library/SessionSplitter'
+import type { EpisodePlannerService } from '../ai/EpisodePlannerService'
+import { parseSeriesPlan } from '@shared/models/series'
+
+/** What a recording's cover may be: a still image the library can show as it is. */
+const COVER_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'avif']
+const MAX_COVER_IMAGE_BYTES = 20 * 1024 * 1024
 import { assetUrl } from '@shared/models/media'
 import { toMusicAppError } from '../library/MusicImporter'
 import type { VideoImporter } from '../library/VideoImporter'
@@ -93,6 +101,8 @@ export interface IpcDependencies {
   images: ImageImporter
   clips: ClipImporter
   joiner: SessionJoiner
+  splitter: SessionSplitter
+  episodes: EpisodePlannerService
   templates: TemplateStore
   meet: MeetRecorder
   meetSettings: MeetSettingsStore
@@ -151,6 +161,8 @@ export function registerIpc(deps: IpcDependencies): void {
     images,
     clips,
     joiner,
+    splitter,
+    episodes,
     templates,
     meet,
     meetSettings,
@@ -294,6 +306,129 @@ export function registerIpc(deps: IpcDependencies): void {
     } catch (error) {
       logger.error('could not rename recording', { sessionId, error: String(error) })
       return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('library:set-series', async ([sessionId, series]) => {
+    if (!isSessionId(sessionId) || typeof series !== 'string') {
+      return { ok: false, error: appError('invalid-state', 'invalid series') }
+    }
+    try {
+      const done = await sessions.setSeries(sessionId, normalizeSeriesName(series))
+      if (!done) return { ok: false, error: appError('invalid-state', 'session not found') }
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: null }
+    } catch (error) {
+      logger.error('could not set series', { sessionId, error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('library:choose-cover', async ([sessionId]) => {
+    if (!isSessionId(sessionId)) return { ok: false, error: appError('invalid-state', 'invalid session id') }
+    const owner = windows.mainWindow
+    const options = {
+      title: 'Escolher capa',
+      buttonLabel: 'Usar como capa',
+      properties: ['openFile'] as Array<'openFile'>,
+      filters: [{ name: 'Imagens', extensions: COVER_EXTENSIONS }]
+    }
+    const answer = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    const filePath = answer.filePaths[0]
+    if (answer.canceled || !filePath) return { ok: true, value: { changed: false } }
+    const extension = path.extname(filePath).slice(1).toLowerCase()
+    if (!COVER_EXTENSIONS.includes(extension)) return { ok: false, error: appError('invalid-state', 'not an image') }
+    try {
+      const bytes = await readFile(filePath)
+      if (bytes.byteLength > MAX_COVER_IMAGE_BYTES) return { ok: false, error: appError('invalid-state', 'cover too large') }
+      const done = await sessions.setCover(sessionId, { bytes, extension: extension === 'jpeg' ? 'jpg' : extension })
+      if (!done) return { ok: false, error: appError('invalid-state', 'session not found') }
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: { changed: true } }
+    } catch (error) {
+      logger.error('could not set cover', { sessionId, error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('library:set-cover-frame', async ([sessionId, png]) => {
+    if (!isSessionId(sessionId) || !(png instanceof Uint8Array) || png.byteLength === 0 || png.byteLength > MAX_COVER_IMAGE_BYTES) {
+      return { ok: false, error: appError('invalid-state', 'invalid cover') }
+    }
+    try {
+      const done = await sessions.setCover(sessionId, { bytes: png, extension: 'png' })
+      if (!done) return { ok: false, error: appError('invalid-state', 'session not found') }
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: null }
+    } catch (error) {
+      logger.error('could not set cover', { sessionId, error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('library:clear-cover', async ([sessionId]) => {
+    if (!isSessionId(sessionId)) return { ok: false, error: appError('invalid-state', 'invalid session id') }
+    try {
+      const done = await sessions.setCover(sessionId, null)
+      if (!done) return { ok: false, error: appError('invalid-state', 'session not found') }
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: null }
+    } catch (error) {
+      logger.error('could not clear cover', { sessionId, error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('library:series', () => sessions.listSeries())
+
+  handle('library:add-series', async ([name]) => {
+    const series = normalizeSeriesName(name)
+    if (!series) return { ok: false, error: appError('invalid-state', 'invalid series name') }
+    try {
+      await sessions.addSeries(series)
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: null }
+    } catch (error) {
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('library:remove-series', async ([name]) => {
+    const series = normalizeSeriesName(name)
+    if (!series) return { ok: false, error: appError('invalid-state', 'invalid series name') }
+    try {
+      await sessions.removeSeries(series)
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: null }
+    } catch (error) {
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
+  handle('library:plan-series', async ([sessionId, chosen, targetSec]) => {
+    const choice = parseAiChoice(chosen)
+    const target = typeof targetSec === 'number' && Number.isFinite(targetSec) ? Math.min(Math.max(targetSec, 30), 3600) : 180
+    if (!isSessionId(sessionId) || !choice) return { ok: false, error: appError('ai-failed', 'invalid series request') }
+    try {
+      return { ok: true, value: await episodes.plan(sessionId, choice, target) }
+    } catch (error) {
+      const failure = error instanceof AiError ? error.appError : appError('ai-failed', String(error))
+      if (failure.code !== 'ai-cancelled') logger.error('series plan failed', { sessionId, code: failure.code, detail: failure.detail })
+      return { ok: false, error: failure }
+    }
+  })
+
+  handle('library:split-series', async ([sessionId, value]) => {
+    if (!isSessionId(sessionId)) return { ok: false, error: appError('invalid-state', 'invalid session id') }
+    const manifest = await sessions.read(sessionId)
+    const plan = manifest?.assets.screen ? parseSeriesPlan(value, manifest.assets.screen.durationMs) : null
+    if (!plan) return { ok: false, error: appError('invalid-state', 'invalid series plan') }
+    try {
+      const sessionIds = await splitter.split(sessionId, plan)
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: { sessionIds } }
+    } catch (error) {
+      return { ok: false, error: toSplitAppError(error) }
     }
   })
 

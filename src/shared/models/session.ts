@@ -32,6 +32,16 @@ export function normalizeSessionTitle(value: unknown): string | null {
   return title.length > 0 ? title : null
 }
 
+/** Longest name a series can be given. */
+export const SESSION_SERIES_MAX_LENGTH = 60
+
+/** The series a recording is put in, tidied as a name is; `null` for none. */
+export function normalizeSeriesName(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const series = value.replace(/\s+/g, ' ').trim().slice(0, SESSION_SERIES_MAX_LENGTH).trim()
+  return series.length > 0 ? series : null
+}
+
 export interface SessionSource {
   /** `file`: a video recorded elsewhere and imported into the library. */
   kind: 'display' | 'window' | 'file'
@@ -137,6 +147,10 @@ export interface RecordingSessionManifest {
   source: SessionSource
   /** Name given by the user; absent until the recording is renamed. */
   title?: string
+  /** The series the recording belongs to, as the user groups them; absent until put in one. */
+  series?: string
+  /** The cover image's file name inside the session folder; absent until one is chosen. */
+  cover?: string
   /** When the recording was last exported; absent until it is. */
   lastExportAt?: string
   /** The start of what was said, kept once transcribed, for searching and for suggesting a name. */
@@ -181,6 +195,10 @@ export interface RecordingSummary {
   transcriptPreview: string | null
   /** What the recording is called: the user's name for it, or the source's label. */
   title: string
+  /** The series it is in, `null` when none. */
+  series: string | null
+  /** Whether a cover of the user's choosing stands in for the poster frame. */
+  hasCover: boolean
   sourceLabel: string
   durationMs: number
   /** Every track of the session together. */
@@ -191,6 +209,6 @@ export interface RecordingSummary {
   hasSystemAudio: boolean
   hasWebcam: boolean
   hasWarnings: boolean
-  /** A poster frame, `null` when there is no video to take it from. */
+  /** The cover, or a poster frame; `null` when there is neither. */
   thumbnailUrl: string | null
 }

@@ -21,7 +21,9 @@ export interface WindowManagerOptions {
 
 type Page = 'index' | 'hud' | 'camera'
 
-const MAIN_WINDOW_SIZE = { width: 980, height: 700, minWidth: 720, minHeight: 520 } as const
+/** The main window opens at this size, or as large as the screen's work area allows (with a margin) when that is smaller. */
+const MAIN_WINDOW_SIZE = { width: 1440, height: 900, minWidth: 720, minHeight: 520 } as const
+const MAIN_WINDOW_MARGIN = 40
 /** The meeting page is drawn at this size (even sides, as the video encoder needs) and recorded as is. */
 const MEET_WINDOW_SIZE = { width: 1280, height: 720 } as const
 /** Frames per second the meeting page is drawn at. */
@@ -224,8 +226,11 @@ export class WindowManager implements CaptureShield {
   // MARK: windows
 
   private createMain(): BrowserWindow {
+    const workArea = screen.getPrimaryDisplay().workArea
     const window = new BrowserWindow({
       ...MAIN_WINDOW_SIZE,
+      width: Math.max(MAIN_WINDOW_SIZE.minWidth, Math.min(MAIN_WINDOW_SIZE.width, workArea.width - MAIN_WINDOW_MARGIN)),
+      height: Math.max(MAIN_WINDOW_SIZE.minHeight, Math.min(MAIN_WINDOW_SIZE.height, workArea.height - MAIN_WINDOW_MARGIN)),
       title: 'ScreenRx',
       show: false,
       backgroundColor: WINDOW_BACKGROUND,
