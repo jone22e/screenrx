@@ -44,6 +44,9 @@ import type { Logger } from '../logging/logger'
 import { writeFileAtomic } from '../filesystem/atomicWrite'
 import { toImportAppError } from '../library/VideoImporter'
 import type { MusicImporter } from '../library/MusicImporter'
+import type { ImageImporter } from '../library/ImageImporter'
+import { IMAGE_EXTENSIONS, toImageAppError } from '../library/ImageImporter'
+import { assetUrl } from '@shared/models/media'
 import { toMusicAppError } from '../library/MusicImporter'
 import type { VideoImporter } from '../library/VideoImporter'
 import type { ThumbnailService } from '../media/ThumbnailService'
@@ -79,6 +82,7 @@ export interface IpcDependencies {
   thumbnails: ThumbnailService
   importer: VideoImporter
   music: MusicImporter
+  images: ImageImporter
   meet: MeetRecorder
   meetSettings: MeetSettingsStore
   updates: UpdateService
@@ -132,6 +136,7 @@ export function registerIpc(deps: IpcDependencies): void {
     thumbnails,
     importer,
     music,
+    images,
     meet,
     meetSettings,
     updates,
@@ -494,6 +499,40 @@ export function registerIpc(deps: IpcDependencies): void {
       return { ok: true, value: await music.import(sessionId, filePath) }
     } catch (error) {
       return { ok: false, error: toMusicAppError(error) }
+    }
+  })
+
+  handle('images:import', async ([sessionId]) => {
+    if (!isSessionId(sessionId)) return { ok: false, error: appError('invalid-state', 'invalid session id') }
+    const owner = windows.mainWindow
+    const options = {
+      title: 'Escolher imagens',
+      buttonLabel: 'Adicionar',
+      properties: ['openFile', 'multiSelections'] as Array<'openFile' | 'multiSelections'>,
+      filters: [{ name: 'Imagens', extensions: IMAGE_EXTENSIONS }]
+    }
+    const answer = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
+    if (answer.canceled) return { ok: true, value: [] }
+    const imported = []
+    for (const filePath of answer.filePaths) {
+      try {
+        const image = await images.import(sessionId, filePath)
+        imported.push({ file: image.file, name: image.name, url: assetUrl(sessionId, image.file), widthPx: image.widthPx, heightPx: image.heightPx })
+      } catch (error) {
+        if (imported.length === 0) return { ok: false, error: toImageAppError(error) }
+        logger.warn('image skipped', { sessionId, file: filePath, error: String(error) })
+      }
+    }
+    return { ok: true, value: imported }
+  })
+
+  handle('images:remove', async ([sessionId, file]) => {
+    if (!isSessionId(sessionId) || typeof file !== 'string') return { ok: false, error: appError('invalid-state', 'invalid image') }
+    try {
+      await images.remove(sessionId, file)
+      return { ok: true, value: null }
+    } catch (error) {
+      return { ok: false, error: toImageAppError(error) }
     }
   })
 

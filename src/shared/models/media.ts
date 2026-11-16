@@ -32,6 +32,11 @@ export function thumbnailUrl(sessionId: string): string {
   return `${MEDIA_SCHEME}://session/${sessionId}/thumbnail`
 }
 
+/** URL of an image in a session's `assets/` folder. */
+export function assetUrl(sessionId: string, file: string): string {
+  return `${MEDIA_SCHEME}://session/${sessionId}/asset/${encodeURIComponent(file)}`
+}
+
 /** URL of one of a session's tracks. The renderer never sees a file path. */
 export function trackUrl(sessionId: string, track: MediaTrack): string {
   return `${MEDIA_SCHEME}://session/${sessionId}/${track}`

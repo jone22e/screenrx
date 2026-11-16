@@ -137,7 +137,8 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
         !store.selectedTrim &&
         !store.selectedSpeed &&
         !store.selectedCue &&
-        !store.selectedText
+        !store.selectedText &&
+        !store.selectedLayer
       ) {
         event.preventDefault()
         store.cutSelection()
@@ -156,6 +157,9 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
       } else if ((event.key === 'Backspace' || event.key === 'Delete') && store.selectedText) {
         event.preventDefault()
         store.removeText(store.selectedText.id)
+      } else if ((event.key === 'Backspace' || event.key === 'Delete') && store.selectedLayer) {
+        event.preventDefault()
+        store.removeLayer(store.selectedLayer.id)
       } else if (event.key === 'Escape') {
         store.select(null)
         store.setSelection(null)

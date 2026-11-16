@@ -21,9 +21,10 @@ import type { DubProgress, DubRequest, DubTrack } from '@shared/models/dub'
 import type { ColorSettings, FilterRenderRequest, FilterSettings, FilterTrack, RenderedFilter, RenderedFilterName } from '@shared/models/filters'
 import { COLOR_LIMITS, DEFAULT_COLOR, needsRenderedTrack, renderKey } from '@shared/models/filters'
 import type { ObjectTrack, ObjectTrackRequest } from '@shared/models/telemetry'
-import type { EditorSession, MusicTrack } from '@shared/models/editor'
+import type { EditorImage, EditorSession, MusicTrack } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
 import type {
+  ImageLayer,
   Marker,
   SpeedEffect,
   ExportPreset,
@@ -46,6 +47,8 @@ import type {
   ZoomEffect
 } from '@shared/models/project'
 import {
+  DEFAULT_IMAGE_LAYER,
+  LAYER_LIMITS,
   MARKER_LIMITS,
   speedsOf,
   DEFAULT_MUSIC,
@@ -85,6 +88,10 @@ export interface EditorState {
   captions: CaptionSettings
   /** Texts written over the video, sorted by start. */
   texts: readonly TextOverlay[]
+  /** Images over the video, bottom first. */
+  layers: readonly ImageLayer[]
+  /** The session's images; not part of the project. */
+  images: readonly EditorImage[]
   audio: AudioSettings
   /** How the music plays; `null` until music is brought in. */
   music: MusicSettings | null
@@ -137,6 +144,7 @@ export interface EditorState {
   selectedSpeedId: string | null
   selectedCueId: string | null
   selectedTextId: string | null
+  selectedLayerId: string | null
   /** UI state: a stretch of the recording marked on the timeline, e.g. to cut it. */
   selection: TimeSpan | null
   saveStatus: SaveStatus
@@ -168,6 +176,7 @@ const createTrimId = (): string => `trim-${crypto.randomUUID()}`
 const createCueId = (): string => `cue-${crypto.randomUUID()}`
 const createSpeedId = (): string => `speed-${crypto.randomUUID()}`
 const createMarkerId = (): string => `marker-${crypto.randomUUID()}`
+const createLayerId = (): string => `layer-${crypto.randomUUID()}`
 /** Two markers closer than this are one. */
 const MARKER_NEAR_MS = 150
 const createTextId = (): string => `text-${crypto.randomUUID()}`
@@ -179,9 +188,10 @@ interface Selected {
   speedId: string | null
   cueId: string | null
   textId: string | null
+  layerId: string | null
 }
 
-const NOTHING_SELECTED: Selected = { zoomId: null, trimId: null, speedId: null, cueId: null, textId: null }
+const NOTHING_SELECTED: Selected = { zoomId: null, trimId: null, speedId: null, cueId: null, textId: null, layerId: null }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
 
@@ -214,6 +224,7 @@ export class EditorStore {
   private translating: CaptionLanguage | null = null
   private dubs: DubTrack[]
   private musicTrack: MusicTrack | null
+  private images: EditorImage[]
   private speech: SpeechSpan[]
   private objectTrack: ObjectTrack | null
   private tracking: { fraction: number } | null = null
@@ -249,6 +260,7 @@ export class EditorStore {
     this.transcript = session.transcript
     this.dubs = [...session.dubs]
     this.musicTrack = session.music
+    this.images = [...session.images]
     this.speech = speechSpans(session.transcript?.words ?? [])
     this.filterTrack = session.filterTrack
     this.objectTrack = session.track
@@ -268,6 +280,10 @@ export class EditorStore {
 
   get selectedTrim(): TrimEffect | null {
     return this.state.trims.find((trim) => trim.id === this.state.selectedTrimId) ?? null
+  }
+
+  get selectedLayer(): ImageLayer | null {
+    return this.state.layers.find((layer) => layer.id === this.state.selectedLayerId) ?? null
   }
 
   get selectedSpeed(): SpeedEffect | null {
@@ -302,14 +318,19 @@ export class EditorStore {
     this.setSelected({ ...NOTHING_SELECTED, textId })
   }
 
+  selectLayer(layerId: string | null): void {
+    this.setSelected({ ...NOTHING_SELECTED, layerId })
+  }
+
   private setSelected(selected: Selected): void {
-    const { selectedZoomId, selectedTrimId, selectedSpeedId, selectedCueId, selectedTextId } = this.state
+    const { selectedZoomId, selectedTrimId, selectedSpeedId, selectedCueId, selectedTextId, selectedLayerId } = this.state
     if (
       selected.zoomId === selectedZoomId &&
       selected.trimId === selectedTrimId &&
       selected.speedId === selectedSpeedId &&
       selected.cueId === selectedCueId &&
-      selected.textId === selectedTextId
+      selected.textId === selectedTextId &&
+      selected.layerId === selectedLayerId
     ) {
       return
     }
@@ -319,7 +340,8 @@ export class EditorStore {
       selectedTrimId: selected.trimId,
       selectedSpeedId: selected.speedId,
       selectedCueId: selected.cueId,
-      selectedTextId: selected.textId
+      selectedTextId: selected.textId,
+      selectedLayerId: selected.layerId
     }
     this.emit()
   }
@@ -387,6 +409,95 @@ export class EditorStore {
       this.state.selectedTextId === textId ? null : this.state.selectedTextId,
       null
     )
+  }
+
+  // --- image layers -------------------------------------------------------------
+
+  /** The session gained or lost images (brought in or deleted on disk); not an undo step. */
+  setImages(images: readonly EditorImage[]): void {
+    this.images = [...images]
+    this.state = { ...this.state, images: this.images }
+    this.emit()
+  }
+
+  /**
+   * Lays an image of the session over the video, on top of the others, for
+   * the whole recording — a logo stays; a sticker is then trimmed on the
+   * timeline. Returns the layer's id.
+   */
+  addImageLayer(file: string, span: TimeSpan | null = null): string {
+    const duration = this.session.durationMs
+    const layer: ImageLayer = {
+      id: createLayerId(),
+      kind: 'image',
+      file,
+      startMs: span ? clamp(span.startMs, 0, duration) : 0,
+      endMs: span ? clamp(span.endMs, 0, duration) : duration,
+      ...DEFAULT_IMAGE_LAYER,
+      position: { ...DEFAULT_IMAGE_LAYER.position }
+    }
+    if (layer.endMs - layer.startMs < LAYER_LIMITS.minDurationMs) layer.endMs = Math.min(duration, layer.startMs + LAYER_LIMITS.minDurationMs)
+    if (this.project.layers.length >= LAYER_LIMITS.maxLayers) return ''
+    this.commitLayers([...this.project.layers, layer], layer.id, null)
+    return layer.id
+  }
+
+  setLayer(layerId: string, change: Partial<Omit<ImageLayer, 'id' | 'kind' | 'file'>>, gestureKey: string | null = null): void {
+    this.editLayer(layerId, gestureKey === null ? null : `${gestureKey}:${layerId}`, (layer) => {
+      const merged = { ...layer, ...change }
+      return {
+        ...merged,
+        position: { x: clamp(merged.position.x, 0, 1), y: clamp(merged.position.y, 0, 1) },
+        sizeRatio: clamp(merged.sizeRatio, LAYER_LIMITS.minSizeRatio, LAYER_LIMITS.maxSizeRatio),
+        rotationDeg: ((merged.rotationDeg % 360) + 360) % 360,
+        opacity: clamp(merged.opacity, 0, 1),
+        cornerRadiusRatio: clamp(merged.cornerRadiusRatio, 0, LAYER_LIMITS.maxCornerRadiusRatio)
+      }
+    })
+  }
+
+  /** Slides an image in time, keeping its length within the recording. Images may overlap. */
+  moveLayer(original: ImageLayer, deltaMs: number): void {
+    const length = original.endMs - original.startMs
+    const startMs = clamp(original.startMs + deltaMs, 0, Math.max(0, this.session.durationMs - length))
+    this.editLayer(original.id, `layer-span:${original.id}`, (layer) => ({ ...layer, startMs, endMs: startMs + length }))
+  }
+
+  resizeLayer(original: ImageLayer, edge: 'start' | 'end', timeMs: number): void {
+    const span =
+      edge === 'start'
+        ? { startMs: clamp(timeMs, 0, original.endMs - LAYER_LIMITS.minDurationMs), endMs: original.endMs }
+        : { startMs: original.startMs, endMs: clamp(timeMs, original.startMs + LAYER_LIMITS.minDurationMs, this.session.durationMs) }
+    this.editLayer(original.id, `layer-span:${original.id}`, (layer) => ({ ...layer, ...span }))
+  }
+
+  /** Brings an image one step up (drawn later, over more) or down in the pile. */
+  reorderLayer(layerId: string, direction: 'up' | 'down'): void {
+    const layers = [...this.project.layers]
+    const index = layers.findIndex((layer) => layer.id === layerId)
+    const target = direction === 'up' ? index + 1 : index - 1
+    if (index === -1 || target < 0 || target >= layers.length) return
+    const [moved] = layers.splice(index, 1)
+    layers.splice(target, 0, moved as ImageLayer)
+    this.commitLayers(layers, layerId, null)
+  }
+
+  /** The image is shown the whole recording through. */
+  stretchLayer(layerId: string): void {
+    this.editLayer(layerId, null, (layer) => ({ ...layer, startMs: 0, endMs: this.session.durationMs }))
+  }
+
+  removeLayer(layerId: string): void {
+    this.commitLayers(
+      this.project.layers.filter((layer) => layer.id !== layerId),
+      this.state.selectedLayerId === layerId ? null : this.state.selectedLayerId,
+      null
+    )
+  }
+
+  /** Whether any layer still shows the image file. */
+  usesImage(file: string): boolean {
+    return this.project.layers.some((layer) => layer.file === file)
   }
 
   // --- cuts -------------------------------------------------------------------
@@ -1418,6 +1529,15 @@ export class EditorStore {
     this.commitTexts(texts, textId, gestureKey)
   }
 
+  private editLayer(layerId: string, gestureKey: string | null, change: (layer: ImageLayer) => ImageLayer): void {
+    const layers = this.project.layers.map((layer) => (layer.id === layerId ? change(layer) : layer))
+    this.commitLayers(layers, layerId, gestureKey)
+  }
+
+  private commitLayers(layers: readonly ImageLayer[], selectedLayerId: string | null, gestureKey: string | null): void {
+    this.commit({ ...this.project, layers: [...layers] }, { ...NOTHING_SELECTED, layerId: selectedLayerId }, gestureKey)
+  }
+
   private commitTexts(texts: readonly TextOverlay[], selectedTextId: string | null, gestureKey: string | null): void {
     const sorted = [...texts].sort((a, b) => a.startMs - b.startMs)
     this.commit({ ...this.project, texts: sorted }, { ...NOTHING_SELECTED, textId: selectedTextId }, gestureKey)
@@ -1434,7 +1554,8 @@ export class EditorStore {
       trimId: null,
       speedId: this.state.selectedSpeedId,
       cueId: this.state.selectedCueId,
-      textId: this.state.selectedTextId
+      textId: this.state.selectedTextId,
+      layerId: this.state.selectedLayerId
     }
   }
 
@@ -1464,6 +1585,7 @@ export class EditorStore {
     const speedExists = speedsOf(project).some((region) => region.id === this.state.selectedSpeedId)
     const cueExists = project.captions.cues.some((cue) => cue.id === this.state.selectedCueId)
     const textExists = project.texts.some((text) => text.id === this.state.selectedTextId)
+    const layerExists = project.layers.some((layer) => layer.id === this.state.selectedLayerId)
     this.state = {
       ...this.derive(
         {
@@ -1471,7 +1593,8 @@ export class EditorStore {
           trimId: trimExists ? this.state.selectedTrimId : null,
           speedId: speedExists ? this.state.selectedSpeedId : null,
           cueId: cueExists ? this.state.selectedCueId : null,
-          textId: textExists ? this.state.selectedTextId : null
+          textId: textExists ? this.state.selectedTextId : null,
+          layerId: layerExists ? this.state.selectedLayerId : null
         },
         'pending'
       ),
@@ -1492,6 +1615,8 @@ export class EditorStore {
       webcam: this.project.webcam,
       captions: this.project.captions,
       texts: this.project.texts,
+      layers: this.project.layers,
+      images: this.images,
       audio: this.project.audio,
       music: this.project.music,
       musicTrack: this.musicTrack,
@@ -1523,6 +1648,7 @@ export class EditorStore {
       selectedSpeedId: selected.speedId,
       selectedCueId: selected.cueId,
       selectedTextId: selected.textId,
+      selectedLayerId: selected.layerId,
       selection: null,
       saveStatus,
       canUndo: this.past.length > 0,

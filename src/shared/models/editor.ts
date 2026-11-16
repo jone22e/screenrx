@@ -4,6 +4,16 @@ import type { FilterTrack } from './filters'
 import type { Project } from './project'
 import type { CursorSample, InteractionEvent, ObjectTrack } from './telemetry'
 
+/** An image of the session as the editor sees it. */
+export interface EditorImage {
+  file: string
+  name: string
+  url: string
+  /** 0 when unknown until drawn. */
+  widthPx: number
+  heightPx: number
+}
+
 /** The session's music file, as the editor and the preview see it. */
 export interface MusicTrack {
   url: string
@@ -38,6 +48,8 @@ export interface EditorSession {
   dubs: DubTrack[]
   /** The music track brought into the session, when there is one. */
   music: MusicTrack | null
+  /** Images brought into the session, for the layers; each with the address it is served at. */
+  images: EditorImage[]
   /** The screen track with rendered effects, when one has been made, and what it was made from. */
   filterTrack: FilterTrack | null
   /** Speech-to-text of the session's audio, when it has been transcribed. */

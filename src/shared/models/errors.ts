@@ -47,6 +47,8 @@ export type AppErrorCode =
   | 'import-failed'
   | 'music-unsupported'
   | 'music-failed'
+  | 'image-unsupported'
+  | 'image-failed'
   | 'invalid-state'
   | 'unknown'
 
@@ -118,6 +120,8 @@ const MESSAGES: Record<AppErrorCode, string> = {
   'import-failed': 'Não foi possível importar o vídeo.',
   'music-unsupported': 'O arquivo escolhido não tem uma trilha de áudio que o ScreenRx consiga ler.',
   'music-failed': 'Não foi possível trazer a música para a gravação.',
+  'image-unsupported': 'O arquivo escolhido não é uma imagem que o ScreenRx consiga mostrar (PNG, JPG, WebP, GIF, SVG).',
+  'image-failed': 'Não foi possível trazer a imagem para a gravação.',
   'invalid-state': 'Essa ação não está disponível no momento.',
   unknown: 'Ocorreu um erro inesperado.'
 }

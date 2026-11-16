@@ -8,10 +8,11 @@ import { findBackgroundPreset } from '@engine/rendering/backgrounds'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import type { NormalizedRect } from '@engine/rendering/frameLayout'
 import { centeredSquare, layoutFrame, layoutWebcam, sourceCrop } from '@engine/rendering/frameLayout'
+import { layoutImageLayer, rotatedBounds } from '@engine/rendering/layerLayout'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { viewToSource, visibleRect } from '@engine/zoom/zoomCamera'
 import type { ColorSettings } from '@shared/models/filters'
-import type { BackgroundSettings, CaptionStyle, NormalizedPoint, WebcamSettings } from '@shared/models/project'
+import type { BackgroundSettings, CaptionStyle, ImageLayer, NormalizedPoint, WebcamSettings } from '@shared/models/project'
 
 export interface FrameInput {
   screen: CanvasImageSource
@@ -30,6 +31,8 @@ export interface FrameInput {
   caption: { text: string; style: CaptionStyle; timing: CaptionTiming } | null
   /** The user's texts on screen at this instant, drawn over the caption in this order. */
   texts: ReadonlyArray<{ id: string; text: string; style: CaptionStyle }>
+  /** Images on screen at this instant, bottom first, each with its picture as loaded; one not loaded yet is left out. */
+  layers: ReadonlyArray<{ layer: ImageLayer; image: CanvasImageSource; size: Size }>
 }
 
 /** Where things ended up on the frame, for pointer interaction in the preview. */
@@ -38,6 +41,8 @@ export interface FrameRegions {
   caption: Rect | null
   /** Each text's block in output pixels, in drawing order. */
   texts: Array<{ id: string; box: Rect }>
+  /** Each image's box in output pixels (around its rotation), in drawing order. */
+  layers: Array<{ id: string; box: Rect }>
 }
 
 type Context = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
@@ -254,6 +259,29 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
     }
   }
 
+  // Images over the picture and the webcam, each in its place, turned and faded as set.
+  const layers: FrameRegions['layers'] = []
+  for (const { layer, image, size } of input.layers) {
+    const placed = layoutImageLayer(output, layer, size)
+    const centerX = placed.x + placed.width / 2
+    const centerY = placed.y + placed.height / 2
+    context.save()
+    context.globalAlpha = layer.opacity
+    if (placed.rotationDeg !== 0) {
+      context.translate(centerX, centerY)
+      context.rotate((placed.rotationDeg * Math.PI) / 180)
+      context.translate(-centerX, -centerY)
+    }
+    if (placed.cornerRadius > 0) {
+      context.beginPath()
+      context.roundRect(placed.x, placed.y, placed.width, placed.height, placed.cornerRadius)
+      context.clip()
+    }
+    context.drawImage(image, placed.x, placed.y, placed.width, placed.height)
+    context.restore()
+    layers.push({ id: layer.id, box: rotatedBounds(placed) })
+  }
+
   // Captions are not part of the recording: they stay put and sharp while it zooms.
   const caption = input.caption
     ? drawCaption(context, output, input.caption.text, input.caption.style, input.caption.timing)
@@ -263,7 +291,7 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
     const box = drawCaption(context, output, item.text, item.style)
     if (box) texts.push({ id: item.id, box })
   }
-  return { caption, texts }
+  return { caption, texts, layers }
 }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)

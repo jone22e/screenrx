@@ -2,12 +2,13 @@ import { captionAt } from '@engine/captions/captionCues'
 import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
 import { textsAt } from '@engine/captions/textOverlays'
 import { frameSourceTimeMs } from '@engine/export/exportPlan'
+import { layersAt } from '@engine/rendering/layerLayout'
 import { buildTimeMap } from '@engine/time/timeMapping'
 import { cameraAt } from '@engine/zoom/zoomCamera'
 import type { EditorSession } from '@shared/models/editor'
 import type { AppError } from '@shared/models/errors'
 import type { ExportJob } from '@shared/models/export'
-import type { Project } from '@shared/models/project'
+import type { ImageLayer, Project } from '@shared/models/project'
 import type { ObjectTrack } from '@shared/models/telemetry'
 import { zoomsOf } from '@shared/models/project'
 import { composeFrame } from '../rendering/composeFrame'
@@ -54,6 +55,8 @@ export async function renderExport(
   const objectPath = objectTrack ? smoothCursorPath(objectTrack.samples, session.durationMs) : []
   const { captions } = project
   const output = { width: plan.width, height: plan.height }
+  // Every image a layer shows, decoded once before the first frame.
+  const pictures = await loadPictures(project.layers, session.images)
 
   // Composited on the GPU, like the preview; each finished frame is then read back once.
   const canvas = new OffscreenCanvas(plan.width, plan.height)
@@ -94,7 +97,11 @@ export async function renderExport(
         background: project.background,
         color: project.filters.color,
         caption: caption === null ? null : { text: caption.text, style: captions.style, timing: caption },
-        texts: textsAt(project.texts, sourceMs)
+        texts: textsAt(project.texts, sourceMs),
+        layers: layersAt(project.layers, sourceMs).flatMap((layer) => {
+          const picture = pictures.get(layer.file)
+          return picture ? [{ layer, image: picture, size: { width: picture.naturalWidth, height: picture.naturalHeight } }] : []
+        })
       })
 
       const rendered = new VideoFrame(canvas, { timestamp: 0 })
@@ -112,4 +119,25 @@ export async function renderExport(
     screen.close()
     webcam?.close()
   }
+}
+
+/** Decodes the images the layers show; one that cannot be loaded is simply not drawn, as in the preview. */
+async function loadPictures(layers: readonly ImageLayer[], images: EditorSession['images']): Promise<Map<string, HTMLImageElement>> {
+  const pictures = new Map<string, HTMLImageElement>()
+  const files = [...new Set(layers.map((layer) => layer.file))]
+  await Promise.all(
+    files.map(async (file) => {
+      const url = images.find((image) => image.file === file)?.url
+      if (!url) return
+      const picture = new Image()
+      picture.src = url
+      try {
+        await picture.decode()
+        if (picture.naturalWidth > 0) pictures.set(file, picture)
+      } catch {
+        // Left out of the export, as the preview leaves it out.
+      }
+    })
+  )
+  return pictures
 }

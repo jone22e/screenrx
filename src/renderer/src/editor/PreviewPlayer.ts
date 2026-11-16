@@ -3,6 +3,7 @@ import { textsAt } from '@engine/captions/textOverlays'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import { outputSizeFor } from '@engine/rendering/frameLayout'
 import { safeZones } from '@engine/rendering/safeZones'
+import { layersAt } from '@engine/rendering/layerLayout'
 import type { ColorSettings } from '@shared/models/filters'
 import type { TimeMap } from '@engine/time/timeMapping'
 import { keptSourceTime, nextKeptSourceTime, outputDurationMs, sourceTimeToTimelineTime, timelineTimeToOutputTime } from '@engine/time/timeMapping'
@@ -16,6 +17,7 @@ import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
 import type { EditorSession } from '@shared/models/editor'
 import type { ObjectTrack } from '@shared/models/telemetry'
 import type {
+  ImageLayer,
   SpeedEffect,
   MusicSettings,
   AudioSettings,
@@ -78,6 +80,11 @@ export interface PreviewSettings {
   texts: readonly TextOverlay[]
   /** The text picked in the editor: it gets a frame with handles, drawn only here, never exported. */
   selectedTextId: string | null
+  /** Images over the video, bottom first, and the one picked in the editor. */
+  layers: readonly ImageLayer[]
+  selectedLayerId: string | null
+  /** Where each image of the session is served from, by file name. */
+  images: ReadonlyArray<{ file: string; url: string }>
   /** Whether to shade where a vertical video is covered by the apps' interface; drawn only here. */
   safeAreas: boolean
   /** Where the marked object goes, for the frame that follows it. */
@@ -143,6 +150,9 @@ export class PreviewPlayer {
   private destroyed = false
   private drawnCaption: Rect | null = null
   private drawnTexts: Array<{ id: string; box: Rect }> = []
+  private drawnLayers: Array<{ id: string; box: Rect }> = []
+  /** The session's images as loaded; a file is fetched the first time a layer asks for it. */
+  private readonly pictures = new Map<string, HTMLImageElement>()
   private readonly timeListeners = new Set<(timeMs: number) => void>()
   private readonly playingListeners = new Set<(playing: boolean) => void>()
   private readonly errorListeners = new Set<() => void>()
@@ -254,6 +264,11 @@ export class PreviewPlayer {
   /** The blocks of the texts currently on screen, in output pixels, in drawing order. */
   get textBoxes(): ReadonlyArray<{ id: string; box: Rect }> {
     return this.drawnTexts
+  }
+
+  /** The boxes of the images currently on screen, in output pixels, in drawing order. */
+  get layerBoxes(): ReadonlyArray<{ id: string; box: Rect }> {
+    return this.drawnLayers
   }
 
   /** Size of the rendered output, for mapping pointer positions. */
@@ -493,6 +508,9 @@ export class PreviewPlayer {
     const regions = composeFrame(this.context, this.output, this.frameInputAt(timeMs, showWebcam ? webcam : null))
     this.drawnCaption = regions.caption
     this.drawnTexts = regions.texts
+    this.drawnLayers = regions.layers
+    const selectedLayer = regions.layers.find((layer) => layer.id === this.settings.selectedLayerId)
+    if (selectedLayer) this.drawLayerSelection(selectedLayer.box)
     if (this.settings.safeAreas) this.drawSafeAreas()
     const selected = regions.texts.find((text) => text.id === this.settings.selectedTextId)
     const selectedText = selected ? textsAt(this.settings.texts, timeMs).find((text) => text.id === selected.id) : null
@@ -521,8 +539,52 @@ export class PreviewPlayer {
       background: this.settings.background,
       color: this.settings.color,
       caption: caption === null ? null : { text: caption.text, style: captions.style, timing: caption },
-      texts: textsAt(this.settings.texts, timeMs)
+      texts: textsAt(this.settings.texts, timeMs),
+      layers: this.picturesFor(layersAt(this.settings.layers, timeMs))
     }
+  }
+
+  /** The images of the layers given, as far as they have loaded; a missing one is fetched and the frame drawn again when it arrives. */
+  private picturesFor(layers: readonly ImageLayer[]): FrameInput['layers'] {
+    const shown: Array<{ layer: ImageLayer; image: CanvasImageSource; size: Size }> = []
+    for (const layer of layers) {
+      let picture = this.pictures.get(layer.file)
+      if (!picture) {
+        const url = this.settings.images.find((image) => image.file === layer.file)?.url
+        if (!url) continue
+        picture = new Image()
+        picture.decoding = 'async'
+        picture.addEventListener('load', () => this.render(), { once: true })
+        picture.src = url
+        this.pictures.set(layer.file, picture)
+      }
+      if (picture.complete && picture.naturalWidth > 0) {
+        shown.push({ layer, image: picture, size: { width: picture.naturalWidth, height: picture.naturalHeight } })
+      }
+    }
+    return shown
+  }
+
+  /** A dashed frame with corner handles around the picked image, drawn only on the preview. */
+  private drawLayerSelection(box: Rect): void {
+    const context = this.context
+    const { frame, handle } = textSelectionFrame(box, this.output)
+    const line = Math.max(1, this.output.width / 960)
+    context.save()
+    context.lineWidth = line
+    context.setLineDash([4 * line, 4 * line])
+    context.strokeStyle = 'rgba(255, 255, 255, 0.85)'
+    context.strokeRect(frame.x, frame.y, frame.width, frame.height)
+    context.setLineDash([])
+    context.fillStyle = '#fff'
+    context.shadowColor = 'rgba(0, 0, 0, 0.5)'
+    context.shadowBlur = 4 * line
+    for (const corner of frameCorners(frame)) {
+      context.beginPath()
+      context.roundRect(corner.x - handle / 2, corner.y - handle / 2, handle, handle, handle * 0.25)
+      context.fill()
+    }
+    context.restore()
   }
 
   /**

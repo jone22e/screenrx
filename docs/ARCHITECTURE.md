@@ -86,6 +86,7 @@ src/
     project/ProjectStore.ts        project.json: abertura, auto zoom inicial, salvamento
   library/VideoImporter.ts       traz um vídeo gravado fora do app para a biblioteca
   library/MusicImporter.ts       traz um arquivo de áudio como a trilha de música da sessão
+  library/ImageImporter.ts       copia imagens para a pasta assets/ da sessão, para as camadas
   update/UpdateService.ts        atualização automática: consulta, baixa e instala (electron-updater)
     captions/DictationService      ditado do assistente: WAV → texto pelo transcritor nativo
   tracking/ObjectTrackingService segue um objeto marcado pelo vídeo (helper screenrx-track, Vision) → track.json
@@ -141,7 +142,8 @@ recording-20261003-203556-847/
 ├── microphone.m4a      só quando o microfone está ligado
 ├── system.m4a          só quando o áudio do sistema está ligado
 ├── webcam.mp4          só quando a câmera está ligada
-└── music.m4a           só quando o usuário escolhe uma música (aba Áudio)
+├── music.m4a           só quando o usuário escolhe uma música (aba Áudio)
+└── assets/             imagens trazidas pelo usuário (aba Camadas), um nome próprio cada
 ```
 
 `session.json` (`RecordingSessionManifest`) registra fonte, parâmetros de captura,
@@ -492,6 +494,42 @@ Backspace remove o selecionado. O desenho reaproveita `drawCaption`
 (`composeFrame`, campo `texts`), depois da legenda, no preview e na exportação
 (`textsAt`). O assistente também escreve textos ("text"). **Não verificado:** só
 por testes e leitura; nenhum arrasto nem exportação real com textos.
+
+### Camadas de imagem (aba "Camadas")
+
+```
+arquivo do usuário → ImageImporter: cópia em <sessão>/assets/<uuid>.<ext> + assets.images no manifesto
+                                                  ↓ screenrx-media://session/<id>/asset/<arquivo>
+project.layers (ImageLayer: arquivo, intervalo, centro, largura, rotação, opacidade, cantos)
+                                                  ↓ layersAt + layoutImageLayer
+                       composeFrame (entre a câmera e as legendas) → preview e exportação
+```
+
+- **Arquivos.** "Adicionar imagem…" copia PNG, JPG, WebP, GIF, SVG, BMP ou AVIF
+  (até 50 MB) para a pasta `assets/` da sessão com um nome próprio
+  (`src/main/library/ImageImporter.ts`); o FFprobe lê o tamanho quando consegue
+  (um SVG fica 0×0 e o editor usa o tamanho de quando desenha). O manifesto lista
+  cada imagem em `assets.images`; `EditorSession.images` traz nome, tamanho e
+  endereço. O protocolo de mídia serve `asset/<arquivo>` inteiro (`isSafeFileName`
+  + `resolveInside`). Remover a última camada que usa um arquivo apaga o arquivo.
+- **Modelo** (`ImageLayer`, `project.layers`, do fundo para o topo): centro
+  normalizado, largura como fração da largura de saída (a altura segue a imagem),
+  rotação, opacidade e cantos (fração do lado menor; 0,5 arredonda um quadrado).
+  Uma imagem nova cobre o vídeo inteiro, no canto superior direito a 18%: um logo
+  está pronto; um sticker é encurtado na linha do tempo. `parseLayers` só aceita
+  `kind: 'image'` e nomes de arquivo sem barras.
+- **Desenho** (`engine/rendering/layerLayout.ts` + `composeFrame`): a imagem pode
+  sair pela borda, mas o centro fica dentro do quadro, para sempre dar de pegar;
+  `rotatedBounds` dá a caixa alinhada ao eixo que o preview usa para o clique.
+  O `PreviewPlayer` carrega cada arquivo uma vez (`HTMLImageElement`, então SVG
+  também) e redesenha quando chega; a exportação decodifica todos antes do
+  primeiro quadro. Uma imagem que não carrega simplesmente não é desenhada, nos dois.
+- **Interface.** Aba Camadas: lista (a primeira por cima), subir/descer, remover,
+  e para a selecionada tamanho, opacidade, rotação, cantos e "O vídeo todo". No
+  preview: arrastar move, um canto da moldura redimensiona (como os textos; os
+  textos e a legenda ficam por cima das imagens no clique). Linha do tempo: faixa
+  "Imagens" (só quando há alguma), regiões arrastáveis e redimensionáveis.
+  `⌫` remove a selecionada.
 
 ### Dublagem com a voz de quem gravou
 

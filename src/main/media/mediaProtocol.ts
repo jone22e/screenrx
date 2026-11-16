@@ -5,10 +5,24 @@ import { protocol } from 'electron'
 import type { MediaTrack } from '@shared/models/media'
 import { MEDIA_SCHEME, isMediaTrack } from '@shared/models/media'
 import { isSessionId } from '@shared/models/session'
+import path from 'node:path'
+import { SESSION_FILES } from '@shared/config/recording'
+import { isSafeFileName, resolveInside } from '../filesystem/safePaths'
 import type { Logger } from '../logging/logger'
 import type { SessionStore } from '../recording/SessionStore'
 import type { ThumbnailService } from './ThumbnailService'
 import { parseByteRange } from './byteRange'
+
+const IMAGE_CONTENT_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  svg: 'image/svg+xml',
+  bmp: 'image/bmp',
+  avif: 'image/avif'
+}
 
 const CONTENT_TYPES: Record<MediaTrack, string> = {
   dubEn: 'audio/mp4',
@@ -39,9 +53,23 @@ export function registerMediaScheme(): void {
 export function serveMedia(sessions: SessionStore, thumbnails: ThumbnailService, logger: Logger): void {
   protocol.handle(MEDIA_SCHEME, async (request) => {
     const url = new URL(request.url)
-    const [sessionId, resource] = url.pathname.split('/').filter(Boolean)
+    const [sessionId, resource, assetName] = url.pathname.split('/').filter(Boolean)
     if (url.hostname !== 'session' || !isSessionId(sessionId)) {
       return new Response(null, { status: 404 })
+    }
+
+    // An image of the session's assets folder, whole: images are small and drawn at once.
+    if (resource === 'asset') {
+      const file = assetName === undefined ? '' : decodeURIComponent(assetName)
+      if (!isSafeFileName(file)) return new Response(null, { status: 404 })
+      try {
+        const filePath = resolveInside(path.join(sessions.directoryOf(sessionId), SESSION_FILES.assets), file)
+        return new Response(await readFile(filePath), {
+          headers: { 'Content-Type': IMAGE_CONTENT_TYPES[path.extname(file).slice(1).toLowerCase()] ?? 'application/octet-stream' }
+        })
+      } catch {
+        return new Response(null, { status: 404 })
+      }
     }
 
     if (resource === 'thumbnail') {

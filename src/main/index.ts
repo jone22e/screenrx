@@ -21,6 +21,7 @@ import { FfmpegService, bundledFfmpegBinaries } from './export/FfmpegService'
 import { DubbingService } from './dub/DubbingService'
 import { FilterRenderService } from './filters/FilterRenderService'
 import { registerIpc } from './ipc/registerIpc'
+import { ImageImporter } from './library/ImageImporter'
 import { MusicImporter } from './library/MusicImporter'
 import { VideoImporter } from './library/VideoImporter'
 import { addLogSink, consoleSink, createLogger, fileSink } from './logging/logger'
@@ -288,6 +289,7 @@ async function bootstrap(): Promise<void> {
     thumbnails,
     importer: new VideoImporter({ ffmpeg, sessions, logger: createLogger('import') }),
     music: new MusicImporter({ ffmpeg, sessions, logger: createLogger('music') }),
+    images: new ImageImporter({ ffmpeg, sessions, logger: createLogger('images') }),
     meet,
     meetSettings,
     updates,

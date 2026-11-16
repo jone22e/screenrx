@@ -292,6 +292,47 @@ export interface TextOverlay {
   style: CaptionStyle
 }
 
+/**
+ * An image laid over the video — a logo, a sticker, a screenshot — during
+ * its span. The file is one of the session's `assets/`; the layer only says
+ * how and when it shows. Layers are drawn in list order, the last on top.
+ */
+export interface ImageLayer {
+  id: string
+  kind: 'image'
+  /** File name inside the session's `assets/` folder. */
+  file: string
+  startMs: number
+  endMs: number
+  /** Centre of the image, normalized to the output. */
+  position: NormalizedPoint
+  /** Width as a ratio of the output width; the height follows the image. */
+  sizeRatio: number
+  rotationDeg: number
+  /** 0…1. */
+  opacity: number
+  /** Corner rounding as a ratio of the image's shorter side; 0.5 makes a square round. */
+  cornerRadiusRatio: number
+}
+
+export type Layer = ImageLayer
+
+export const LAYER_LIMITS = {
+  maxLayers: 200,
+  minSizeRatio: 0.02,
+  maxSizeRatio: 1.5,
+  maxCornerRadiusRatio: 0.5,
+  minDurationMs: 300
+} as const
+
+export const DEFAULT_IMAGE_LAYER: Pick<ImageLayer, 'position' | 'sizeRatio' | 'rotationDeg' | 'opacity' | 'cornerRadiusRatio'> = {
+  position: { x: 0.85, y: 0.12 },
+  sizeRatio: 0.18,
+  rotationDeg: 0,
+  opacity: 1,
+  cornerRadiusRatio: 0
+}
+
 export const TEXT_LIMITS = {
   maxTexts: 500,
   maxTextLength: 300,
@@ -326,6 +367,8 @@ export interface Project {
   captions: CaptionSettings
   /** Texts written over the video. Empty in projects saved before they existed. */
   texts: TextOverlay[]
+  /** Images over the video, bottom first. Empty in projects saved before them. */
+  layers: Layer[]
   audio: AudioSettings
   /** How the session's music track plays; `null` until music is brought in (the file may still be there). */
   music: MusicSettings | null
@@ -438,6 +481,7 @@ export function createProject(sessionId: string, effects: TimelineEffect[] = [])
     webcam: { ...DEFAULT_WEBCAM, position: { ...DEFAULT_WEBCAM.position } },
     captions: createCaptionSettings(),
     texts: [],
+    layers: [],
     audio: createAudioSettings(),
     music: null,
     markers: [],
@@ -660,6 +704,29 @@ function parseTexts(value: unknown): TextOverlay[] {
   return texts.sort((a, b) => a.startMs - b.startMs)
 }
 
+/** Image layers as saved, in their order; a malformed one is dropped. Projects saved before them have none. */
+function parseLayers(value: unknown): Layer[] {
+  const layers: Layer[] = []
+  for (const entry of Array.isArray(value) ? value.slice(0, LAYER_LIMITS.maxLayers) : []) {
+    if (!isRecord(entry) || entry.kind !== 'image') continue
+    const base = parseBase(entry)
+    if (!base || typeof entry.file !== 'string' || !/^[^/\\\0]{1,255}$/.test(entry.file) || entry.file === '.' || entry.file === '..') continue
+    layers.push({
+      ...base,
+      kind: 'image',
+      file: entry.file,
+      position: parseNormalizedPoint(entry.position, DEFAULT_IMAGE_LAYER.position),
+      sizeRatio: isFiniteNumber(entry.sizeRatio)
+        ? Math.min(Math.max(entry.sizeRatio, LAYER_LIMITS.minSizeRatio), LAYER_LIMITS.maxSizeRatio)
+        : DEFAULT_IMAGE_LAYER.sizeRatio,
+      rotationDeg: isFiniteNumber(entry.rotationDeg) ? ((entry.rotationDeg % 360) + 360) % 360 : 0,
+      opacity: clampRatio(entry.opacity, DEFAULT_IMAGE_LAYER.opacity, 1),
+      cornerRadiusRatio: clampRatio(entry.cornerRadiusRatio, DEFAULT_IMAGE_LAYER.cornerRadiusRatio, LAYER_LIMITS.maxCornerRadiusRatio)
+    })
+  }
+  return layers
+}
+
 /** Projects saved before tracks could be muted play every track; before they had a volume, at full volume. */
 function parseAudio(value: unknown): AudioSettings {
   const settings = isRecord(value) ? value : {}
@@ -754,6 +821,7 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
     webcam: parseWebcam(value.webcam),
     captions: parseCaptions(value.captions),
     texts: parseTexts(value.texts),
+    layers: parseLayers(value.layers),
     audio: parseAudio(value.audio),
     music: parseMusic(value.music),
     markers: parseMarkers(value.markers),

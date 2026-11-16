@@ -270,3 +270,23 @@ export const FlagIcon = () => (
     <path d="M5 4h12l-2.5 4L17 12H5" />
   </Icon>
 )
+
+export const ImageIcon = () => (
+  <Icon>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <circle cx="8.5" cy="9.5" r="1.5" />
+    <path d="M21 16l-5-5-8 8" />
+  </Icon>
+)
+
+export const ArrowUpIcon = () => (
+  <Icon>
+    <path d="M12 19V5M5 12l7-7 7 7" />
+  </Icon>
+)
+
+export const ArrowDownIcon = () => (
+  <Icon>
+    <path d="M12 5v14M5 12l7 7 7-7" />
+  </Icon>
+)

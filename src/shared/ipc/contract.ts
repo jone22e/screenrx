@@ -13,6 +13,7 @@ import type { CaptureDevices } from '../models/devices'
 import type { DubProgress, DubRequest, DubStatus, DubTrack } from '../models/dub'
 import type { FilterRenderProgress, FilterRenderRequest, FilterTrack } from '../models/filters'
 import type {
+  EditorImage,
   MusicTrack, EditorSession } from '../models/editor'
 import type { IpcResult } from '../models/errors'
 import type {
@@ -88,6 +89,8 @@ export interface IpcInvokeContract {
   'dub:generate': { args: [sessionId: string, request: DubRequest]; result: IpcResult<DubTrack> }
 
   'music:import': { args: [sessionId: string]; result: IpcResult<MusicTrack | null> }
+  'images:import': { args: [sessionId: string]; result: IpcResult<EditorImage[]> }
+  'images:remove': { args: [sessionId: string, file: string]; result: IpcResult<null> }
   'music:remove': { args: [sessionId: string]; result: IpcResult<null> }
   'dub:cancel': { args: []; result: void }
   'filters:render': { args: [sessionId: string, request: FilterRenderRequest]; result: IpcResult<FilterTrack> }
@@ -228,6 +231,12 @@ export interface ScreenRxApi {
     exportSubtitles(sessionId: string, format: SubtitleFormat, content: string): Promise<IpcResult<{ fileName: string } | null>>
     /** Asks for an SRT or WebVTT file and returns its text, to be read into captions. `null` when cancelled. */
     importSubtitles(): Promise<IpcResult<{ fileName: string; content: string } | null>>
+  }
+  images: {
+    /** Asks for image files and copies each into the session. Resolves with the ones brought in (none when cancelled). */
+    import(sessionId: string): Promise<IpcResult<EditorImage[]>>
+    /** Deletes one of the session's images. */
+    remove(sessionId: string, file: string): Promise<IpcResult<null>>
   }
   music: {
     /**

@@ -62,6 +62,18 @@ export interface AudioAsset {
   deviceName?: string
 }
 
+/** An image the user brought into the session, in its `assets/` folder, for the layers to show. */
+export interface ImageAsset {
+  /** File name inside `assets/`, unique in the session. */
+  file: string
+  /** The name of the file it came from, for the editor to show. */
+  name: string
+  sizeBytes: number
+  /** 0 when unknown (an SVG): the editor takes the size from the image once drawn. */
+  widthPx: number
+  heightPx: number
+}
+
 /** Music the user brought into the session, as a track of its own (`music.m4a`). Replaced whole when another is chosen. */
 export interface MusicAsset extends AudioAsset {
   /** The name of the file it came from, for the editor to show. */
@@ -135,6 +147,7 @@ export interface RecordingSessionManifest {
     systemAudio?: AudioAsset
     webcam?: WebcamAsset
     music?: MusicAsset
+    images?: ImageAsset[]
     cursor?: TelemetryAsset
     interactions?: TelemetryAsset
   }

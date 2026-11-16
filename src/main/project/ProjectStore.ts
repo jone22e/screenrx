@@ -7,7 +7,7 @@ import { parseTranscript } from '@shared/models/captions'
 import type { EditorSession } from '@shared/models/editor'
 import type { DubTrack } from '@shared/models/dub'
 import type { FilterTrack } from '@shared/models/filters'
-import { DUB_TRACKS, trackUrl } from '@shared/models/media'
+import { DUB_TRACKS, assetUrl, trackUrl } from '@shared/models/media'
 import type { Project } from '@shared/models/project'
 import { CAPTION_LANGUAGES, createProject, parseProject } from '@shared/models/project'
 import type { InteractionEvent } from '@shared/models/telemetry'
@@ -93,6 +93,13 @@ export class ProjectStore {
       cursor: parseCursorSamples(await this.readJson(sessionId, SESSION_FILES.cursor)),
       track: parseObjectTrack(await this.readJson(sessionId, SESSION_FILES.track)),
       dubs: await this.dubsOf(sessionId),
+      images: (manifest.assets.images ?? []).map((image) => ({
+        file: image.file,
+        name: image.name,
+        url: assetUrl(sessionId, image.file),
+        widthPx: image.widthPx,
+        heightPx: image.heightPx
+      })),
       music: manifest.assets.music
         ? { url: trackUrl(sessionId, 'music'), durationMs: manifest.assets.music.durationMs, name: manifest.assets.music.name }
         : null,

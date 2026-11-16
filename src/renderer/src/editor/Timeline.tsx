@@ -5,7 +5,7 @@ import { moveZoom, resizeZoom } from '@engine/zoom/zoomEditing'
 import { formatClock, formatTimecode } from '@shared/format'
 import { DUB_TRACKS } from '@shared/models/media'
 import type { EditorSession } from '@shared/models/editor'
-import type { CaptionCue, SpeedEffect, TextOverlay, TrimEffect, ZoomEffect } from '@shared/models/project'
+import type { CaptionCue, ImageLayer, SpeedEffect, TextOverlay, TrimEffect, ZoomEffect } from '@shared/models/project'
 import type { EditorStore } from './EditorStore'
 import { Filmstrip } from './Filmstrip'
 import type { PreviewPlayer } from './PreviewPlayer'
@@ -20,6 +20,7 @@ import {
   FilmIcon,
   FitIcon,
   GaugeIcon,
+  ImageIcon,
   LockIcon,
   MagnetIcon,
   PlusIcon,
@@ -49,6 +50,7 @@ type Drag = { kind: DragKind; originX: number } & (
   | { target: 'speed'; original: SpeedEffect }
   | { target: 'cue'; original: CaptionCue }
   | { target: 'text'; original: TextOverlay }
+  | { target: 'layer'; original: ImageLayer }
 )
 
 /** A press on the video lane: a click seeks, a drag selects. */
@@ -76,7 +78,7 @@ const ZOOM_LEVELS = { min: 1, max: 8, step: 0.25 } as const
 const SNAP_KEY = 'screenrx.timeline.snap'
 
 /** A lane whose regions the user froze: nothing on it moves until it is unlocked. */
-type LaneId = 'cuts' | 'zoom' | 'speed' | 'captions' | 'text'
+type LaneId = 'cuts' | 'zoom' | 'speed' | 'captions' | 'text' | 'layers'
 
 const speedLabel = (speed: number): string => `${String(speed).replace('.', ',')}×`
 
@@ -228,7 +230,7 @@ export function Timeline({ session, store, player }: Props) {
   const { cues } = state.captions
   // The dubbing in use has a lane of its own; it stands in for the microphone.
   const dub = state.dubs.find((track) => track.language === state.dub.language) ?? null
-  const laneCount = 5 + (cues.length > 0 ? 1 : 0) + (session.webcam ? 1 : 0) + session.audio.length + (dub ? 1 : 0)
+  const laneCount = 5 + (cues.length > 0 ? 1 : 0) + (state.layers.length > 0 ? 1 : 0) + (session.webcam ? 1 : 0) + session.audio.length + (dub ? 1 : 0)
 
   useEffect(() => {
     const element = tracks.current
@@ -268,7 +270,7 @@ export function Timeline({ session, store, player }: Props) {
   /** The instants an edge lands on when snapping: the ends, the playhead and every region's edges. */
   const snapTargets = (except?: string): number[] => {
     const targets = [0, duration, player.currentTimeMs, ...state.markers.map((marker) => marker.timeMs)]
-    for (const region of [...state.trims, ...state.zooms, ...state.speeds, ...cues, ...state.texts]) {
+    for (const region of [...state.trims, ...state.zooms, ...state.speeds, ...cues, ...state.texts, ...state.layers]) {
       if (region.id === except) continue
       targets.push(region.startMs, region.endMs)
     }
@@ -300,8 +302,11 @@ export function Timeline({ session, store, player }: Props) {
     else if (store.selectedSpeed) store.removeSpeed(store.selectedSpeed.id)
     else if (store.selectedCue) store.removeCue(store.selectedCue.id)
     else if (store.selectedText) store.removeText(store.selectedText.id)
+    else if (store.selectedLayer) store.removeLayer(store.selectedLayer.id)
   }
-  const hasSelection = Boolean(store.selectedZoom || store.selectedTrim || store.selectedSpeed || store.selectedCue || store.selectedText)
+  const hasSelection = Boolean(
+    store.selectedZoom || store.selectedTrim || store.selectedSpeed || store.selectedCue || store.selectedText || store.selectedLayer
+  )
 
   const toggleSnap = (): void => {
     setSnap((value) => {
@@ -399,7 +404,10 @@ export function Timeline({ session, store, player }: Props) {
     if (next.target === 'zoom') store.select(next.original.id)
     else if (next.target === 'trim') store.selectTrim(next.original.id)
     else if (next.target === 'speed') store.selectSpeed(next.original.id)
-    else if (next.target === 'text') {
+    else if (next.target === 'layer') {
+      store.selectLayer(next.original.id)
+      if (next.kind === 'move') player.seek(next.original.startMs)
+    } else if (next.target === 'text') {
       store.selectText(next.original.id)
       if (next.kind === 'move') player.seek(next.original.startMs)
     } else {
@@ -440,6 +448,11 @@ export function Timeline({ session, store, player }: Props) {
       else store.resizeText(current.original, current.kind, timeMs)
       return
     }
+    if (current.target === 'layer') {
+      if (current.kind === 'move') store.moveLayer(current.original, deltaMs)
+      else store.resizeLayer(current.original, current.kind, timeMs)
+      return
+    }
     const zooms = store.getState().zooms
     store.setSpan(
       current.original.id,
@@ -463,6 +476,7 @@ export function Timeline({ session, store, player }: Props) {
   const roomy = (region: { startMs: number; endMs: number }): boolean =>
     ((region.endMs - region.startMs) / duration) * width >= REMOVE_MIN_WIDTH_PX
   const now = (): number => player.currentTimeMs
+  const imageName = (file: string): string => state.images.find((image) => image.file === file)?.name ?? file
   const dragHandlers = { onPointerMove: continueDrag, onPointerUp: endDrag, onPointerCancel: endDrag }
 
   return (
@@ -586,6 +600,11 @@ export function Timeline({ session, store, player }: Props) {
           >
             Texto
           </LaneLabel>
+          {state.layers.length > 0 && (
+            <LaneLabel icon={<ImageIcon />} locked={isLocked('layers')} onLock={() => toggleLock('layers')}>
+              Imagens
+            </LaneLabel>
+          )}
           {session.webcam && (
             <VisibilityLabel
               icon={<CameraIcon />}
@@ -896,6 +915,40 @@ export function Timeline({ session, store, player }: Props) {
                 </div>
               ))}
           </div>
+
+          {state.layers.length > 0 && (
+            <div className="lane lane-layers" data-locked={isLocked('layers')} onPointerDown={scrub} onPointerMove={scrub}>
+              {state.layers.map((layer) => (
+                <div
+                  key={layer.id}
+                  className="region layer-block"
+                  data-selected={layer.id === state.selectedLayerId}
+                  title={`${imageName(layer.file)} · ${formatTimecode(layer.startMs)} – ${formatTimecode(layer.endMs)}`}
+                  style={span(layer)}
+                  onPointerDown={beginDrag({ target: 'layer', kind: 'move', original: layer, originX: 0 })}
+                  {...dragHandlers}
+                >
+                  <span
+                    className="region-handle region-handle-start"
+                    onPointerDown={beginDrag({ target: 'layer', kind: 'start', original: layer, originX: 0 })}
+                    {...dragHandlers}
+                  />
+                  <span className="region-icon" aria-hidden="true">
+                    <ImageIcon />
+                  </span>
+                  <span className="cue-label">{imageName(layer.file)}</span>
+                  {layer.id === state.selectedLayerId && roomy(layer) && (
+                    <RegionRemove label="Remover esta imagem" onRemove={() => store.removeLayer(layer.id)} />
+                  )}
+                  <span
+                    className="region-handle region-handle-end"
+                    onPointerDown={beginDrag({ target: 'layer', kind: 'end', original: layer, originX: 0 })}
+                    {...dragHandlers}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
 
           {session.webcam && (
             <div className="lane lane-companion lane-webcam">

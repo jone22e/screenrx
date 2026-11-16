@@ -42,5 +42,7 @@ export const SESSION_FILES = {
   dubZh: 'dub-zh.m4a',
   dubPt: 'dub-pt.m4a',
   /** Background music brought in by the user; replaced whole when another file is chosen. */
-  music: 'music.m4a'
+  music: 'music.m4a',
+  /** Folder of images brought in by the user, for the layers. */
+  assets: 'assets'
 } as const

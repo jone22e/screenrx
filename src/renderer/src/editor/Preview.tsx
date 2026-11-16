@@ -24,6 +24,9 @@ type Press =
   | { kind: 'text'; id: string; grabX: number; grabY: number }
   /** Dragging a corner handle of the selected text: the size follows the distance from the text's centre. */
   | { kind: 'text-resize'; id: string; centerX: number; centerY: number; startDistance: number; startSize: number }
+  | { kind: 'layer'; id: string; grabX: number; grabY: number }
+  /** Dragging a corner handle of the picked image: its width follows the distance from its centre. */
+  | { kind: 'layer-resize'; id: string; centerX: number; centerY: number; startDistance: number; startSize: number }
   | { kind: 'picture' }
   /** Dragging the part of the recording in use, when it fills a frame of another shape. */
   | { kind: 'crop'; startX: number; startY: number; cropX: number; cropY: number }
@@ -44,7 +47,7 @@ function snapToCentre(player: PreviewPlayer, x: number, y: number): { x: number;
   return { x: vertical ? 0.5 : x, y: horizontal ? 0.5 : y }
 }
 
-const settingsOf = (state: EditorState): PreviewSettings => ({
+const settingsOf = (state: EditorState, store: EditorStore): PreviewSettings => ({
   timeMap: state.timeMap,
   zooms: state.zooms,
   speeds: state.speeds,
@@ -53,6 +56,9 @@ const settingsOf = (state: EditorState): PreviewSettings => ({
   captions: state.captions,
   texts: state.texts,
   selectedTextId: state.selectedTextId,
+  layers: state.layers,
+  selectedLayerId: state.selectedLayerId,
+  images: store.session.images,
   safeAreas: safeAreas.getState(),
   objectTrack: state.objectTrack,
   audio: state.audio,
@@ -81,12 +87,12 @@ export function Preview({ session, store, onPlayerReady }: Props) {
 
   useEffect(() => {
     if (!canvas.current) return
-    const instance = new PreviewPlayer(canvas.current, session, settingsOf(store.getState()))
+    const instance = new PreviewPlayer(canvas.current, session, settingsOf(store.getState(), store))
     player.current = instance
     const stopListening = instance.onError(() => setFailed(true))
     // The player redraws itself whenever the project (or a preview preference) changes.
-    const unsubscribe = store.subscribe(() => instance.update(settingsOf(store.getState())))
-    const unsubscribeSafeAreas = safeAreas.subscribe(() => instance.update(settingsOf(store.getState())))
+    const unsubscribe = store.subscribe(() => instance.update(settingsOf(store.getState(), store)))
+    const unsubscribeSafeAreas = safeAreas.subscribe(() => instance.update(settingsOf(store.getState(), store)))
     onPlayerReady(instance)
     return () => {
       unsubscribe()
@@ -111,15 +117,24 @@ export function Preview({ session, store, onPlayerReady }: Props) {
     const caption = instance.captionBox
     // The text drawn last is on top, so it is the one a press lands on.
     const text = [...instance.textBoxes].reverse().find((candidate) => containsPoint(candidate.box, x, y)) ?? null
-    // A corner handle of the selected text is grabbed before anything under it.
-    const { selectedTextId } = store.getState()
+    const layer = [...instance.layerBoxes].reverse().find((candidate) => containsPoint(candidate.box, x, y)) ?? null
+    // A corner handle of the selected text or image is grabbed before anything under it.
+    const { selectedTextId, selectedLayerId } = store.getState()
+    const cornerAt = (box: Rect): number => {
+      const { frame, handle: side } = textSelectionFrame(box, output)
+      return frameCorners(frame).findIndex((point) => Math.abs(point.x - x) <= side && Math.abs(point.y - y) <= side)
+    }
     const selected = instance.textBoxes.find((candidate) => candidate.id === selectedTextId) ?? null
     let handle: { id: string; box: Rect; corner: number } | null = null
     if (selected) {
-      const { frame, handle: side } = textSelectionFrame(selected.box, output)
-      const reach = side
-      const corner = frameCorners(frame).findIndex((point) => Math.abs(point.x - x) <= reach && Math.abs(point.y - y) <= reach)
+      const corner = cornerAt(selected.box)
       if (corner >= 0) handle = { id: selected.id, box: selected.box, corner }
+    }
+    const selectedLayer = instance.layerBoxes.find((candidate) => candidate.id === selectedLayerId) ?? null
+    let layerHandle: { id: string; box: Rect; corner: number } | null = null
+    if (selectedLayer) {
+      const corner = cornerAt(selectedLayer.box)
+      if (corner >= 0) layerHandle = { id: selectedLayer.id, box: selectedLayer.box, corner }
     }
     return {
       instance,
@@ -129,7 +144,9 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       picture: picture && containsPoint(picture, x, y) ? picture : null,
       caption: caption && containsPoint(caption, x, y) ? caption : null,
       text,
-      handle
+      layer,
+      handle,
+      layerHandle
     }
   }
 
@@ -159,11 +176,33 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       }
       return
     }
+    if (at.layerHandle) {
+      const centerX = at.layerHandle.box.x + at.layerHandle.box.width / 2
+      const centerY = at.layerHandle.box.y + at.layerHandle.box.height / 2
+      const layer = store.getState().layers.find((candidate) => candidate.id === at.layerHandle?.id)
+      press.current = {
+        kind: 'layer-resize',
+        id: at.layerHandle.id,
+        centerX,
+        centerY,
+        startDistance: Math.max(1, Math.hypot(at.x - centerX, at.y - centerY)),
+        startSize: layer?.sizeRatio ?? 0.18
+      }
+      return
+    }
+    // Texts over the caption over the images: a press lands on the topmost.
+    const onLayer = at.layer && !at.text && !at.caption ? at.layer : null
     if (at.text) store.selectText(at.text.id)
-    // A press anywhere else lets go of the selected text: its frame and panel are gone.
-    else if (!at.handle && store.getState().selectedTextId) store.selectText(null)
+    else if (onLayer) store.selectLayer(onLayer.id)
+    // A press anywhere else lets go of the selected text or image: its frame and panel are gone.
+    else {
+      if (store.getState().selectedTextId) store.selectText(null)
+      if (store.getState().selectedLayerId) store.selectLayer(null)
+    }
     press.current = at.text
       ? { kind: 'text', id: at.text.id, grabX: at.x - (at.text.box.x + at.text.box.width / 2), grabY: at.y - (at.text.box.y + at.text.box.height / 2) }
+      : onLayer
+        ? { kind: 'layer', id: onLayer.id, grabX: at.x - (onLayer.box.x + onLayer.box.width / 2), grabY: at.y - (onLayer.box.y + onLayer.box.height / 2) }
       : grabbed
       ? {
           kind: at.caption ? 'caption' : 'webcam',
@@ -228,17 +267,28 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       store.setTextStyle(current.id, { position }, 'text-move')
       return
     }
+    if (current?.kind === 'layer') {
+      const position = snapToCentre(at.instance, (at.x - current.grabX) / at.output.width, (at.y - current.grabY) / at.output.height)
+      store.setLayer(current.id, { position }, 'layer-move')
+      return
+    }
+    if (current?.kind === 'layer-resize') {
+      const distance = Math.hypot(at.x - current.centerX, at.y - current.centerY)
+      store.setLayer(current.id, { sizeRatio: current.startSize * (distance / current.startDistance) }, 'layer-resize')
+      return
+    }
     if (current?.kind === 'caption') {
       const position = snapToCentre(at.instance, (at.x - current.grabX) / at.output.width, (at.y - current.grabY) / at.output.height)
       store.setCaptionStyle({ position }, 'caption-move')
       return
     }
     const { background, selectedZoomId } = store.getState()
-    event.currentTarget.style.cursor = at.handle
-      ? at.handle.corner === 0 || at.handle.corner === 3
+    const corner = at.handle ?? at.layerHandle
+    event.currentTarget.style.cursor = corner
+      ? corner.corner === 0 || corner.corner === 3
         ? 'nwse-resize'
         : 'nesw-resize'
-      : at.text || at.caption || at.picture
+      : at.text || at.caption || at.picture || at.layer
       ? 'grab'
       : selectedZoomId !== null
         ? 'crosshair'
@@ -281,6 +331,8 @@ export function Preview({ session, store, onPlayerReady }: Props) {
       current?.kind === 'caption' ||
       current?.kind === 'text' ||
       current?.kind === 'text-resize' ||
+      current?.kind === 'layer' ||
+      current?.kind === 'layer-resize' ||
       current?.kind === 'crop'
     ) {
       player.current?.setGuides({ vertical: false, horizontal: false })

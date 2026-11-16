@@ -188,7 +188,18 @@ Falta a interface.
 Pronto quando: acelerar um trecho a 3× com a voz mantendo o tom exporta certo
 e o atalho `S` divide um corte no cursor.
 
-## Fase G1 — Imagens, logo e sticker (M)
+## Fase G1 — Imagens, logo e sticker (M) — FEITA em 2026-11-16
+
+O que entrou: `project.layers` com `ImageLayer`, pasta `assets/` da sessão
+com `ImageImporter`, imagens servidas pelo protocolo de mídia, desenho no
+`composeFrame` entre a câmera e as legendas (rotação, opacidade, cantos),
+aba Camadas com ordem, arrasto e redimensionamento no preview, faixa
+"Imagens" na linha do tempo. Verificado por testes (layout, parser,
+importador com PNG e SVG reais) e pelo harness visual com logo e sticker
+girado; a aba e o arrasto não foram usados no app. Detalhes em
+`docs/ARCHITECTURE.md`, "Camadas de imagem".
+
+Plano original, para referência:
 
 Primeira "camada" de verdade, sem mexer no modelo de tempo.
 
