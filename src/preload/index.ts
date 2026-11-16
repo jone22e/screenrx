@@ -114,7 +114,9 @@ const api: ScreenRxApi = {
     cancel: () => invoke('ai:cancel'),
     autoEdit: (sessionId, request, choice) => invoke('ai:auto-edit', sessionId, request, choice),
     autoEditRerun: (sessionId, request, choice) => invoke('ai:auto-edit-rerun', sessionId, request, choice),
-    onAutoEditProgress: (listener) => subscribe('ai:auto-edit-progress', listener)
+    onAutoEditProgress: (listener) => subscribe('ai:auto-edit-progress', listener),
+    onAutoEditPlan: (listener) => subscribe('ai:auto-edit-plan', listener),
+    onAutoEditWorker: (listener) => subscribe('ai:auto-edit-worker', listener)
   },
   export: {
     start: (sessionId, overrides = null) => invoke('export:start', sessionId, overrides),

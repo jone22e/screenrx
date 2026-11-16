@@ -287,7 +287,14 @@ async function bootstrap(): Promise<void> {
     }),
     suggestions: new CutSuggestionService(ai, sessions, createLogger('ai')),
     assistant: new AssistantService(ai, sessions, createLogger('ai')),
-    autoEdit: new AutoEditService({ ai, sessions, logger: createLogger('auto-edit'), onProgress: (progress) => windows.broadcast('ai:auto-edit-progress', progress) }),
+    autoEdit: new AutoEditService({
+      ai,
+      sessions,
+      logger: createLogger('auto-edit'),
+      onProgress: (progress) => windows.broadcast('ai:auto-edit-progress', progress),
+      onPlan: (sessionId, plan) => windows.broadcast('ai:auto-edit-plan', { sessionId, plan }),
+      onWorker: (sessionId, result) => windows.broadcast('ai:auto-edit-worker', { sessionId, result })
+    }),
     translations: new CaptionTranslationService(ai, createLogger('ai')),
     aiSetup,
     waveforms: new WaveformService(ffmpeg, sessions),

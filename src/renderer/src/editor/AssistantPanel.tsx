@@ -8,6 +8,7 @@ import { useDictation } from '../common/dictation'
 import { openSettings } from '../common/settingsScreen'
 import type { EditorStore } from './EditorStore'
 import { applyAssistantActions } from './assistantActions'
+import { AutoEditPanel } from './AutoEditPanel'
 import { AiChoicePicker } from './AiChoicePicker'
 import { AssistantSuggestions } from './AssistantSuggestions'
 import { CloseIcon, GearIcon, MicIcon, SparklesIcon } from './icons'
@@ -137,6 +138,7 @@ export function AssistantPanel({ store }: Props) {
 
       {mode === 'simple' ? (
         <div className="assistant-messages">
+          <AutoEditPanel store={store} />
           <AssistantSuggestions store={store} />
         </div>
       ) : (

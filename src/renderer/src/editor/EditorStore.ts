@@ -467,6 +467,47 @@ export class EditorStore {
     this.autoEdit = { base, steps, after: this.project }
   }
 
+  /**
+   * The team starts: from here until `endTeam`, every action applied in the
+   * open goes into one undo step (the team's), and the project of now is
+   * what "take this agent's work back" returns to.
+   */
+  beginTeam(): void {
+    if (this.state.captions.cues.length === 0 && this.transcript) this.rebuildCaptions()
+    this.autoEdit = { base: this.project, steps: [], after: this.project }
+    this.gestureKey = null
+    this.batch = { opened: false }
+  }
+
+  /**
+   * One agent's actions applied one at a time, in the open, `stepMs` apart,
+   * with `onAction` told of each so the agent's cursor can go there. Several
+   * agents may do this at once. Resolves when the agent is done.
+   */
+  async applyWorkerLive(
+    role: WorkerRole,
+    actions: readonly AssistantAction[],
+    translate: (language: CaptionLanguage) => void,
+    stepMs: number,
+    onAction: (action: AssistantAction, index: number) => void
+  ): Promise<void> {
+    for (const [index, action] of actions.entries()) {
+      // The team closed (or was undone) while this agent was still landing: nothing more lands.
+      if (!this.autoEdit || this.batch === null) return
+      onAction(action, index)
+      applyAssistantActions(this, [action], translate)
+      if (index < actions.length - 1) await new Promise<void>((resolve) => setTimeout(resolve, stepMs))
+    }
+    if (this.autoEdit && this.batch !== null && actions.length > 0) this.autoEdit = { ...this.autoEdit, steps: [...this.autoEdit.steps, { role, actions }], after: this.project }
+  }
+
+  /** The team is done: the undo step closes and the per-agent undo knows the final project. */
+  endTeam(): void {
+    this.batch = null
+    this.gestureKey = null
+    if (this.autoEdit) this.autoEdit = { ...this.autoEdit, after: this.project }
+  }
+
   /** Whether an agent's work can still be taken back on its own: nothing was edited since the agents finished. */
   canUndoWorker(role: WorkerRole): boolean {
     return this.autoEdit !== null && this.autoEdit.after === this.project && this.autoEdit.steps.some((step) => step.role === role)
@@ -1547,6 +1588,7 @@ export class EditorStore {
   undo(): void {
     const previous = this.past.pop()
     if (!previous) return
+    this.dropTeamInProgress()
     this.future.push(this.project)
     this.restore(previous)
   }
@@ -1554,8 +1596,16 @@ export class EditorStore {
   redo(): void {
     const next = this.future.pop()
     if (!next) return
+    this.dropTeamInProgress()
     this.past.push(this.project)
     this.restore(next)
+  }
+
+  /** Undo while the team is still landing takes the team down: agents still landing stop, and nothing more lands outside the step. */
+  private dropTeamInProgress(): void {
+    if (this.batch === null) return
+    this.batch = null
+    this.autoEdit = null
   }
 
   /** The project as it stands, for rendering an export of exactly what is on screen. */

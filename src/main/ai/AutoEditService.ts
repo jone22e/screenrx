@@ -23,6 +23,10 @@ export interface AutoEditServiceDeps {
   sessions: SessionStore
   logger: Logger
   onProgress: (progress: AutoEditProgress) => void
+  /** The director's plan, as soon as it is there. */
+  onPlan: (sessionId: string, plan: AutoEditPlan) => void
+  /** Each agent's work the moment it is done, already assembled against the cutter's cuts when that is known. */
+  onWorker: (sessionId: string, result: WorkerResult) => void
 }
 
 /** The effort each role works at: the director thinks hard, the cutter and the captioner carefully, the rest quickly. */
@@ -61,8 +65,32 @@ export class AutoEditService {
       throw error
     }
     this.deps.logger.info('director planned', { sessionId, chapters: plan.chapters.length, workers: plan.workers.map((worker) => worker.role), elapsedMs: Date.now() - startedAt })
+    this.deps.onPlan(sessionId, plan)
 
-    const workers = await Promise.all(plan.workers.map((worker) => this.runWorker(sessionId, worker.role, sheet, plan, facts, base, '')))
+    // Each agent is handed over the moment it is done. The cutter's cuts decide what of the others is kept,
+    // so an agent that finishes before the cutter waits for it; the cutter itself goes out at once.
+    const hasCutter = plan.workers.some((worker) => worker.role === 'cutter')
+    let cutter: WorkerResult | null = null
+    const waiting: WorkerResult[] = []
+    const handOver = (result: WorkerResult): void => {
+      const [assembled] = assembleWorkers(cutter ? [cutter, result] : [result], request.edit.cuts, plan.chapters).filter((entry) => entry.role === result.role)
+      this.deps.onWorker(sessionId, assembled ?? result)
+    }
+    const workers = await Promise.all(
+      plan.workers.map(async (worker) => {
+        const result = await this.runWorker(sessionId, worker.role, sheet, plan, facts, base, '')
+        if (result.role === 'cutter') {
+          cutter = result
+          this.deps.onWorker(sessionId, result)
+          for (const queued of waiting.splice(0)) handOver(queued)
+        } else if (hasCutter && !cutter) {
+          waiting.push(result)
+        } else {
+          handOver(result)
+        }
+        return result
+      })
+    )
     return { plan, workers: assembleWorkers(workers, request.edit.cuts, plan.chapters) }
   }
 

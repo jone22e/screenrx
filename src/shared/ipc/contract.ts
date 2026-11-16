@@ -13,7 +13,7 @@ import type { CaptureDevices } from '../models/devices'
 import type { DubProgress, DubRequest, DubStatus, DubTrack } from '../models/dub'
 import type { FilterRenderProgress, FilterRenderRequest, FilterTrack } from '../models/filters'
 import type { ProjectTemplate } from '../models/template'
-import type { AutoEditProgress, AutoEditRequest, AutoEditRerunRequest, AutoEditResult, WorkerResult } from '../models/autoEdit'
+import type { AutoEditPlan, AutoEditProgress, AutoEditRequest, AutoEditRerunRequest, AutoEditResult, WorkerResult } from '../models/autoEdit'
 import type {
   EditorClip,
   EditorImage,
@@ -169,6 +169,8 @@ export interface IpcEventContract {
   'update:state-changed': UpdateState
   'track:progress': { sessionId: string; fraction: number }
   'ai:auto-edit-progress': AutoEditProgress
+  'ai:auto-edit-plan': { sessionId: string; plan: AutoEditPlan }
+  'ai:auto-edit-worker': { sessionId: string; result: WorkerResult }
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -323,6 +325,10 @@ export interface ScreenRxApi {
     /** One agent again, on the same plan, with a further instruction. */
     autoEditRerun(sessionId: string, request: AutoEditRerunRequest, choice: AiChoice): Promise<IpcResult<WorkerResult>>
     onAutoEditProgress(listener: (progress: AutoEditProgress) => void): Unsubscribe
+    /** The director's plan, as soon as it is written. */
+    onAutoEditPlan(listener: (event: { sessionId: string; plan: AutoEditPlan }) => void): Unsubscribe
+    /** Each agent's work the moment it is done, to be applied while the others still think. */
+    onAutoEditWorker(listener: (event: { sessionId: string; result: WorkerResult }) => void): Unsubscribe
   }
   export: {
     /**

@@ -789,16 +789,26 @@ EditorStore.applyAutoEdit: um passo de desfazer por agente · cursores coloridos
 - **O que sai do Mac**: só texto — transcrição, cliques e deslocamento do
   cursor por janela de 10 s, nomes de arquivos de imagens e música, estado da
   edição, briefing. Nenhum quadro.
-- **No editor** (`AutoEditDialog.tsx`): briefing → progresso por agente
-  (evento `ai:auto-edit-progress`) → resultado por agente com cada ação e seu
-  motivo. `EditorStore.applyAutoEdit` aplica cada agente como um passo de
-  desfazer; `undoWorker` tira o trabalho de um só agente (volta ao projeto de
-  antes da equipe e reaplica os outros, como um passo), e `replaceWorker`
-  troca o de um agente refeito (`ai:auto-edit-rerun`, com instrução extra) —
-  os dois só enquanto nada mais foi editado depois da equipe; depois disso,
-  ⌘Z. Os **cursores** (`common/agentCursors.ts`, `AgentCursorsLayer` na linha
-  do tempo) varrem as ações de cada agente em até 2 s, em paralelo, com o
-  motivo ao lado; são só espetáculo: o trabalho já está aplicado.
+- **No editor, sem modal** (`AutoEditPanel.tsx`, no alto da ferramenta
+  Assistente, ao lado do preview e da linha do tempo; o botão "Editar com IA"
+  da barra só abre essa aba, via `common/sidebarNav.ts`): briefing (rede,
+  duração alvo, tom, agentes) → uma linha por agente com estado e cronômetro →
+  detalhes de cada um ao clicar (notas, ações com motivo, "Desfazer este",
+  "Refazer com…"). O main emite o plano (`ai:auto-edit-plan`) e **cada agente
+  assim que termina** (`ai:auto-edit-worker`, já montado contra os cortes do
+  Cortador — quem termina antes dele espera), e o editor aplica as ações
+  **uma a uma, à vista** (`EditorStore.applyWorkerLive`, ~220 ms entre ações,
+  no máximo 4 s por agente), movendo o cursor colorido do agente
+  (`common/agentCursors.ts`, `AgentCursorsLayer`) para a pista e o instante de
+  cada ação, com o motivo ao lado; vários agentes pousam ao mesmo tempo.
+  `beginTeam`/`endTeam` fecham tudo em **um passo de desfazer** (⌘Z desfaz a
+  equipe inteira); `undoWorker` tira o trabalho de um só agente (volta ao
+  projeto de antes da equipe e reaplica os outros, como um passo) e
+  `replaceWorker` troca o de um agente refeito (`ai:auto-edit-rerun`) — os dois
+  só enquanto nada mais foi editado depois; `beginTeam` também constrói as
+  legendas da transcrição quando o projeto ainda não as tem. ⌘Z no meio do
+  pouso derruba a equipe: o que ainda estava pousando para, e nada mais
+  entra fora do passo (`autoEditTeam.test.ts`).
 - **Primeira rodada real** (2026-11-16, `AutoEditService.live.test.ts`, com
   `SCREENRX_AI_LIVE=1 SCREENRX_AI_SESSION=<id>`, Claude, modelo padrão):
   gravação de 1:24 com 189 palavras, briefing "Reels, 1:00, tutorial direto".
@@ -813,7 +823,13 @@ EditorStore.applyAutoEdit: um passo de desfazer por agente · cursores coloridos
   (os prompts agora exigem índices para fala) e agentes pedindo para "conferir
   na forma de onda" (agora sabem que ninguém ouve nem vê a gravação). Nenhuma
   ação foi aplicada ao projeto nessa rodada. O projeto completo está em
-  `docs/PLANO-EDICAO-POR-IA.md`.
+  `docs/PLANO-EDICAO-POR-IA.md`. **No app** (mesmo dia, cópia da gravação
+  "Teste da edição por IA", dirigido por Playwright em `tmp/autoedit-app/run.mjs`,
+  fora do git): o Diretor em esforço médio levou 30 s, a equipe inteira 58 s;
+  5 cortes, 7 zooms, 3 regiões de velocidade, 6 textos e 65 legendas pousaram à
+  vista, com os cursores; o painel passou a "Pronto em 58 s" no mesmo instante
+  (uma espera de minutos vista antes era do Playwright consultando o DOM por
+  papel acessível, não do app).
 
 ### Sugestões de corte por IA
 

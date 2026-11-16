@@ -198,7 +198,11 @@ custo estimado (número de chamadas) antes de começar.
 
 ## 6. Entregas — I1 a I4 FEITAS em 2026-11-16
 
-Implementado na mesma sessão em que o projeto foi escrito: pool no
+Depois da primeira rodada no app, Jone pediu a edição à vista, sem modal, e
+um painel mais profissional: a equipe passou para o painel do Assistente, com
+cada agente pousando suas ações uma a uma na linha do tempo assim que termina,
+cursor colorido junto, e detalhes só ao abrir cada agente. Implementado na
+mesma sessão em que o projeto foi escrito: pool no
 `AiCliService`, ficha da gravação, Diretor, cinco agentes com filtro de
 ações, montagem com regras de conflito, diálogo "Editar com IA" com
 progresso, lista por agente, cursores na linha do tempo, desfazer e refazer

@@ -1,3 +1,4 @@
+/* eslint-disable no-console -- a live run reports what the tools answered */
 import { writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -50,7 +51,7 @@ describe.runIf(process.env['SCREENRX_AI_LIVE'] === '1' && Boolean(process.env['S
     }
     const ai = new AiCliService({ logger, searchDirs: defaultAiSearchDirs(process.env, os.homedir()), env: process.env })
     const progress: AutoEditProgress[] = []
-    const service = new AutoEditService({ ai, sessions, logger, onProgress: (entry) => progress.push(entry) })
+    const service = new AutoEditService({ ai, sessions, logger, onProgress: (entry) => progress.push(entry), onPlan: () => undefined, onWorker: () => undefined })
     const startedAt = Date.now()
     const result = await service.run(
       sessionId,

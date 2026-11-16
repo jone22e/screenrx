@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useState, useSyncExternalStore } from 'react'
+import { useSidebarNav } from '../common/sidebarNav'
 import { BACKGROUND_PRESETS } from '@engine/rendering/backgrounds'
 import { nextKeptSourceTime } from '@engine/time/timeMapping'
 import { ZOOM_LIMITS } from '@engine/zoom/zoomConfig'
@@ -53,6 +54,7 @@ interface Props {
 }
 
 type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'layers' | 'cursor' | 'audio' | 'dub' | 'format' | 'effects' | 'background' | 'webcam'
+const TABS: readonly Tab[] = ['assistant', 'cuts', 'zoom', 'captions', 'text', 'layers', 'cursor', 'audio', 'dub', 'format', 'effects', 'background', 'webcam']
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
 const speedChip = (value: number): string => `${String(value).replace('.', ',')}×`
@@ -70,6 +72,13 @@ const seconds = (ms: number): string => `${decimal(ms / 1000)} s`
 export function Sidebar({ session, store, player }: Props) {
   const state = useSyncExternalStore(store.subscribe, store.getState)
   const [chosen, setChosen] = useState<Tab>('cuts')
+  // "Editar com IA" on the toolbar asks for the assistant, where the team works: a request not seen yet is taken during render.
+  const wanted = useSidebarNav()
+  const [seenNav, setSeenNav] = useState(wanted?.at ?? 0)
+  if (wanted && wanted.at !== seenNav) {
+    setSeenNav(wanted.at)
+    if (TABS.includes(wanted.tab as Tab)) setChosen(wanted.tab as Tab)
+  }
   // Selecting a region on the timeline brings up its settings.
   const tab: Tab = state.selectedZoomId
     ? 'zoom'
