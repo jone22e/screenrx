@@ -934,7 +934,8 @@ vídeo sem recodificar (segundos, mesmo tamanho), corta microfone e som do
 sistema no mesmo ponto (a webcam é recodificada, pois tem keyframes próprios),
 desloca telemetria e transcrição para começar em zero,
 e grava cada episódio como gravação própria ("N. Título", na série); progresso
-em `library:split-progress`; a original fica. Na grade agrupada,
+em `library:split-progress`; a original fica. Ao terminar, o diálogo oferece
+o passo final **"Editar todos com IA"** (abaixo). Na grade agrupada,
 cada grupo é uma
 **prateleira** (`Shelf.tsx`, como num serviço de streaming): os cartões lado a
 lado numa fileira que rola na horizontal, com setas nas bordas que só aparecem
@@ -946,6 +947,59 @@ ficam cada um numa linha sob a capa. Rodapé: total de gravações e
 tempo, e espaço usado. As reuniões ao vivo do Screen Live viram um banner cada
 ("está ao vivo · começou há N min · N participantes") com Ignorar e Gravar reunião;
 sem reunião, nada aparece.
+
+### Editar todos com IA (uma série inteira)
+
+```
+briefing único (rede, duração alvo, tom, agentes)   ← prateleira da série, ou fim do "Gerar série"
+      ↓ SeriesAutoEditRunner (renderer, app/seriesAutoEdit.ts), um episódio por vez
+editor:open → EditorStore fora da tela → beginTeam → ai:auto-edit → applyWorkerLive por agente → endTeam
+      ↓ project:save só quando a equipe do episódio terminou bem → próximo episódio
+```
+
+A equipe de edição (`AutoEditService`, a mesma do editor) percorre os
+episódios de uma série **um depois do outro**, com o mesmo `AutoEditBrief`, sem
+abrir o editor. Entra por dois lugares: o botão "Editar todos com IA" no título
+da prateleira (`Shelf.tsx`, aparece ao passar o mouse, ao lado de renomear/
+remover; abre `SeriesEditDialog.tsx` com a lista dos episódios e o briefing) e
+o passo final do "Gerar série" (`SeriesDialog.tsx`, fase `made`: "N episódios
+criados… Editar todos com IA" ou "Concluir"). O formulário do briefing é o
+mesmo do painel do editor (`editor/AutoEditBriefForm.tsx`, sem a duração da
+gravação, já que os episódios diferem).
+
+- **Como roda** (`app/seriesAutoEdit.ts`, `SeriesAutoEditRunner`, um singleton
+  `seriesAutoEdit` ligado à ponte do preload; as dependências são injetáveis e
+  os testes em `seriesAutoEdit.test.ts` usam um main em miniatura): para cada
+  episódio, `editor:open` traz a sessão, um `EditorStore` é criado **fora da
+  tela** com uma função de gravar que só **captura** o projeto (nada vai ao
+  disco), `beginTeam` abre o passo (e constrói as legendas da transcrição quando
+  o projeto não as tem), `ai:auto-edit` roda o Diretor e os agentes, cada
+  `ai:auto-edit-worker` pousa com `applyWorkerLive` (sem pausa entre ações, sem
+  cursores), `endTeam` fecha, as traduções pedidas por `caption-language`
+  terminam, `flush` força a captura, e só então `project:save` grava o projeto
+  capturado. O `progress` da gravação vira "Em edição" na listagem seguinte;
+  como `project:save` não emite `library:changed`, o runner avisa a biblioteca
+  por `common/libraryRefresh.ts`, que `useLibrary` também escuta.
+- **Um por vez**: o próximo episódio só começa quando a resposta do anterior
+  voltou e as ações pousaram — nunca duas equipes no pool do `AiCliService`.
+  `start` numa corrida em andamento devolve a corrida atual; o botão da
+  prateleira some enquanto a equipe trabalha e o "Gerar série" avisa.
+- **Progresso na prateleira** (`SeriesEditStatus.tsx`, no `status` da
+  `Shelf`, sob o título da série): "Editando N de M: Título · tempo", o estado
+  de cada agente (`ai:auto-edit-progress` filtrado pelo episódio atual, o
+  resumo do Diretor por `ai:auto-edit-plan`) e uma linha por episódio (na fila,
+  editando, N ações, falhou, cancelado). Fica até "Fechar" depois de pronto.
+- **Cancelar** chama `ai:cancel`: o episódio em andamento recebe
+  `ai-cancelled` e **não é gravado** (o store fora da tela morre com as ações
+  que já tinham pousado), os já gravados ficam, os seguintes passam a
+  "cancelado" sem abrir. Um episódio que falha (IA sem resposta, projeto
+  inválido) é marcado e a fila continua.
+- **Editor bloqueado para quem está na fila**: enquanto a corrida dura,
+  abrir no editor um episódio ainda na fila ou em edição mostra um aviso na
+  biblioteca em vez de abrir (`Home.openRecording`), para o editor e o runner
+  nunca gravarem o mesmo `project.json`; os já editados abrem normalmente, e
+  ⌘Z lá desfaz a equipe inteira como no editor.
+- **O que sai do Mac**: o mesmo texto da edição por IA no editor, por episódio.
 
 ### Janelas
 

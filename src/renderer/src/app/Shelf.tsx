@@ -2,7 +2,7 @@ import type { DragEvent, ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { SESSION_SERIES_MAX_LENGTH } from '@shared/models/session'
 import { RECORDING_DRAG_TYPE } from './RecordingCard'
-import { CloseIcon, RenameIcon } from './icons'
+import { CloseIcon, RenameIcon, SparklesIcon } from './icons'
 
 interface Props {
   /** The heading over the row. */
@@ -15,6 +15,10 @@ interface Props {
   onRemove?: () => void
   /** Gives the series a new name. */
   onRename?: (name: string) => void
+  /** For a series with recordings: the team edits them all, one after the other. */
+  onEditAll?: () => void
+  /** What is going on with the row (the team's progress), under the heading. */
+  status?: ReactNode
   children: ReactNode
 }
 
@@ -32,7 +36,7 @@ const ChevronIcon = ({ direction }: { direction: 'left' | 'right' }) => (
  * items side by side, and a page's worth of them scrolled at a time with the
  * arrows at the edges, which only show where there is more to see.
  */
-export function Shelf({ title, count, onDropRecording, onRemove, onRename, children }: Props) {
+export function Shelf({ title, count, onDropRecording, onRemove, onRename, onEditAll, status, children }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const [reach, setReach] = useState({ before: false, after: false })
   const [dropping, setDropping] = useState(false)
@@ -153,7 +157,13 @@ export function Shelf({ title, count, onDropRecording, onRemove, onRename, child
             </button>
           </span>
         )}
+        {count > 0 && onEditAll && (
+          <button className="shelf-edit-all" title="Editar todos com IA: a equipe de agentes edita cada episódio da série, um depois do outro" onClick={onEditAll}>
+            <SparklesIcon /> Editar todos com IA
+          </button>
+        )}
       </h2>
+      {status}
       {count === 0 && <p className="shelf-empty">Arraste gravações para cá, ou use "Série" no cartão de uma gravação.</p>}
       <div className="shelf-body">
         <button className="shelf-arrow shelf-arrow-before" aria-label="Anteriores" title="Anteriores" tabIndex={reach.before ? 0 : -1} onClick={() => page(-1)}>

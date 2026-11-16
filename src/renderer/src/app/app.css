@@ -1598,3 +1598,147 @@ body {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* --- "Editar todos com IA": the team through a series, on its shelf ---------------------- */
+
+.shelf-edit-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  margin-left: 6px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  opacity: 0;
+}
+
+.shelf:hover .shelf-edit-all,
+.shelf-edit-all:focus-visible {
+  opacity: 1;
+}
+
+.shelf-edit-all:hover {
+  background: rgba(79, 124, 255, 0.12);
+  border-color: rgba(79, 124, 255, 0.35);
+}
+
+.shelf-edit-all svg {
+  width: 14px;
+  height: 14px;
+}
+
+.series-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+}
+
+.series-edit[data-phase='working'] {
+  border-color: rgba(79, 124, 255, 0.35);
+}
+
+.series-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.series-edit-headline {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.series-edit[data-phase='working'] .series-edit-headline {
+  color: var(--accent);
+}
+
+.series-edit-agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+}
+
+.series-edit-agents li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.series-edit-agents li[data-stage='thinking'] {
+  color: var(--text);
+}
+
+.series-edit-stage {
+  color: var(--text-muted);
+}
+
+.series-edit-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 2px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.series-edit-list li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.series-edit-list li[data-status='editing'] {
+  color: var(--text);
+}
+
+.series-edit-list li[data-status='done'] .series-edit-state {
+  color: #5fd38d;
+}
+
+.series-edit-list li[data-status='failed'] .series-edit-state {
+  color: #ff7a7a;
+}
+
+.series-edit-list li[data-status='editing'] .series-edit-state {
+  color: var(--accent);
+}
+
+.series-edit-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.series-edit-state {
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.series-edit-episodes {
+  max-height: 160px;
+}
+
+.episode-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
