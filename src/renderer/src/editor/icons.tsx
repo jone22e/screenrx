@@ -255,3 +255,18 @@ export const MusicIcon = () => (
     <circle cx="17" cy="16" r="3" />
   </Icon>
 )
+
+export const GaugeIcon = () => (
+  <Icon>
+    <path d="M4 15a8 8 0 0 1 16 0" />
+    <path d="M12 15l4-5" />
+    <circle cx="12" cy="15" r="1.5" />
+  </Icon>
+)
+
+export const FlagIcon = () => (
+  <Icon>
+    <path d="M5 21V4" />
+    <path d="M5 4h12l-2.5 4L17 12H5" />
+  </Icon>
+)

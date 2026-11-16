@@ -32,6 +32,7 @@ function editStateOf(store: EditorStore): AssistantEditState {
     cuts: state.trims.map(({ startMs, endMs }) => ({ startMs, endMs })),
     zooms: state.zooms.map(({ startMs, endMs, scale }) => ({ startMs, endMs, scale })),
     speed: state.exportSettings.speed,
+    speedRegions: state.speeds.map((region) => ({ startMs: region.startMs, endMs: region.endMs, speed: region.speed })),
     hasCaptions: state.captions.cues.length > 0,
     captionsVisible: state.captions.visible,
     captionLanguage: state.captions.language,

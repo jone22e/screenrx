@@ -59,6 +59,9 @@ export function applyAssistantActions(
           store.setExportSettings({ speed: action.speed })
           did(`Velocidade ${String(action.speed).replace('.', ',')}×`, true)
           break
+        case 'speed-region':
+          did(`Trecho ${span(action)} a ${String(action.speed).replace('.', ',')}×`, store.addSpeedSpan(action, action.speed))
+          break
         case 'captions': {
           const ok = store.getState().captions.cues.length > 0
           if (ok) store.setCaptionsVisible(action.visible)

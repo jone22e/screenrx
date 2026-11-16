@@ -3,10 +3,11 @@ import { useState, useSyncExternalStore } from 'react'
 import { BACKGROUND_PRESETS } from '@engine/rendering/backgrounds'
 import { nextKeptSourceTime } from '@engine/time/timeMapping'
 import { ZOOM_LIMITS } from '@engine/zoom/zoomConfig'
+import { SPEED_CONFIG } from '@engine/timeline/speedConfig'
 import { formatTimecode } from '@shared/format'
 import type { EditorSession } from '@shared/models/editor'
 import type { WebcamCorner, WebcamShape } from '@shared/models/project'
-import { BACKGROUND_LIMITS, FRAME_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
+import { BACKGROUND_LIMITS, FRAME_LIMITS, MARKER_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
 import { AssistantPanel } from './AssistantPanel'
 import { AudioPanel } from './AudioPanel'
 import { CaptionsPanel } from './CaptionsPanel'
@@ -26,6 +27,8 @@ import {
   CameraIcon,
   FormatIcon,
   CaptionsIcon,
+  FlagIcon,
+  GaugeIcon,
   MusicIcon,
   VoiceIcon,
   PlusIcon,
@@ -47,6 +50,7 @@ interface Props {
 type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'audio' | 'dub' | 'format' | 'effects' | 'background' | 'webcam'
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
+const speedChip = (value: number): string => `${String(value).replace('.', ',')}×`
 const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
 const seconds = (ms: number): string => `${decimal(ms / 1000)} s`
 
@@ -60,7 +64,7 @@ export function Sidebar({ session, store, player }: Props) {
   // Selecting a region on the timeline brings up its settings.
   const tab: Tab = state.selectedZoomId
     ? 'zoom'
-    : state.selectedTrimId
+    : state.selectedTrimId || state.selectedSpeedId
       ? 'cuts'
       : state.selectedCueId
         ? 'captions'
@@ -120,9 +124,17 @@ export function Sidebar({ session, store, player }: Props) {
 
 function CutsPanel({ session, store, player }: Props) {
   const state = useSyncExternalStore(store.subscribe, store.getState)
-  const { selection, trims, timeMap } = state
+  const { selection, trims, timeMap, speeds, markers } = state
   const removedMs = session.durationMs - timeMap.timelineDurationMs
   const selectedMs = selection ? selection.endMs - selection.startMs : 0
+  const selectedSpeed = speeds.find((region) => region.id === state.selectedSpeedId) ?? null
+  // The factor the next speed region gets; the selected region's, once there is one.
+  const [factor, setFactor] = useState<number>(SPEED_CONFIG.defaultFactor)
+  const currentFactor = selectedSpeed?.speed ?? factor
+  const chooseFactor = (value: number): void => {
+    setFactor(value)
+    if (selectedSpeed) store.setSpeedFactor(selectedSpeed.id, value)
+  }
 
   return (
     <>
@@ -182,6 +194,104 @@ function CutsPanel({ session, store, player }: Props) {
                   onClick={() => store.removeTrim(trim.id)}
                 >
                   <UndoIcon />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section
+        title={selectedSpeed ? 'Velocidade do trecho' : `Velocidade${speeds.length > 0 ? ` (${speeds.length})` : ''}`}
+        aside={selectedSpeed ? `${formatTimecode(selectedSpeed.startMs)} – ${formatTimecode(selectedSpeed.endMs)}` : undefined}
+      >
+        <div className="speed-factors" role="radiogroup" aria-label="Fator de velocidade">
+          {SPEED_CONFIG.factors.map((value) => (
+            <button key={value} className="chip" role="radio" aria-checked={value === currentFactor} onClick={() => chooseFactor(value)}>
+              {speedChip(value)}
+            </button>
+          ))}
+        </div>
+        {selectedSpeed ? (
+          <button className="panel-button panel-button-danger" onClick={() => store.removeSpeed(selectedSpeed.id)}>
+            <TrashIcon /> Remover velocidade
+          </button>
+        ) : (
+          <div className="cut-actions">
+            <button
+              className="panel-button panel-button-primary"
+              disabled={!selection}
+              title="Toca a seleção na velocidade escolhida; o resto do vídeo não muda"
+              onClick={() => {
+                if (selection && store.addSpeedSpan(selection, factor)) store.setSelection(null)
+              }}
+            >
+              <GaugeIcon /> Seleção a {speedChip(factor)}
+            </button>
+            <button
+              className="panel-button"
+              disabled={!player}
+              title="Abre um trecho de alguns segundos a partir da posição do play"
+              onClick={() => player && store.addSpeed(player.currentTimeMs, factor)}
+            >
+              <GaugeIcon /> Daqui
+            </button>
+          </div>
+        )}
+        <p className="panel-hint">
+          A voz mantém o tom. Trechos lentos abaixo de 1× ficam mais longos. A velocidade de todo o vídeo fica ao lado do play.
+        </p>
+        {speeds.length > 0 && !selectedSpeed && (
+          <ul className="cut-list">
+            {speeds.map((region) => (
+              <li key={region.id} className="cut-row" data-selected={region.id === state.selectedSpeedId}>
+                <button
+                  className="cut-row-main"
+                  onClick={() => {
+                    store.selectSpeed(region.id)
+                    player?.seek(region.startMs)
+                  }}
+                >
+                  <span className="cut-row-span">
+                    {formatTimecode(region.startMs)} – {formatTimecode(region.endMs)}
+                  </span>
+                  <span className="cut-row-length">{speedChip(region.speed)}</span>
+                </button>
+                <button className="region-row-remove" aria-label="Remover esta velocidade" title="Remover esta velocidade" onClick={() => store.removeSpeed(region.id)}>
+                  <TrashIcon />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
+
+      <Section title={`Marcadores${markers.length > 0 ? ` (${markers.length})` : ''}`}>
+        <button className="panel-button" disabled={!player} onClick={() => player && store.addMarker(player.currentTimeMs)}>
+          <FlagIcon /> Marcar aqui
+          <kbd className="button-key">M</kbd>
+        </button>
+        <p className="panel-hint">
+          Um lembrete na régua, para voltar depois. <kbd>⇧M</kbd> pula para o próximo. Dê um nome, se quiser.
+        </p>
+        {markers.length > 0 && (
+          <ul className="cut-list marker-list">
+            {markers.map((marker) => (
+              <li key={marker.id} className="cut-row">
+                <button className="cut-row-main" onClick={() => player?.seek(marker.timeMs)}>
+                  <span className="cut-row-span">{formatTimecode(marker.timeMs)}</span>
+                </button>
+                <input
+                  className="marker-label-input"
+                  aria-label={`Nome do marcador em ${formatTimecode(marker.timeMs)}`}
+                  placeholder="Nome"
+                  value={marker.label}
+                  maxLength={MARKER_LIMITS.maxLabelLength}
+                  onChange={(event) => store.setMarkerLabel(marker.id, event.target.value)}
+                  onBlur={() => store.endGesture()}
+                />
+                <button className="region-row-remove" aria-label="Remover este marcador" title="Remover este marcador" onClick={() => store.removeMarker(marker.id)}>
+                  <TrashIcon />
                 </button>
               </li>
             ))}

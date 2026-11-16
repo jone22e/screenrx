@@ -1,6 +1,7 @@
 import { CAPTION_CONFIG } from '@engine/captions/captionConfig'
 import { applyPlatformPreset, platformPreset } from '@engine/export/platformPresets'
 import { captionPlacementOf, captionPlacementY } from '@engine/rendering/safeZones'
+import { SPEED_CONFIG, isSpeedFactor } from '@engine/timeline/speedConfig'
 import type { SpeechSpan } from '@engine/audio/musicLevel'
 import { speechSpans } from '@engine/audio/musicLevel'
 import { buildCues, clipCue, cueText, fitCue, rewordCue } from '@engine/captions/captionCues'
@@ -23,6 +24,8 @@ import type { ObjectTrack, ObjectTrackRequest } from '@shared/models/telemetry'
 import type { EditorSession, MusicTrack } from '@shared/models/editor'
 import type { IpcResult } from '@shared/models/errors'
 import type {
+  Marker,
+  SpeedEffect,
   ExportPreset,
   MusicSettings,
   AudioSettings,
@@ -43,6 +46,8 @@ import type {
   ZoomEffect
 } from '@shared/models/project'
 import {
+  MARKER_LIMITS,
+  speedsOf,
   DEFAULT_MUSIC,
   MUSIC_LIMITS,
   spreadWords,
@@ -69,6 +74,10 @@ export interface EditorState {
   zooms: readonly ZoomEffect[]
   /** Cuts sorted by start time. */
   trims: readonly TrimEffect[]
+  /** Speed regions sorted by start time. */
+  speeds: readonly SpeedEffect[]
+  /** Marked places, sorted by time. */
+  markers: readonly Marker[]
   /** Source ↔ timeline mapping for the current cuts. */
   timeMap: TimeMap
   background: BackgroundSettings
@@ -125,6 +134,7 @@ export interface EditorState {
   /** UI state: never persisted. At most one region is selected at a time. */
   selectedZoomId: string | null
   selectedTrimId: string | null
+  selectedSpeedId: string | null
   selectedCueId: string | null
   selectedTextId: string | null
   /** UI state: a stretch of the recording marked on the timeline, e.g. to cut it. */
@@ -156,17 +166,22 @@ const NO_SPEECH_NOTICE = 'Nenhuma fala foi encontrada nesta trilha de áudio.'
 const createZoomId = (): string => `zoom-${crypto.randomUUID()}`
 const createTrimId = (): string => `trim-${crypto.randomUUID()}`
 const createCueId = (): string => `cue-${crypto.randomUUID()}`
+const createSpeedId = (): string => `speed-${crypto.randomUUID()}`
+const createMarkerId = (): string => `marker-${crypto.randomUUID()}`
+/** Two markers closer than this are one. */
+const MARKER_NEAR_MS = 150
 const createTextId = (): string => `text-${crypto.randomUUID()}`
 
 /** What is selected on the timeline; at most one of these is set. */
 interface Selected {
   zoomId: string | null
   trimId: string | null
+  speedId: string | null
   cueId: string | null
   textId: string | null
 }
 
-const NOTHING_SELECTED: Selected = { zoomId: null, trimId: null, cueId: null, textId: null }
+const NOTHING_SELECTED: Selected = { zoomId: null, trimId: null, speedId: null, cueId: null, textId: null }
 
 const clamp = (value: number, min: number, max: number): number => Math.min(Math.max(value, min), max)
 
@@ -255,6 +270,10 @@ export class EditorStore {
     return this.state.trims.find((trim) => trim.id === this.state.selectedTrimId) ?? null
   }
 
+  get selectedSpeed(): SpeedEffect | null {
+    return this.state.speeds.find((region) => region.id === this.state.selectedSpeedId) ?? null
+  }
+
   get selectedCue(): CaptionCue | null {
     return this.state.captions.cues.find((cue) => cue.id === this.state.selectedCueId) ?? null
   }
@@ -271,6 +290,10 @@ export class EditorStore {
     this.setSelected({ ...NOTHING_SELECTED, trimId })
   }
 
+  selectSpeed(speedId: string | null): void {
+    this.setSelected({ ...NOTHING_SELECTED, speedId })
+  }
+
   selectCue(cueId: string | null): void {
     this.setSelected({ ...NOTHING_SELECTED, cueId })
   }
@@ -280,10 +303,11 @@ export class EditorStore {
   }
 
   private setSelected(selected: Selected): void {
-    const { selectedZoomId, selectedTrimId, selectedCueId, selectedTextId } = this.state
+    const { selectedZoomId, selectedTrimId, selectedSpeedId, selectedCueId, selectedTextId } = this.state
     if (
       selected.zoomId === selectedZoomId &&
       selected.trimId === selectedTrimId &&
+      selected.speedId === selectedSpeedId &&
       selected.cueId === selectedCueId &&
       selected.textId === selectedTextId
     ) {
@@ -293,6 +317,7 @@ export class EditorStore {
       ...this.state,
       selectedZoomId: selected.zoomId,
       selectedTrimId: selected.trimId,
+      selectedSpeedId: selected.speedId,
       selectedCueId: selected.cueId,
       selectedTextId: selected.textId
     }
@@ -416,6 +441,92 @@ export class EditorStore {
     const selection = this.state.selection
     if (!selection || selection.endMs - selection.startMs < TRIM_CONFIG.minDurationMs) return false
     return this.cutSpans([selection])
+  }
+
+  // --- speed regions ------------------------------------------------------------
+
+  /** Plays a stretch starting at `timeMs` at the default factor. Returns whether there was room for it. */
+  addSpeed(timeMs: number, factor: number = SPEED_CONFIG.defaultFactor): boolean {
+    const span = spanForNew(this.state.speeds, timeMs, this.session.durationMs, SPEED_CONFIG.defaultDurationMs, SPEED_CONFIG.minDurationMs)
+    return span ? this.addSpeedSpan(span, factor) : false
+  }
+
+  /**
+   * Plays `span` at `factor`. Regions it overlaps are trimmed around it, or
+   * replaced when it covers them: the newest wish wins. Returns whether the
+   * region was made.
+   */
+  addSpeedSpan(span: TimeSpan, factor: number): boolean {
+    if (!isSpeedFactor(factor)) return false
+    const startMs = clamp(Math.min(span.startMs, span.endMs), 0, this.session.durationMs)
+    const endMs = clamp(Math.max(span.startMs, span.endMs), 0, this.session.durationMs)
+    if (endMs - startMs < SPEED_CONFIG.minDurationMs) return false
+    const region: SpeedEffect = { id: createSpeedId(), type: 'speed', startMs, endMs, speed: factor }
+    const others = this.state.speeds.flatMap((existing): SpeedEffect[] => {
+      if (existing.endMs <= startMs || existing.startMs >= endMs) return [existing]
+      const pieces: SpeedEffect[] = []
+      if (existing.startMs < startMs - SPEED_CONFIG.minDurationMs) pieces.push({ ...existing, endMs: startMs })
+      if (existing.endMs > endMs + SPEED_CONFIG.minDurationMs) pieces.push({ ...existing, id: createSpeedId(), startMs: endMs })
+      return pieces
+    })
+    this.commitSpeeds([...others, region], region.id, null)
+    return true
+  }
+
+  setSpeedFactor(speedId: string, factor: number): void {
+    if (!isSpeedFactor(factor)) return
+    this.commitSpeeds(
+      this.state.speeds.map((region) => (region.id === speedId ? { ...region, speed: factor } : region)),
+      speedId,
+      null
+    )
+  }
+
+  moveSpeed(original: SpeedEffect, deltaMs: number): void {
+    const span = moveSpan(this.state.speeds, original, deltaMs, this.session.durationMs)
+    this.commitSpeeds(this.state.speeds.map((region) => (region.id === original.id ? { ...region, ...span } : region)), original.id, `speed-span:${original.id}`)
+  }
+
+  resizeSpeed(original: SpeedEffect, edge: 'start' | 'end', timeMs: number): void {
+    const span = resizeSpan(this.state.speeds, original, edge, timeMs, this.session.durationMs, SPEED_CONFIG.minDurationMs)
+    this.commitSpeeds(this.state.speeds.map((region) => (region.id === original.id ? { ...region, ...span } : region)), original.id, `speed-span:${original.id}`)
+  }
+
+  removeSpeed(speedId: string): void {
+    this.commitSpeeds(this.state.speeds.filter((region) => region.id !== speedId), null, null)
+  }
+
+  // --- markers ------------------------------------------------------------------
+
+  /** Marks `timeMs`; a marker already within a moment of it is left as is. Returns the marker's id. */
+  addMarker(timeMs: number, label = ''): string {
+    const clamped = clamp(timeMs, 0, this.session.durationMs)
+    const existing = this.project.markers.find((marker) => Math.abs(marker.timeMs - clamped) < MARKER_NEAR_MS)
+    if (existing) return existing.id
+    if (this.project.markers.length >= MARKER_LIMITS.maxMarkers) return ''
+    const marker: Marker = { id: createMarkerId(), timeMs: clamped, label: label.slice(0, MARKER_LIMITS.maxLabelLength) }
+    this.commitMarkers([...this.project.markers, marker], null)
+    return marker.id
+  }
+
+  setMarkerLabel(markerId: string, label: string): void {
+    const clean = label.replace(/\s+/g, ' ').slice(0, MARKER_LIMITS.maxLabelLength)
+    this.commitMarkers(
+      this.project.markers.map((marker) => (marker.id === markerId ? { ...marker, label: clean } : marker)),
+      `marker-label:${markerId}`
+    )
+  }
+
+  removeMarker(markerId: string): void {
+    this.commitMarkers(this.project.markers.filter((marker) => marker.id !== markerId), null)
+  }
+
+  /** The first marker after `timeMs` (or before it, going back), wrapping around; `null` without markers. */
+  nextMarker(timeMs: number, direction: 'forward' | 'back' = 'forward'): Marker | null {
+    const markers = this.project.markers
+    if (markers.length === 0) return null
+    if (direction === 'forward') return markers.find((marker) => marker.timeMs > timeMs + MARKER_NEAR_MS) ?? (markers[0] as Marker)
+    return [...markers].reverse().find((marker) => marker.timeMs < timeMs - MARKER_NEAR_MS) ?? (markers[markers.length - 1] as Marker)
   }
 
   // --- suggestions --------------------------------------------------------------
@@ -1242,6 +1353,17 @@ export class EditorStore {
     return true
   }
 
+  private commitSpeeds(speeds: readonly SpeedEffect[], selectedSpeedId: string | null, gestureKey: string | null): void {
+    const others = this.project.effects.filter((effect) => effect.type !== 'speed')
+    const sorted = [...speeds].sort((a, b) => a.startMs - b.startMs)
+    this.commit({ ...this.project, effects: [...others, ...sorted] }, { ...NOTHING_SELECTED, speedId: selectedSpeedId }, gestureKey)
+  }
+
+  private commitMarkers(markers: readonly Marker[], gestureKey: string | null): void {
+    const sorted = [...markers].sort((a, b) => a.timeMs - b.timeMs)
+    this.commit({ ...this.project, markers: sorted }, this.selected(), gestureKey)
+  }
+
   /** A zoom the user touches becomes theirs: regeneration will not replace it. */
   private editZoom(zoomId: string, gesture: string | null, change: (zoom: ZoomEffect) => ZoomEffect): void {
     this.commitZooms(
@@ -1307,7 +1429,13 @@ export class EditorStore {
 
   /** The selection an edit of the look (framing, webcam, export) leaves in place. */
   private selected(): Selected {
-    return { zoomId: this.state.selectedZoomId, trimId: null, cueId: this.state.selectedCueId, textId: this.state.selectedTextId }
+    return {
+      zoomId: this.state.selectedZoomId,
+      trimId: null,
+      speedId: this.state.selectedSpeedId,
+      cueId: this.state.selectedCueId,
+      textId: this.state.selectedTextId
+    }
   }
 
   private commit(project: Project, selected: Selected, gestureKey: string | null): void {
@@ -1333,6 +1461,7 @@ export class EditorStore {
     this.project = project
     const zoomExists = zoomsOf(project).some((zoom) => zoom.id === this.state.selectedZoomId)
     const trimExists = trimsOf(project).some((trim) => trim.id === this.state.selectedTrimId)
+    const speedExists = speedsOf(project).some((region) => region.id === this.state.selectedSpeedId)
     const cueExists = project.captions.cues.some((cue) => cue.id === this.state.selectedCueId)
     const textExists = project.texts.some((text) => text.id === this.state.selectedTextId)
     this.state = {
@@ -1340,6 +1469,7 @@ export class EditorStore {
         {
           zoomId: zoomExists ? this.state.selectedZoomId : null,
           trimId: trimExists ? this.state.selectedTrimId : null,
+          speedId: speedExists ? this.state.selectedSpeedId : null,
           cueId: cueExists ? this.state.selectedCueId : null,
           textId: textExists ? this.state.selectedTextId : null
         },
@@ -1355,6 +1485,8 @@ export class EditorStore {
     return {
       zooms: zoomsOf(this.project),
       trims: trimsOf(this.project),
+      speeds: speedsOf(this.project),
+      markers: this.project.markers,
       timeMap: buildTimeMap(this.session.durationMs, this.project.effects),
       background: this.project.background,
       webcam: this.project.webcam,
@@ -1388,6 +1520,7 @@ export class EditorStore {
       suggestionNotice: this.suggestionNotice,
       selectedZoomId: selected.zoomId,
       selectedTrimId: selected.trimId,
+      selectedSpeedId: selected.speedId,
       selectedCueId: selected.cueId,
       selectedTextId: selected.textId,
       selection: null,

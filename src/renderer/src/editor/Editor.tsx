@@ -58,6 +58,12 @@ export function Editor({ sessionId, onClose }: Props) {
   )
 }
 
+/** One frame at the usual 30 fps, for the arrow keys; Shift makes it a second. */
+const FRAME_MS = 1000 / 30
+const SECOND_MS = 1000
+/** How far J goes back. */
+const JUMP_BACK_MS = 5000
+
 function Workspace({ session, onClose }: { session: EditorSession; onClose: () => void }) {
   const store = useMemo(
     () => new EditorStore(session, (project) => window.screenrx.editor.saveProject(project)),
@@ -95,6 +101,31 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
       } else if (event.code === 'Space') {
         event.preventDefault()
         player?.toggle()
+      } else if (event.key.toLowerCase() === 'k' && player) {
+        player.pause()
+      } else if (event.key.toLowerCase() === 'l' && player) {
+        if (!player.playing) player.toggle()
+      } else if (event.key.toLowerCase() === 'j' && player) {
+        player.pause()
+        player.seek(player.currentTimeMs - JUMP_BACK_MS)
+      } else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && player && !command) {
+        event.preventDefault()
+        player.pause()
+        const step = event.shiftKey ? SECOND_MS : FRAME_MS
+        player.seek(player.currentTimeMs + (event.key === 'ArrowRight' ? step : -step))
+      } else if (event.key.toLowerCase() === 's' && player && !command) {
+        // Split: cut the selection when there is one, else open a cut at the playhead.
+        event.preventDefault()
+        if (store.getState().selection) store.cutSelection()
+        else store.addTrim(player.currentTimeMs)
+      } else if (event.key.toLowerCase() === 'm' && player && !command) {
+        event.preventDefault()
+        if (event.shiftKey) {
+          const next = store.nextMarker(player.currentTimeMs)
+          if (next) player.seek(next.timeMs)
+        } else {
+          store.addMarker(player.currentTimeMs)
+        }
       } else if (event.key.toLowerCase() === 'i' && player) {
         store.markSelection('start', player.currentTimeMs)
       } else if (event.key.toLowerCase() === 'o' && player) {
@@ -104,6 +135,7 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
         store.getState().selection &&
         !store.selectedZoom &&
         !store.selectedTrim &&
+        !store.selectedSpeed &&
         !store.selectedCue &&
         !store.selectedText
       ) {
@@ -115,6 +147,9 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
       } else if ((event.key === 'Backspace' || event.key === 'Delete') && store.selectedTrim) {
         event.preventDefault()
         store.removeTrim(store.selectedTrim.id)
+      } else if ((event.key === 'Backspace' || event.key === 'Delete') && store.selectedSpeed) {
+        event.preventDefault()
+        store.removeSpeed(store.selectedSpeed.id)
       } else if ((event.key === 'Backspace' || event.key === 'Delete') && store.selectedCue) {
         event.preventDefault()
         store.removeCue(store.selectedCue.id)

@@ -55,6 +55,15 @@ export interface TrimEffect extends TimelineEffectBase {
 /** Annotation, blur, highlight and webcam effects join this union in later phases. */
 export type TimelineEffect = ZoomEffect | SpeedEffect | TrimEffect
 
+/** A place the user marked on the recording, to find again (source time). */
+export interface Marker {
+  id: string
+  timeMs: number
+  label: string
+}
+
+export const MARKER_LIMITS = { maxMarkers: 1000, maxLabelLength: 80 } as const
+
 /** Frame rates an export can be made at. */
 export const EXPORT_FRAME_RATES = [24, 30, 60] as const
 export type ExportFps = (typeof EXPORT_FRAME_RATES)[number]
@@ -320,6 +329,8 @@ export interface Project {
   audio: AudioSettings
   /** How the session's music track plays; `null` until music is brought in (the file may still be there). */
   music: MusicSettings | null
+  /** Places marked on the recording, sorted by time. Empty in projects saved before them. */
+  markers: Marker[]
   dub: DubSettings
   /** Effects on the picture: stabilization, noise reduction, sharpening, colour. */
   filters: FilterSettings
@@ -429,6 +440,7 @@ export function createProject(sessionId: string, effects: TimelineEffect[] = [])
     texts: [],
     audio: createAudioSettings(),
     music: null,
+    markers: [],
     dub: { language: null },
     filters: createFilterSettings(),
     export: { ...DEFAULT_EXPORT_SETTINGS }
@@ -438,6 +450,12 @@ export function createProject(sessionId: string, effects: TimelineEffect[] = [])
 export function trimsOf(project: Project): TrimEffect[] {
   return project.effects
     .filter((effect): effect is TrimEffect => effect.type === 'trim')
+    .sort((a, b) => a.startMs - b.startMs)
+}
+
+export function speedsOf(project: Project): SpeedEffect[] {
+  return project.effects
+    .filter((effect): effect is SpeedEffect => effect.type === 'speed')
     .sort((a, b) => a.startMs - b.startMs)
 }
 
@@ -653,6 +671,18 @@ function parseAudio(value: unknown): AudioSettings {
   return audio
 }
 
+/** Markers as saved, sorted; a malformed one is dropped. Projects saved before them have none. */
+function parseMarkers(value: unknown): Marker[] {
+  const markers: Marker[] = []
+  for (const entry of Array.isArray(value) ? value.slice(0, MARKER_LIMITS.maxMarkers) : []) {
+    if (!isRecord(entry) || typeof entry.id !== 'string' || entry.id === '' || entry.id.length > MAX_ID_LENGTH) continue
+    if (!isFiniteNumber(entry.timeMs) || entry.timeMs < 0) continue
+    const label = typeof entry.label === 'string' ? entry.label.replace(/\s+/g, ' ').trim().slice(0, MARKER_LIMITS.maxLabelLength) : ''
+    markers.push({ id: entry.id, timeMs: entry.timeMs, label })
+  }
+  return markers.sort((a, b) => a.timeMs - b.timeMs)
+}
+
 /** Music settings as saved; whatever is not well-formed takes the default. `null` when there are none. */
 function parseMusic(value: unknown): MusicSettings | null {
   if (!isRecord(value)) return null
@@ -726,6 +756,7 @@ export function parseProject(value: unknown, sessionId: string): Project | null 
     texts: parseTexts(value.texts),
     audio: parseAudio(value.audio),
     music: parseMusic(value.music),
+    markers: parseMarkers(value.markers),
     dub: {
       language:
         isRecord(value.dub) && includes(CAPTION_LANGUAGES, value.dub.language) ? value.dub.language : null

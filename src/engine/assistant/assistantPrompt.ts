@@ -10,6 +10,7 @@ import type { TranscriptWord } from '@shared/models/captions'
 import { CAPTION_ANIMATIONS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, EXPORT_PRESETS, FRAME_ASPECTS, FRAME_FITS, MUSIC_DUCKINGS } from '@shared/models/project'
 import { EXPORT_CONFIG } from '../export/exportConfig'
 import { BACKGROUND_PRESETS } from '../rendering/backgrounds'
+import { SPEED_CONFIG, isSpeedFactor } from '../timeline/speedConfig'
 import { TRIM_CONFIG } from '../timeline/trimConfig'
 import { ZOOM_LIMITS } from '../zoom/zoomConfig'
 
@@ -32,6 +33,7 @@ const ACTION_TYPES = [
   'zoom',
   'remove-zoom',
   'speed',
+  'speed-region',
   'captions',
   'caption-language',
   'caption-length',
@@ -91,7 +93,8 @@ Actions and their fields:
 - "uncut": undoes the cuts inside startSec–endSec (or fromWord–toWord).
 - "zoom": zooms in on a stretch. fromWord/toWord or startSec/endSec; scale between ${ZOOM_LIMITS.minScale} and ${ZOOM_LIMITS.maxScale} (null = ${1.6}). Without an end, the zoom lasts ${ASSISTANT_CONFIG.defaultZoomMs / 1000} s. You cannot choose where in the frame it focuses.
 - "remove-zoom": removes the zooms inside startSec–endSec (or fromWord–toWord).
-- "speed": value = one of ${EXPORT_CONFIG.speeds.join(', ')}.
+- "speed": the speed of the whole finished video. value = one of ${EXPORT_CONFIG.speeds.join(', ')}.
+- "speed-region": plays one stretch faster or slower than the rest (the voice keeps its pitch). fromWord/toWord or startSec/endSec; value = one of ${SPEED_CONFIG.factors.join(', ')} (2 = twice as fast, 0.5 = half speed). Use it for stretches to hurry through, not for the whole video.
 - "captions": value = "show" or "hide".
 - "caption-language": value = ${CAPTION_LANGUAGES.map((language) => `"${language}"`).join(', ')} or "original". Translating takes the editor a while.
 - "caption-length": value = "word" (one word at a time), "pair" (two or three words), "short", "medium" or "long" (how much text per caption).
@@ -133,6 +136,9 @@ function describeEdit(edit: AssistantEditState): string {
   const lines = [
     `Recording length: ${clock(edit.durationMs)}`,
     `Speed: ${edit.speed}x`,
+    edit.speedRegions.length === 0
+      ? 'Speed regions: none'
+      : `Speed regions (${edit.speedRegions.length}):\n${edit.speedRegions.map((region) => `  ${clock(region.startMs)}–${clock(region.endMs)} ${region.speed}x`).join('\n')}`,
     edit.cuts.length === 0
       ? 'Cuts: none'
       : `Cuts (${edit.cuts.length}):\n${edit.cuts.map((cut) => `  ${clock(cut.startMs)}–${clock(cut.endMs)}`).join('\n')}`,
@@ -286,6 +292,13 @@ export function parseAssistantResponse(
       case 'speed': {
         const speed = text === null ? NaN : Number(text.replace(',', '.').replace(/x$/, ''))
         if ((EXPORT_CONFIG.speeds as readonly number[]).includes(speed)) actions.push({ type: 'speed', speed })
+        break
+      }
+      case 'speed-region': {
+        const speed = text === null ? NaN : Number(text.replace(',', '.').replace(/x$/, ''))
+        const span = spanOf(entry, words, durationMs, null)
+        if (!isSpeedFactor(speed) || !span || span.endMs - span.startMs < SPEED_CONFIG.minDurationMs) break
+        actions.push({ type: 'speed-region', ...span, speed })
         break
       }
       case 'captions':

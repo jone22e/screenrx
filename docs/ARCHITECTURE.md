@@ -887,8 +887,31 @@ relógio mostra o tempo já editado. Um corte nunca pode deixar menos de
 
 São conceitos separados no modelo. `ExportSettings.speed` escala a linha do tempo
 inteira no momento da exportação; `SpeedEffect` é uma edição criativa de um
-trecho. O mapeamento de tempo e o grafo de áudio já tratam os dois (e os
-multiplicam onde se sobrepõem); a interface ainda só oferece a velocidade global.
+trecho. O mapeamento de tempo e o grafo de áudio tratam os dois (e os
+multiplicam onde se sobrepõem).
+
+**Regiões de velocidade** (2026-11-16): faixa "Velocidade" na linha do tempo,
+entre o zoom e as legendas, com regiões arrastáveis e redimensionáveis como as
+outras (âmbar acima de 1×, azul abaixo); duplo clique ou "+" abre uma de 3 s no
+cursor; na ferramenta Cortes, "Seleção a 2×" aplica o fator escolhido à seleção
+e a lista mostra as regiões. Fatores em `engine/timeline/speedConfig.ts` (0,5 a
+4×). `EditorStore.addSpeedSpan` apara ou substitui regiões que a nova cobre: a
+última vontade vence. O preview toca cada região no seu fator
+(`PreviewPlayer.applySpeed` multiplica a velocidade global por `speedAt` a cada
+quadro, tom preservado), então o que se ouve é o que a exportação faz. O
+assistente tem a ação `speed-region` (trecho por palavras ou segundos + fator) e
+recebe as regiões no estado.
+
+**Marcadores** (`project.markers`: id, instante de origem, nome): pinos na régua;
+clique vai até ele, duplo clique remove; a ferramenta Cortes lista, nomeia e
+remove. `M` marca no cursor, `⇧M` pula para o próximo (dá a volta).
+
+**Atalhos do editor** (`Editor.tsx`): espaço toca/pausa; `J` volta 5 s, `K`
+pausa, `L` toca; `←`/`→` um quadro (1/30 s), com `⇧` um segundo; `I`/`O` marcam
+a seleção; `S` corta a seleção, ou abre um corte no cursor quando não há
+seleção; `X`/`⌫` cortam a seleção ou removem a região selecionada; `M`/`⇧M`
+marcadores; `+`/`−` aproximam e afastam a linha do tempo (`Timeline.tsx`);
+`Esc` limpa; `⌘Z`/`⇧⌘Z` desfazem e refazem.
 
 A velocidade global é escolhida **no editor**, no seletor ao lado do play
 (`Transport`), e não só na hora de exportar: o preview toca nela

@@ -158,7 +158,19 @@ deste quadro" no `Transport`.
 Pronto quando: exportar "Reels + Shorts" gera dois arquivos nos limites de cada
 plataforma, com aviso quando estoura, e a capa sai em PNG.
 
-## Fase D — Regiões de velocidade e timeline profissional (M)
+## Fase D — Regiões de velocidade e timeline profissional (M) — FEITA em 2026-11-16
+
+O que entrou: faixa de velocidade na linha do tempo com regiões arrastáveis,
+"Seleção a N×" e lista na ferramenta Cortes, preview tocando cada região no
+seu fator, marcadores com nome na régua e na lista, atalhos J K L, setas por
+quadro, S, M/⇧M e +/−, ação `speed-region` do assistente. Diferença do plano:
+`J` volta 5 s em vez de tocar ao contrário (o `<video>` não toca para trás) e
+`S` corta a seleção ou abre um corte no cursor, porque os cortes aqui são
+regiões, não divisões de clipe. Verificado por testes; a linha do tempo e os
+atalhos não foram usados no app. Detalhes em `docs/ARCHITECTURE.md`,
+"Velocidade global × regiões de velocidade".
+
+Plano original, para referência:
 
 O motor já tem `SpeedEffect`, `timeMapping` e o grafo de áudio por região.
 Falta a interface.

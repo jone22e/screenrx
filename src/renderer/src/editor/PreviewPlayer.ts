@@ -8,6 +8,7 @@ import type { TimeMap } from '@engine/time/timeMapping'
 import { keptSourceTime, nextKeptSourceTime, outputDurationMs, sourceTimeToTimelineTime, timelineTimeToOutputTime } from '@engine/time/timeMapping'
 import type { SpeechSpan } from '@engine/audio/musicLevel'
 import { approachGain, isSpeakingAt, musicTargetGain } from '@engine/audio/musicLevel'
+import { speedAt } from '@engine/timeline/speedConfig'
 import { correctTrack } from '@engine/time/trackSync'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { cameraAt } from '@engine/zoom/zoomCamera'
@@ -15,6 +16,7 @@ import { pointerAt, smoothCursorPath } from '@engine/zoom/cursorPath'
 import type { EditorSession } from '@shared/models/editor'
 import type { ObjectTrack } from '@shared/models/telemetry'
 import type {
+  SpeedEffect,
   MusicSettings,
   AudioSettings,
   BackgroundSettings,
@@ -68,6 +70,8 @@ export interface PreviewSettings {
   /** Cuts: playback jumps over anything the map does not keep. */
   timeMap: TimeMap
   zooms: readonly ZoomEffect[]
+  /** Stretches played faster or slower, sorted: the preview plays them at their factor, as the export will. */
+  speeds: readonly SpeedEffect[]
   background: BackgroundSettings
   webcam: WebcamSettings
   captions: CaptionSettings
@@ -358,7 +362,8 @@ export class PreviewPlayer {
    * pitch (the media elements' default), as they do in the exported file.
    */
   private applySpeed(): void {
-    const { speed } = this.settings
+    // The global speed, times the factor of the speed region the playhead is in.
+    const speed = this.settings.speed * speedAt(this.settings.speeds, this.currentTimeMs)
     for (const element of [this.video, ...this.companions]) {
       // Both: loading a source puts the rate back to the default one.
       if (element.defaultPlaybackRate !== speed) element.defaultPlaybackRate = speed
@@ -696,6 +701,7 @@ export class PreviewPlayer {
     this.skipCuts()
     this.render()
     this.alignCompanions()
+    if (this.settings.speeds.length > 0) this.applySpeed()
     const now = performance.now()
     const sourceMs = this.currentTimeMs
     this.placeMusic(sourceMs, false)
@@ -719,7 +725,7 @@ export class PreviewPlayer {
   /** Keeps the separately recorded tracks in step with the screen track. */
   private alignCompanions(): void {
     const time = this.video.currentTime
-    const { speed } = this.settings
+    const speed = this.video.playbackRate
     for (const companion of this.companions) {
       // A track still landing a seek, still loading, or whose `play()` has not taken yet is not
       // measurable: its clock stands still, and correcting it would only pile up more seeks.

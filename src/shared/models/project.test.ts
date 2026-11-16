@@ -30,6 +30,24 @@ describe('parseProject', () => {
     expect(parseProject(JSON.parse(JSON.stringify(project)), sessionId)).toEqual(project)
   })
 
+  it('reads markers sorted, repairs their labels and gives old projects none', () => {
+    const { markers, ...legacy } = createProject(sessionId)
+    expect(markers).toEqual([])
+    expect(parseProject(legacy, sessionId)?.markers).toEqual([])
+    const saved = [
+      { id: 'm2', timeMs: 5000, label: '  fim  da   intro ' },
+      { id: 'm1', timeMs: 1000, label: 'x'.repeat(200) },
+      { id: '', timeMs: 2000, label: 'sem id' },
+      { id: 'm3', timeMs: -1, label: 'negativo' },
+      { id: 'm4', timeMs: 3000 }
+    ]
+    expect(parseProject({ ...createProject(sessionId), markers: saved }, sessionId)?.markers).toEqual([
+      { id: 'm1', timeMs: 1000, label: 'x'.repeat(80) },
+      { id: 'm4', timeMs: 3000, label: '' },
+      { id: 'm2', timeMs: 5000, label: 'fim da intro' }
+    ])
+  })
+
   it('drops unknown fields instead of persisting them', () => {
     const parsed = parseProject(
       { ...createProject(sessionId, [{ ...zoom, hover: true } as never]), modalOpen: true },

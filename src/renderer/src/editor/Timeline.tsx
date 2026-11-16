@@ -5,7 +5,7 @@ import { moveZoom, resizeZoom } from '@engine/zoom/zoomEditing'
 import { formatClock, formatTimecode } from '@shared/format'
 import { DUB_TRACKS } from '@shared/models/media'
 import type { EditorSession } from '@shared/models/editor'
-import type { CaptionCue, TextOverlay, TrimEffect, ZoomEffect } from '@shared/models/project'
+import type { CaptionCue, SpeedEffect, TextOverlay, TrimEffect, ZoomEffect } from '@shared/models/project'
 import type { EditorStore } from './EditorStore'
 import { Filmstrip } from './Filmstrip'
 import type { PreviewPlayer } from './PreviewPlayer'
@@ -19,6 +19,7 @@ import {
   EyeOffIcon,
   FilmIcon,
   FitIcon,
+  GaugeIcon,
   LockIcon,
   MagnetIcon,
   PlusIcon,
@@ -45,6 +46,7 @@ type DragKind = 'move' | 'start' | 'end'
 type Drag = { kind: DragKind; originX: number } & (
   | { target: 'zoom'; original: ZoomEffect }
   | { target: 'trim'; original: TrimEffect }
+  | { target: 'speed'; original: SpeedEffect }
   | { target: 'cue'; original: CaptionCue }
   | { target: 'text'; original: TextOverlay }
 )
@@ -74,7 +76,9 @@ const ZOOM_LEVELS = { min: 1, max: 8, step: 0.25 } as const
 const SNAP_KEY = 'screenrx.timeline.snap'
 
 /** A lane whose regions the user froze: nothing on it moves until it is unlocked. */
-type LaneId = 'cuts' | 'zoom' | 'captions' | 'text'
+type LaneId = 'cuts' | 'zoom' | 'speed' | 'captions' | 'text'
+
+const speedLabel = (speed: number): string => `${String(speed).replace('.', ',')}×`
 
 function readSnap(): boolean {
   try {
@@ -224,7 +228,7 @@ export function Timeline({ session, store, player }: Props) {
   const { cues } = state.captions
   // The dubbing in use has a lane of its own; it stands in for the microphone.
   const dub = state.dubs.find((track) => track.language === state.dub.language) ?? null
-  const laneCount = 4 + (cues.length > 0 ? 1 : 0) + (session.webcam ? 1 : 0) + session.audio.length + (dub ? 1 : 0)
+  const laneCount = 5 + (cues.length > 0 ? 1 : 0) + (session.webcam ? 1 : 0) + session.audio.length + (dub ? 1 : 0)
 
   useEffect(() => {
     const element = tracks.current
@@ -263,8 +267,8 @@ export function Timeline({ session, store, player }: Props) {
 
   /** The instants an edge lands on when snapping: the ends, the playhead and every region's edges. */
   const snapTargets = (except?: string): number[] => {
-    const targets = [0, duration, player.currentTimeMs]
-    for (const region of [...state.trims, ...state.zooms, ...cues, ...state.texts]) {
+    const targets = [0, duration, player.currentTimeMs, ...state.markers.map((marker) => marker.timeMs)]
+    for (const region of [...state.trims, ...state.zooms, ...state.speeds, ...cues, ...state.texts]) {
       if (region.id === except) continue
       targets.push(region.startMs, region.endMs)
     }
@@ -293,10 +297,11 @@ export function Timeline({ session, store, player }: Props) {
   const removeSelected = (): void => {
     if (store.selectedZoom) store.removeZoom(store.selectedZoom.id)
     else if (store.selectedTrim) store.removeTrim(store.selectedTrim.id)
+    else if (store.selectedSpeed) store.removeSpeed(store.selectedSpeed.id)
     else if (store.selectedCue) store.removeCue(store.selectedCue.id)
     else if (store.selectedText) store.removeText(store.selectedText.id)
   }
-  const hasSelection = Boolean(store.selectedZoom || store.selectedTrim || store.selectedCue || store.selectedText)
+  const hasSelection = Boolean(store.selectedZoom || store.selectedTrim || store.selectedSpeed || store.selectedCue || store.selectedText)
 
   const toggleSnap = (): void => {
     setSnap((value) => {
@@ -309,6 +314,21 @@ export function Timeline({ session, store, player }: Props) {
     })
   }
   const setZoomLevel = (level: number): void => setZoom(Math.min(ZOOM_LEVELS.max, Math.max(ZOOM_LEVELS.min, level)))
+
+  // + and − stretch and shrink the tracks, as the buttons do, when nothing is being typed.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return
+      if (event.key === '+' || event.key === '=') setZoom((level) => Math.min(ZOOM_LEVELS.max, level + 1))
+      else if (event.key === '-' || event.key === '_') setZoom((level) => Math.max(ZOOM_LEVELS.min, level - 1))
+      else return
+      event.preventDefault()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
   const isLocked = (lane: LaneId): boolean => locked.has(lane)
   const toggleLock = (lane: LaneId): void =>
     setLocked((current) => {
@@ -378,6 +398,7 @@ export function Timeline({ session, store, player }: Props) {
     drag.current = { ...next, originX: event.clientX }
     if (next.target === 'zoom') store.select(next.original.id)
     else if (next.target === 'trim') store.selectTrim(next.original.id)
+    else if (next.target === 'speed') store.selectSpeed(next.original.id)
     else if (next.target === 'text') {
       store.selectText(next.original.id)
       if (next.kind === 'move') player.seek(next.original.startMs)
@@ -402,6 +423,11 @@ export function Timeline({ session, store, player }: Props) {
     if (current.target === 'trim') {
       if (current.kind === 'move') store.moveTrim(current.original, deltaMs)
       else store.resizeTrim(current.original, current.kind, timeMs)
+      return
+    }
+    if (current.target === 'speed') {
+      if (current.kind === 'move') store.moveSpeed(current.original, deltaMs)
+      else store.resizeSpeed(current.original, current.kind, timeMs)
       return
     }
     if (current.target === 'cue') {
@@ -532,6 +558,15 @@ export function Timeline({ session, store, player }: Props) {
           >
             Zoom
           </LaneLabel>
+          <LaneLabel
+            icon={<GaugeIcon />}
+            onAdd={() => store.addSpeed(now())}
+            addLabel="Acelerar a partir daqui"
+            locked={isLocked('speed')}
+            onLock={() => toggleLock('speed')}
+          >
+            Velocidade
+          </LaneLabel>
           {cues.length > 0 && (
             <VisibilityLabel
               icon={<CaptionsIcon />}
@@ -599,6 +634,20 @@ export function Timeline({ session, store, player }: Props) {
               <span key={timeMs} className="ruler-mark" style={{ left: percent(timeMs) }}>
                 {formatClock(timeMs)}
               </span>
+            ))}
+            {state.markers.map((marker) => (
+              <button
+                key={marker.id}
+                className="marker-pin"
+                aria-label={`Marcador ${marker.label || formatTimecode(marker.timeMs)}`}
+                title={`${marker.label ? `${marker.label} · ` : ''}${formatTimecode(marker.timeMs)} · clique para ir; duplo clique para remover`}
+                style={{ left: percent(marker.timeMs) }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => player.seek(marker.timeMs)}
+                onDoubleClick={() => store.removeMarker(marker.id)}
+              >
+                {marker.label && <span className="marker-pin-label">{marker.label}</span>}
+              </button>
             ))}
           </div>
 
@@ -724,6 +773,44 @@ export function Timeline({ session, store, player }: Props) {
                 <span
                   className="region-handle region-handle-end"
                   onPointerDown={beginDrag({ target: 'zoom', kind: 'end', original: zoom, originX: 0 })}
+                  {...dragHandlers}
+                />
+              </div>
+            ))}
+          </div>
+
+          <div
+            className="lane lane-speed"
+            data-locked={isLocked('speed')}
+            onPointerDown={scrub}
+            onPointerMove={scrub}
+            onDoubleClick={(event) => !isLocked('speed') && store.addSpeed(timeAt(event.clientX))}
+          >
+            {state.speeds.length === 0 && <span className="lane-hint">Clique duas vezes para acelerar um trecho</span>}
+            {state.speeds.map((region) => (
+              <div
+                key={region.id}
+                className="region speed-block"
+                data-slow={region.speed < 1}
+                data-selected={region.id === state.selectedSpeedId}
+                title={`${speedLabel(region.speed)} · ${formatTimecode(region.startMs)} – ${formatTimecode(region.endMs)}`}
+                style={span(region)}
+                onPointerDown={beginDrag({ target: 'speed', kind: 'move', original: region, originX: 0 })}
+                onDoubleClick={(event) => event.stopPropagation()}
+                {...dragHandlers}
+              >
+                <span
+                  className="region-handle region-handle-start"
+                  onPointerDown={beginDrag({ target: 'speed', kind: 'start', original: region, originX: 0 })}
+                  {...dragHandlers}
+                />
+                <span className="zoom-label">{speedLabel(region.speed)}</span>
+                {region.id === state.selectedSpeedId && roomy(region) && (
+                  <RegionRemove label="Remover esta velocidade" onRemove={() => store.removeSpeed(region.id)} />
+                )}
+                <span
+                  className="region-handle region-handle-end"
+                  onPointerDown={beginDrag({ target: 'speed', kind: 'end', original: region, originX: 0 })}
                   {...dragHandlers}
                 />
               </div>

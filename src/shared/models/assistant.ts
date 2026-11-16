@@ -34,6 +34,8 @@ export interface AssistantEditState {
   cuts: AssistantSpan[]
   zooms: Array<AssistantSpan & { scale: number }>
   speed: number
+  /** Stretches played faster or slower than the rest. */
+  speedRegions: Array<AssistantSpan & { speed: number }>
   hasCaptions: boolean
   captionsVisible: boolean
   captionLanguage: CaptionLanguage | null
@@ -67,6 +69,7 @@ export type AssistantAction =
   | { type: 'zoom'; startMs: number; endMs: number; scale: number | null }
   | { type: 'remove-zoom'; startMs: number; endMs: number }
   | { type: 'speed'; speed: number }
+  | { type: 'speed-region'; startMs: number; endMs: number; speed: number }
   | { type: 'captions'; visible: boolean }
   | { type: 'caption-language'; language: CaptionLanguage | null }
   | { type: 'caption-length'; length: CaptionLength }
@@ -121,6 +124,12 @@ export function parseAssistantRequest(value: unknown): AssistantRequest | null {
       return span && isRecord(zoom) && isFiniteNumber(zoom.scale) ? { ...span, scale: zoom.scale } : null
     })
     .filter((zoom): zoom is AssistantSpan & { scale: number } => zoom !== null)
+  const speedRegions = (Array.isArray(edit.speedRegions) ? edit.speedRegions : [])
+    .map((region) => {
+      const span = parseSpan(region)
+      return span && isRecord(region) && isFiniteNumber(region.speed) ? { ...span, speed: region.speed } : null
+    })
+    .filter((region): region is AssistantSpan & { speed: number } => region !== null)
   const language = (CAPTION_LANGUAGES as readonly unknown[]).includes(edit.captionLanguage)
     ? (edit.captionLanguage as CaptionLanguage)
     : null
@@ -136,6 +145,7 @@ export function parseAssistantRequest(value: unknown): AssistantRequest | null {
       cuts,
       zooms,
       speed: edit.speed,
+      speedRegions,
       hasCaptions: edit.hasCaptions === true,
       captionsVisible: edit.captionsVisible === true,
       captionLanguage: language,

@@ -47,6 +47,7 @@ function snapToCentre(player: PreviewPlayer, x: number, y: number): { x: number;
 const settingsOf = (state: EditorState): PreviewSettings => ({
   timeMap: state.timeMap,
   zooms: state.zooms,
+  speeds: state.speeds,
   background: state.background,
   webcam: state.webcam,
   captions: state.captions,

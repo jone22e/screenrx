@@ -22,6 +22,7 @@ const request: AssistantRequest = {
     cuts: [{ startMs: 3000, endMs: 4000 }],
     zooms: [{ startMs: 6000, endMs: 9000, scale: 1.6 }],
     speed: 1,
+    speedRegions: [{ startMs: 9000, endMs: 11_000, speed: 2 }],
     hasCaptions: true,
     captionsVisible: true,
     captionLanguage: null,
@@ -46,6 +47,7 @@ describe('buildAssistantPrompt', () => {
     expect(wordCount).toBe(words.length)
     expect(prompt).toContain('Cuts (1):\n  0:03.0–0:04.0')
     expect(prompt).toContain('Zooms (1):\n  0:06.0–0:09.0 1.6x')
+    expect(prompt).toContain('Speed regions (1):\n  0:09.0–0:11.0 2x')
     expect(prompt).toContain('System audio: off, volume 60%')
     expect(prompt).toContain('Music: volume 25%, ducking light')
     expect(prompt).toContain('Webcam: not recorded')
@@ -120,6 +122,8 @@ describe('parseAssistantResponse', () => {
       action({ type: 'volume', value: 'system', scale: 70 }),
       action({ type: 'music-ducking', value: 'heavy' }),
       action({ type: 'export-preset', value: 'Instagram' }),
+      action({ type: 'speed-region', fromWord: 4, toWord: 5, value: '2x' }),
+      action({ type: 'speed-region', startSec: 1, endSec: 3, value: '7' }),
       action({ type: 'uncut', startSec: 2, endSec: 5 }),
       action({ type: 'remove-zoom', fromWord: 4, toWord: 5 })
     ])
@@ -141,6 +145,7 @@ describe('parseAssistantResponse', () => {
       { type: 'volume', track: 'systemAudio', volume: 0.7 },
       { type: 'music-ducking', ducking: 'strong' },
       { type: 'export-preset', preset: 'reels' },
+      { type: 'speed-region', startMs: 6000, endMs: 12_000, speed: 2 },
       { type: 'uncut', startMs: 2000, endMs: 5000 },
       { type: 'remove-zoom', startMs: 6000, endMs: 12_000 }
     ])
