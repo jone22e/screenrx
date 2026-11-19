@@ -21,6 +21,7 @@ import type {
 } from '@shared/models/project'
 import { CAPTION_FONT_IDS, CAPTION_LIMITS } from '@shared/models/project'
 import { aiSettings, currentAiChoice } from '../common/aiSettings'
+import { features, isWeb } from '../common/platform'
 import { openSettings } from '../common/settingsScreen'
 import type { EditorStore, TranscriptionActivity } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
@@ -256,10 +257,11 @@ export function CaptionsPanel({ session, store, player }: Props) {
     }
     if (result.value.locale) {
       setLocale(result.value.locale)
+      const label = CAPTION_LOCALES.find((option) => option.id === result.value.locale)?.label ?? result.value.locale
       const tried = result.value.candidates.filter((candidate) => candidate.installed).length
-      setDetectionNote(`${CAPTION_LOCALES.find((option) => option.id === result.value.locale)?.label ?? result.value.locale}, entre ${tried} ${tried === 1 ? 'idioma baixado' : 'idiomas baixados'} neste Mac.`)
+      setDetectionNote(isWeb ? `${label}.` : `${label}, entre ${tried} ${tried === 1 ? 'idioma baixado' : 'idiomas baixados'} neste Mac.`)
     } else {
-      setDetectionNote('Nenhum idioma baixado reconheceu a fala. Escolha o idioma na lista.')
+      setDetectionNote(isWeb ? 'A fala não foi reconhecida em nenhum idioma da lista. Escolha o idioma.' : 'Nenhum idioma baixado reconheceu a fala. Escolha o idioma na lista.')
     }
   }
 
@@ -286,7 +288,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
             type="button"
             className="field-link"
             disabled={transcription !== null || detecting}
-            title="Ouve os primeiros segundos e escolhe o idioma entre os já baixados neste Mac"
+            title={isWeb ? 'Ouve os primeiros segundos e escolhe o idioma' : 'Ouve os primeiros segundos e escolhe o idioma entre os já baixados neste Mac'}
             onClick={() => void detectLocale()}
           >
             {detecting ? 'Descobrindo…' : 'Detectar'}
@@ -337,8 +339,18 @@ export function CaptionsPanel({ session, store, player }: Props) {
   )
 
   if (captions.cues.length === 0) {
+    if (!features.transcription) {
+      return (
+        <Section title="Legendas" help="No navegador as legendas vêm de um arquivo SRT ou WebVTT; a transcrição automática fica no app para Mac.">
+          <button className="panel-button panel-button-primary" onClick={() => void loadSubtitles()}>
+            <UploadIcon /> Importar SRT ou VTT
+          </button>
+          {fileNote && <p className="panel-hint">{fileNote}</p>}
+        </Section>
+      )
+    }
     return (
-      <Section title="Legendas automáticas" help="Transcreve o que foi dito. Tudo roda neste Mac.">
+      <Section title="Legendas automáticas" help={isWeb ? 'Transcreve o que foi dito. O som é enviado ao servidor do ScreenRx, que devolve as palavras; o vídeo não sai daqui.' : 'Transcreve o que foi dito. Tudo roda neste Mac.'}>
         {source}
         {activity ?? (
           <button className="panel-button panel-button-primary" onClick={() => void generate(false)}>
@@ -397,6 +409,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
         />
       </Section>
 
+      {features.ai && (
       <Section title="Idioma da legenda" help="Muda só a legenda; a voz é na aba Dublagem. Só o texto vai à ferramenta de IA. Mudar o texto por legenda descarta as traduções.">
         <div className="languages" role="radiogroup" aria-label="Idioma da legenda">
           <button
@@ -459,6 +472,7 @@ export function CaptionsPanel({ session, store, player }: Props) {
         )}
         {captionNotice && <p className="panel-notice">{captionNotice}</p>}
       </Section>
+      )}
 
       <Section title="Estilo">
         <div className="looks" role="group" aria-label="Estilos prontos">
@@ -650,17 +664,25 @@ export function CaptionsPanel({ session, store, player }: Props) {
 
       {subtitleFiles}
 
-      <Section title="Refazer a transcrição" help="Se o texto saiu errado: escolha o idioma falado e transcreva de novo. Apaga as correções e as traduções.">
-        {source}
-        {activity ?? (
-          <button className="panel-button" onClick={() => void generate(true)}>
-            <RefreshIcon /> Transcrever de novo
+      {features.transcription ? (
+        <Section title="Refazer a transcrição" help="Se o texto saiu errado: escolha o idioma falado e transcreva de novo. Apaga as correções e as traduções.">
+          {source}
+          {activity ?? (
+            <button className="panel-button" onClick={() => void generate(true)}>
+              <RefreshIcon /> Transcrever de novo
+            </button>
+          )}
+          <button className="panel-button panel-button-danger" onClick={() => store.removeCaptions()}>
+            <TrashIcon /> Remover legendas
           </button>
-        )}
-        <button className="panel-button panel-button-danger" onClick={() => store.removeCaptions()}>
-          <TrashIcon /> Remover legendas
-        </button>
-      </Section>
+        </Section>
+      ) : (
+        <Section title="Remover">
+          <button className="panel-button panel-button-danger" onClick={() => store.removeCaptions()}>
+            <TrashIcon /> Remover legendas
+          </button>
+        </Section>
+      )}
     </>
   )
 }

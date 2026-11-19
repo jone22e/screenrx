@@ -35,7 +35,8 @@ import type {
   ZoomEffect,
   CaptionStyle
 } from '@shared/models/project'
-import type { FrameInput } from '../rendering/composeFrame'
+import { isElementLayer } from '@shared/models/project'
+import type { FrameInput, PlacedLayer } from '../rendering/composeFrame'
 import { composeFrame, drawCaption } from '../rendering/composeFrame'
 
 /** The preview canvas never needs more pixels than this, whatever the recording's size. */
@@ -138,6 +139,16 @@ export interface PreviewSettings {
 const MUSIC_DRIFT_SEC = 0.25
 /** How far a b-roll clip may stray from its layer's clock before it is seeked. */
 const CLIP_DRIFT_SEC = 0.2
+/**
+ * While playing, a clip this far off is seeked; nearer, it is caught up by
+ * playing a little faster or slower. A seek stalls the clip for a moment,
+ * which put it off again: seeking at every small drift made it skip
+ * (and the split screen flash) every few frames.
+ */
+const CLIP_SEEK_SEC = 1
+/** How hard the clip's rate leans to catch up: drift in seconds times this, within ±`CLIP_RATE_LEAN_MAX`. */
+const CLIP_RATE_LEAN = 0.5
+const CLIP_RATE_LEAN_MAX = 0.12
 
 export class PreviewPlayer {
   private readonly video: HTMLVideoElement
@@ -171,6 +182,10 @@ export class PreviewPlayer {
   private readonly pictures = new Map<string, HTMLImageElement>()
   /** The b-roll clips, one player each, created the first time a layer shows the clip. */
   private readonly clipPlayers = new Map<string, HTMLVideoElement>()
+  /** Each clip's last good frame, shown while it seeks. */
+  private readonly clipFrames = new Map<string, { canvas: HTMLCanvasElement; size: { width: number; height: number } }>()
+  /** A split screen is playing its clip's sound alone: the recording's own tracks are silent meanwhile. */
+  private splitAlone = false
   /** The pointer's path as drawn, for the smoothing in use; computed again when that changes. */
   private drawnCursor: { smoothing: CursorSmoothing; path: Array<NormalizedPoint | null> } | null = null
   private readonly timeListeners = new Set<(timeMs: number) => void>()
@@ -389,8 +404,9 @@ export class PreviewPlayer {
   private applyMutes(): void {
     for (const track of this.audioTracks) {
       const replaced = track.kind === 'microphone' && this.dub !== null
-      track.element.muted = replaced || this.settings.audio[track.kind].muted
+      track.element.muted = replaced || this.settings.audio[track.kind].muted || this.splitAlone
     }
+    if (this.dub) this.dub.element.muted = this.splitAlone
   }
 
   /**
@@ -586,18 +602,28 @@ export class PreviewPlayer {
 
   /** The images of the layers given, as far as they have loaded; a missing one is fetched and the frame drawn again when it arrives. */
   private picturesFor(layers: readonly Layer[]): FrameInput['layers'] {
-    const shown: Array<{ layer: Layer; image: CanvasImageSource; size: Size }> = []
+    const shown: PlacedLayer[] = []
     const timeMs = this.currentTimeMs
     const clipsShown = new Set<string>()
+    let alone = false
     for (const layer of layers) {
+      if (isElementLayer(layer)) {
+        shown.push({ layer })
+        continue
+      }
       if (layer.kind === 'video') {
         const clip = this.clipPlayerFor(layer.file)
         if (!clip) continue
         clipsShown.add(layer.file)
         this.placeClip(clip, layer, timeMs)
-        if (clip.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && clip.videoWidth > 0) {
-          shown.push({ layer, image: clip, size: { width: clip.videoWidth, height: clip.videoHeight } })
-        }
+        // A split screen may let the clip be heard, with the recording or in its place.
+        const heard = layer.split !== undefined && layer.split.audio !== 'main'
+        if (clip.muted === heard) clip.muted = !heard
+        if (heard && layer.split) clip.volume = Math.min(1, layer.split.clipVolume)
+        if (heard && layer.split?.audio === 'clip') alone = true
+        // While a clip seeks it has no frame to give: its last one is shown meanwhile, so the picture (and a split screen) never drops out.
+        const frame = this.clipFrame(layer.file, clip)
+        if (frame) shown.push({ layer, image: frame.image, size: frame.size })
         continue
       }
       let picture = this.pictures.get(layer.file)
@@ -617,7 +643,36 @@ export class PreviewPlayer {
     }
     // A clip no layer shows right now stands still.
     for (const [file, clip] of this.clipPlayers) if (!clipsShown.has(file) && !clip.paused) clip.pause()
+    if (alone !== this.splitAlone) {
+      this.splitAlone = alone
+      this.applyMutes()
+    }
     return shown
+  }
+
+  /** The clip's current frame, kept as its last good one too; that one while the clip has none (seeking, loading). */
+  private clipFrame(file: string, clip: HTMLVideoElement): { image: CanvasImageSource; size: { width: number; height: number } } | null {
+    const ready = clip.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && clip.videoWidth > 0 && !clip.seeking
+    let cache = this.clipFrames.get(file)
+    if (ready) {
+      const size = { width: clip.videoWidth, height: clip.videoHeight }
+      // Kept at most 1280 wide: it only stands in for a few frames.
+      const scale = Math.min(1, 1280 / size.width)
+      const width = Math.max(1, Math.round(size.width * scale))
+      const height = Math.max(1, Math.round(size.height * scale))
+      if (!cache) {
+        cache = { canvas: document.createElement('canvas'), size }
+        this.clipFrames.set(file, cache)
+      }
+      if (cache.canvas.width !== width || cache.canvas.height !== height) {
+        cache.canvas.width = width
+        cache.canvas.height = height
+      }
+      cache.size = size
+      cache.canvas.getContext('2d')?.drawImage(clip, 0, 0, width, height)
+      return { image: clip, size }
+    }
+    return cache && cache.canvas.width > 1 ? { image: cache.canvas, size: cache.size } : null
   }
 
   /** The player of a b-roll clip, made the first time it is needed. */
@@ -647,11 +702,20 @@ export class PreviewPlayer {
       if (!clip.paused) clip.pause()
       return
     }
-    if (Math.abs(clip.currentTime - wantedSec) > CLIP_DRIFT_SEC || !this.playing) {
-      if (Math.abs(clip.currentTime - wantedSec) > 0.02) clip.currentTime = wantedSec
+    const drift = wantedSec - clip.currentTime
+    if (!this.playing) {
+      // Standing still: show exactly the frame of the instant.
+      if (Math.abs(drift) > 0.02 && !clip.seeking) clip.currentTime = wantedSec
+    } else if ((Math.abs(drift) > CLIP_SEEK_SEC || clip.paused && Math.abs(drift) > CLIP_DRIFT_SEC) && !clip.seeking) {
+      // Far off (a jump over a cut, the start of the piece): go there.
+      clip.currentTime = wantedSec
     }
+    // Near: lean on the rate until it is in step again, with no seek and no stall.
+    const base = this.video.playbackRate
+    const lean = this.playing ? Math.min(Math.max(drift * CLIP_RATE_LEAN, -CLIP_RATE_LEAN_MAX), CLIP_RATE_LEAN_MAX) : 0
+    const rate = base * (1 + lean)
+    if (Math.abs(clip.playbackRate - rate) > 0.004) clip.playbackRate = rate
     if (this.playing && clip.paused) {
-      clip.playbackRate = this.video.playbackRate
       void clip.play().catch(() => undefined)
     } else if (!this.playing && !clip.paused) {
       clip.pause()

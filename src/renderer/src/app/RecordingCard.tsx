@@ -3,6 +3,9 @@ import { formatBytes, formatClock } from '@shared/format'
 import { SESSION_SERIES_MAX_LENGTH } from '@shared/models/session'
 import type { RecordingProgress, RecordingSummary } from '@shared/models/session'
 import { RecordingTitle } from './RecordingTitle'
+import { publishRequest } from './PublishDialog'
+import { isPublishPending } from '@shared/models/instagram'
+import type { PublishState } from '@shared/models/instagram'
 import {
   CameraIcon,
   CoverIcon,
@@ -14,6 +17,8 @@ import {
   RenameIcon,
   SeriesIcon,
   SpeakerIcon,
+  DuplicateIcon,
+  InstagramIcon,
   SparklesIcon,
   TrashIcon
 } from './icons'
@@ -68,6 +73,67 @@ export function ProgressBadge({ recording }: { recording: RecordingSummary }) {
       {label}
     </span>
   )
+}
+
+const PUBLISH_LABELS: Record<PublishState, string> = {
+  approved: 'Na fila do Instagram',
+  rendering: 'Preparando o Reel',
+  uploading: 'Enviando ao Instagram',
+  processing: 'Instagram processando',
+  published: 'No Instagram',
+  failed: 'Falhou no Instagram'
+}
+
+/**
+ * Where an approved recording is on its way to Instagram. Published: opens
+ * the post. Failed: says why and tries again. Waiting: can be taken out.
+ */
+export function PublishBadge({ recording }: { recording: RecordingSummary }) {
+  const publish = recording.publish
+  if (!publish) return null
+  const { instagram } = window.screenrx
+  const label = PUBLISH_LABELS[publish.state]
+  if (publish.state === 'published') {
+    return (
+      <span className="publish-badge" data-state="published">
+        <button className="publish-badge-open" title={publish.permalink ? 'Abrir o Reel no Instagram' : label} onClick={() => void instagram.openPost(recording.id)}>
+          <InstagramIcon /> {label}
+        </button>
+        <button className="publish-badge-action" title="Clona o projeto e abre a publicação da cópia" onClick={() => void publishCopy(recording.id)}>
+          Publicar uma cópia
+        </button>
+      </span>
+    )
+  }
+  if (publish.state === 'failed') {
+    return (
+      <span className="publish-badge" data-state="failed" title={publish.error ?? label}>
+        <InstagramIcon /> {label}
+        <button className="publish-badge-action" title="Tentar de novo" onClick={() => publishRequest.open([recording.id], null)}>
+          Tentar de novo
+        </button>
+        <button className="publish-badge-action" aria-label="Tirar da fila" title="Desistir de publicar" onClick={() => void instagram.withdraw(recording.id)}>
+          ×
+        </button>
+      </span>
+    )
+  }
+  return (
+    <span className="publish-badge" data-state={publish.state} title={label}>
+      <InstagramIcon /> {label}
+      {publish.state === 'approved' && (
+        <button className="publish-badge-action" aria-label="Tirar da fila" title="Tirar da fila (deixa de estar aprovado)" onClick={() => void instagram.withdraw(recording.id)}>
+          ×
+        </button>
+      )}
+    </span>
+  )
+}
+
+/** Clones the project and opens the publishing of the clone; the original keeps its post. */
+async function publishCopy(sessionId: string): Promise<void> {
+  const result = await window.screenrx.library.duplicate(sessionId)
+  if (result.ok) publishRequest.open([result.value.sessionId], null)
 }
 
 /** "Renomear para …": the name the transcript suggests, applied with one click. */
@@ -164,6 +230,16 @@ export function RecordingActions({
       {done && (
         <button
           className="icon-button"
+          aria-label="Duplicar"
+          title="Clonar o projeto: uma cópia com toda a edição, para editar ou publicar à parte"
+          onClick={() => void library.duplicate(recording.id)}
+        >
+          <DuplicateIcon />
+        </button>
+      )}
+      {done && (
+        <button
+          className="icon-button"
           aria-label={recording.hasCover ? 'Trocar a capa' : 'Escolher uma capa'}
           title={recording.hasCover ? 'Trocar a capa por outra imagem' : 'Escolher uma imagem como capa'}
           onClick={() => void library.chooseCover(recording.id)}
@@ -174,6 +250,11 @@ export function RecordingActions({
       {done && recording.hasCover && (
         <button className="icon-button" aria-label="Remover a capa" title="Remover a capa e voltar ao quadro do vídeo" onClick={() => void library.clearCover(recording.id)}>
           <CoverOffIcon />
+        </button>
+      )}
+      {done && !(recording.publish && (isPublishPending(recording.publish.state) || recording.publish.state === 'published')) && (
+        <button className="icon-button" aria-label="Publicar no Instagram" title="Aprovar e publicar como Reel no Instagram" onClick={() => publishRequest.open([recording.id], null)}>
+          <InstagramIcon />
         </button>
       )}
       {done && (
@@ -254,6 +335,7 @@ export function RecordingCard({ recording, highlighted, showSeries, onEdit, onMa
           {!renaming && <RecordingBadges recording={recording} />}
         </span>
         {!renaming && !editingSeries && <SuggestedTitle recording={recording} />}
+        {!renaming && <PublishBadge recording={recording} />}
         {editingSeries ? (
           <SeriesEditor key={recording.id} recording={recording} onDone={() => setEditingSeries(false)} />
         ) : (

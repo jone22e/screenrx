@@ -11,11 +11,10 @@ import type { EditorSession } from '@shared/models/editor'
 import type { AppError } from '@shared/models/errors'
 import type { ExportJob } from '@shared/models/export'
 import { clipTrackName } from '@shared/models/export'
-import type { Size } from '@engine/rendering/frameLayout'
-import type { FrameInput } from '../rendering/composeFrame'
+import type { FrameInput, PlacedLayer } from '../rendering/composeFrame'
 import type { Layer, Project } from '@shared/models/project'
 import type { ObjectTrack } from '@shared/models/telemetry'
-import { trimsOf, zoomsOf } from '@shared/models/project'
+import { isElementLayer, trimsOf, zoomsOf } from '@shared/models/project'
 import { composeFrame } from '../rendering/composeFrame'
 import { TrackFrameReader } from './TrackFrameReader'
 
@@ -93,8 +92,12 @@ export async function renderExport(
 
   /** The pictures of the layers on screen: images as decoded, clips at the frame their layer asks for. */
   const layerPictures = async (layers: readonly Layer[], sourceMs: number): Promise<FrameInput['layers']> => {
-    const shown: Array<{ layer: Layer; image: CanvasImageSource; size: Size }> = []
+    const shown: PlacedLayer[] = []
     for (const layer of layers) {
+      if (isElementLayer(layer)) {
+        shown.push({ layer })
+        continue
+      }
       if (layer.kind === 'video') {
         const reader = clipReaders.get(layer.file)
         if (!reader) continue
@@ -169,7 +172,7 @@ export async function renderExport(
 /** Decodes the images the layers show; one that cannot be loaded is simply not drawn, as in the preview. */
 async function loadPictures(layers: readonly Layer[], images: EditorSession['images']): Promise<Map<string, HTMLImageElement>> {
   const pictures = new Map<string, HTMLImageElement>()
-  const files = [...new Set(layers.filter((layer) => layer.kind === 'image').map((layer) => layer.file))]
+  const files = [...new Set(layers.flatMap((layer) => (layer.kind === 'image' ? [layer.file] : [])))]
   await Promise.all(
     files.map(async (file) => {
       const url = images.find((image) => image.file === file)?.url

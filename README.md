@@ -40,6 +40,43 @@ Privacidade e Segurança › Gravação do Áudio do Sistema e da Tela.
 As gravações ficam em `~/Movies/ScreenRx/`, uma pasta por sessão. Os logs ficam em
 `~/Library/Logs/ScreenRx/main.log`.
 
+### Editor web
+
+O editor também roda no navegador, sem os recursos que dependem do Mac
+(biblioteca, IA, dublagem, efeitos renderizados, rastreamento de objeto e a
+telemetria do cursor). Grava a tela pela própria página no Chrome e no Edge:
+
+```bash
+npm run dev:web
+```
+
+Abre em `http://localhost:5180`. `npm run build:web` gera `out/web/`, uma página
+estática. O vídeo (MP4 ou MOV) é aberto como arquivo e a edição e a exportação
+acontecem no navegador (WebCodecs: Chrome, Edge ou Safari 16.4+); o projeto fica
+no IndexedDB.
+
+**Servidor** (`src/server`): serve a página e, quando aponta para um serviço de
+transcrição compatível com a API de áudio da OpenAI (OpenAI, Groq ou um Whisper
+próprio), gera as legendas. Só o som vai ao servidor, como WAV mono de 16 kHz.
+
+```bash
+npm run build:web && npm run build:server
+```
+
+```bash
+SCREENRX_TRANSCRIPTION_URL=https://api.openai.com/v1 SCREENRX_TRANSCRIPTION_KEY=sk-… npm run start:server
+```
+
+Em `http://localhost:8080`. Sem `SCREENRX_TRANSCRIPTION_URL` a aba Legendas só
+importa SRT/VTT. Variáveis: `PORT`, `HOST`, `SCREENRX_WEB_DIR`,
+`SCREENRX_TRANSCRIPTION_MODEL` (`whisper-1`), `_MAX_MINUTES` (120),
+`_CHUNK_MINUTES` (1), `_CONCURRENCY` (2), `_TIMEOUT_SECONDS` (300). Em
+desenvolvimento, `npm run dev:web` encaminha `/api` para `localhost:8080`.
+
+Para hospedar tudo em casa: `docker compose up -d` sobe a página e um Whisper
+(speaches) ao lado; o `Dockerfile` serve sozinho para usar um serviço de nuvem.
+Coloque atrás de HTTPS: WebCodecs e o acesso a arquivos exigem contexto seguro.
+
 ## Gravar reuniões do Screen Live
 
 Em Configurações, informe o endereço do Screen Live (ex.: `https://meet.exemplo.com`) e o

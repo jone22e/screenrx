@@ -1,0 +1,32 @@
+# O editor web com a transcrição no próprio servidor: `docker compose up -d`
+# sobe a página em http://localhost:8080 e um Whisper (speaches, faster-whisper)
+# ao lado, que só o servidor do ScreenRx alcança. Ao subir, o servidor pede ao
+# Whisper que baixe o modelo (~480 MB o `small`); ele fica no volume
+# `whisper-models`. Com o modelo pronto, 10 s de fala levam ~4 s numa CPU comum.
+#
+# Para usar um serviço de nuvem no lugar (OpenAI, Groq…), apague o serviço
+# `whisper` e aponte SCREENRX_TRANSCRIPTION_URL/KEY/MODEL para ele.
+
+services:
+  screenrx-web:
+    build: .
+    ports:
+      - '8080:8080'
+    environment:
+      SCREENRX_TRANSCRIPTION_URL: http://whisper:8000/v1
+      # `Systran/faster-whisper-large-v3` ou `deepdml/faster-whisper-large-v3-turbo-ct2` acertam mais e pedem mais máquina.
+      SCREENRX_TRANSCRIPTION_MODEL: Systran/faster-whisper-small
+      SCREENRX_TRANSCRIPTION_MAX_MINUTES: '120'
+    depends_on:
+      - whisper
+    restart: unless-stopped
+
+  whisper:
+    # Com GPU NVIDIA: `latest-cuda` e `deploy.resources.reservations.devices` (driver nvidia).
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    volumes:
+      - whisper-models:/home/ubuntu/.cache/huggingface/hub
+    restart: unless-stopped
+
+volumes:
+  whisper-models:

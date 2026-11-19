@@ -1,8 +1,9 @@
-import { access, readFile, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Menu, app, dialog, ipcMain, screen, shell, systemPreferences } from 'electron'
 import type { IpcInvokeChannel, IpcInvokeContract } from '@shared/ipc/contract'
 import type { AiProvider } from '@shared/models/ai'
+import type { EditorClip } from '@shared/models/editor'
 import { isAiProviderId, parseAiChoice } from '@shared/models/ai'
 import { parseAssistantRequest } from '@shared/models/assistant'
 import { parseObjectTrackRequest } from '@shared/models/telemetry'
@@ -64,6 +65,13 @@ const MAX_COVER_IMAGE_BYTES = 20 * 1024 * 1024
 import { assetUrl } from '@shared/models/media'
 import { toMusicAppError } from '../library/MusicImporter'
 import type { VideoImporter } from '../library/VideoImporter'
+import type { InstagramService } from '../instagram/InstagramService'
+import { InstagramError } from '../instagram/InstagramGraph'
+import type { LinkDownloader } from '../library/LinkDownloader'
+import { LinkError } from '../library/LinkDownloader'
+import type { ReelCaptionService } from '../ai/ReelCaptionService'
+import { applyPlatformPreset, platformPreset } from '@engine/export/platformPresets'
+import { INSTAGRAM_LIMITS } from '@shared/models/instagram'
 import type { ThumbnailService } from '../media/ThumbnailService'
 import { toMeetAppError } from '../meet/MeetRecorder'
 import type { MeetRecorder } from '../meet/MeetRecorder'
@@ -110,6 +118,9 @@ export interface IpcDependencies {
   windows: WindowManager
   logger: Logger
   ownPids: () => number[]
+  instagram: InstagramService
+  links: LinkDownloader
+  reelCaptions: ReelCaptionService
 }
 
 type Result<Channel extends IpcInvokeChannel> = IpcInvokeContract[Channel]['result']
@@ -169,7 +180,10 @@ export function registerIpc(deps: IpcDependencies): void {
     updates,
     windows,
     logger,
-    ownPids
+    ownPids,
+    instagram,
+    links,
+    reelCaptions
   } = deps
 
   function handle<Channel extends IpcInvokeChannel>(
@@ -496,6 +510,18 @@ export function registerIpc(deps: IpcDependencies): void {
     }
   })
 
+  handle('library:duplicate', async ([sessionId]) => {
+    if (!isSessionId(sessionId)) return { ok: false, error: appError('invalid-state', 'invalid session id') }
+    try {
+      const copy = await sessions.duplicate(sessionId, new Date())
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: { sessionId: copy } }
+    } catch (error) {
+      logger.error('could not duplicate recording', { sessionId, error: String(error) })
+      return { ok: false, error: appError('storage-unavailable', String(error)) }
+    }
+  })
+
   handle('library:import-paths', async ([value]) => {
     const paths = Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry !== '') : []
     const allowed = paths.filter((filePath) => IMPORT_EXTENSIONS.includes(filePath.split('.').pop()?.toLowerCase() ?? ''))
@@ -729,18 +755,31 @@ export function registerIpc(deps: IpcDependencies): void {
     }
     const answer = owner ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options)
     if (answer.canceled) return { ok: true, value: [] }
+    return importClips(sessionId, answer.filePaths)
+  })
+
+  // Video files dropped on the editor's timeline: only what looks like a video is taken.
+  handle('clips:import-paths', async ([sessionId, value]) => {
+    if (!isSessionId(sessionId)) return { ok: false, error: appError('invalid-state', 'invalid session id') }
+    const paths = Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string' && entry !== '') : []
+    const allowed = paths.filter((filePath) => IMPORT_EXTENSIONS.includes(filePath.split('.').pop()?.toLowerCase() ?? ''))
+    if (allowed.length === 0) return { ok: false, error: appError('import-unsupported', 'no video files') }
+    return importClips(sessionId, allowed)
+  })
+
+  async function importClips(sessionId: string, filePaths: readonly string[]): Promise<IpcResult<EditorClip[]>> {
     const imported = []
-    for (const filePath of answer.filePaths) {
+    for (const filePath of filePaths) {
       try {
         const clip = await clips.import(sessionId, filePath)
-        imported.push({ ...clip, url: assetUrl(sessionId, clip.file) })
+        imported.push({ ...clip, url: assetUrl(sessionId, clip.file), hasAudio: clip.hasAudio === true })
       } catch (error) {
         if (imported.length === 0) return { ok: false, error: toClipAppError(error) }
         logger.warn('clip skipped', { sessionId, file: filePath, error: String(error) })
       }
     }
     return { ok: true, value: imported.map(({ sizeBytes: _size, ...clip }) => clip) }
-  })
+  }
 
   handle('clips:remove', async ([sessionId, file]) => {
     if (!isSessionId(sessionId) || typeof file !== 'string') return { ok: false, error: appError('invalid-state', 'invalid clip') }
@@ -1107,6 +1146,139 @@ export function registerIpc(deps: IpcDependencies): void {
   handle('update:get-state', () => updates.getState())
   handle('update:check', () => updates.check())
   handle('update:install', () => updates.install())
+
+  // MARK: Instagram
+
+  const instagramResult = async <T>(operation: () => Promise<T>): Promise<IpcResult<T>> => {
+    try {
+      return { ok: true, value: await operation() }
+    } catch (error) {
+      const failure =
+        error instanceof InstagramError || error instanceof ExportError || error instanceof AiError ? error.appError : appError('instagram-failed', String(error))
+      if (failure.code !== 'export-cancelled' && failure.code !== 'ai-cancelled') logger.error('instagram call failed', { code: failure.code, detail: failure.detail })
+      return { ok: false, error: failure }
+    }
+  }
+  /** The Reels file of a recording, in its own folder; made again for each publish. */
+  const reelsPath = (sessionId: string): string => path.join(sessions.directoryOf(sessionId), 'publish', 'reels.mp4')
+
+  handle('instagram:status', () => instagram.status())
+  handle('instagram:configure', ([appId, appSecret, configId]) =>
+    instagramResult(async () => {
+      if (typeof appId !== 'string' || (appSecret !== null && typeof appSecret !== 'string') || typeof configId !== 'string') {
+        throw new InstagramError(appError('invalid-state', 'invalid instagram settings'))
+      }
+      return instagram.configure(appId.slice(0, 40), appSecret === null ? null : appSecret.slice(0, 200), configId.slice(0, 40))
+    })
+  )
+  handle('instagram:login', ([switching]) => instagramResult(() => instagram.login(switching === true)))
+  handle('instagram:connect-token', ([token]) =>
+    instagramResult(async () => {
+      if (typeof token !== 'string' || token.length > 2000) throw new InstagramError(appError('instagram-login-failed', 'invalid token'))
+      return instagram.connectWithToken(token)
+    })
+  )
+  handle('instagram:choose', ([igUserId]) =>
+    instagramResult(async () => {
+      if (typeof igUserId !== 'string') throw new InstagramError(appError('invalid-state', 'invalid account'))
+      return instagram.choose(igUserId)
+    })
+  )
+  handle('instagram:disconnect', () => instagramResult(() => instagram.disconnect()))
+  handle('instagram:approve', ([value]) =>
+    instagramResult(async () => {
+      const entries = Array.isArray(value)
+        ? value.flatMap((entry: unknown) => {
+            const candidate = entry as { sessionId?: unknown; caption?: unknown } | null
+            return candidate && isSessionId(candidate.sessionId) && typeof candidate.caption === 'string' ? [{ sessionId: candidate.sessionId, caption: candidate.caption }] : []
+          })
+        : []
+      if (entries.length === 0) throw new InstagramError(appError('invalid-state', 'nothing to approve'))
+      for (const { sessionId } of entries) {
+        const manifest = await sessions.read(sessionId)
+        const durationMs = manifest?.clock.durationMs ?? 0
+        if (!manifest?.assets.screen || manifest.status !== 'completed') throw new InstagramError(appError('invalid-state', 'not a finished recording'))
+        if (durationMs < INSTAGRAM_LIMITS.minDurationMs) throw new InstagramError(appError('instagram-failed', 'too short'))
+      }
+      await instagram.approve(entries)
+      return null
+    })
+  )
+  handle('instagram:withdraw', ([sessionId]) =>
+    instagramResult(async () => {
+      if (!isSessionId(sessionId)) throw new InstagramError(appError('invalid-state', 'invalid session id'))
+      await instagram.withdraw(sessionId)
+      return null
+    })
+  )
+  handle('instagram:suggest-caption', ([sessionId, chosen, topic]) =>
+    instagramResult(async () => {
+      const choice = parseAiChoice(chosen)
+      if (!isSessionId(sessionId) || !choice) throw new AiError(appError('ai-failed', 'invalid caption request'))
+      return reelCaptions.suggest(sessionId, choice, typeof topic === 'string' ? topic.slice(0, 80) : '')
+    })
+  )
+  handle('instagram:start-export', ([sessionId]) =>
+    instagramResult(async () => {
+      if (!isSessionId(sessionId)) throw new InstagramError(appError('invalid-state', 'invalid session id'))
+      const manifest = await sessions.read(sessionId)
+      if (!manifest?.publish || manifest.publish.state !== 'approved') throw new InstagramError(appError('invalid-state', 'not waiting to publish'))
+      if ((await instagram.status()).account === null) throw new InstagramError(appError('instagram-not-connected'))
+      // The project's own look, at the Reels size and shape; the project is not changed.
+      const { project } = await projects.open(sessionId)
+      const reels = platformPreset('reels')
+      if (!reels) throw new InstagramError(appError('export-failed', 'no reels preset'))
+      const overrides = { export: applyPlatformPreset(project.export, reels), aspect: reels.aspect ?? project.background.aspect }
+      const destination = reelsPath(sessionId)
+      await mkdir(path.dirname(destination), { recursive: true })
+      const job = await exports.start(sessionId, overrides, destination)
+      await instagram.mark(sessionId, 'rendering')
+      return job
+    })
+  )
+  handle('instagram:mark', ([sessionId, state, error]) =>
+    instagramResult(async () => {
+      if (!isSessionId(sessionId) || (state !== 'approved' && state !== 'failed')) throw new InstagramError(appError('invalid-state', 'invalid mark'))
+      await instagram.mark(sessionId, state, typeof error === 'string' ? error.slice(0, 300) : undefined)
+      return null
+    })
+  )
+  handle('instagram:publish', ([sessionId]) =>
+    instagramResult(async () => {
+      if (!isSessionId(sessionId)) throw new InstagramError(appError('invalid-state', 'invalid session id'))
+      const file = reelsPath(sessionId)
+      await access(file)
+      return instagram.publish(sessionId, file)
+    })
+  )
+  handle('instagram:open-post', async ([sessionId]) => {
+    if (!isSessionId(sessionId)) return
+    const permalink = (await sessions.read(sessionId))?.publish?.permalink
+    if (permalink && /^https:\/\/(www\.)?instagram\.com\//.test(permalink)) await shell.openExternal(permalink)
+  })
+
+  // MARK: Videos by link
+
+  handle('link:status', () => links.status())
+  handle('link:install', async () => {
+    try {
+      return { ok: true, value: await links.installTool() }
+    } catch (error) {
+      return { ok: false, error: error instanceof LinkError ? error.appError : appError('link-tool-failed', String(error)) }
+    }
+  })
+  handle('link:download', async ([url]) => {
+    try {
+      const sessionId = await links.download(typeof url === 'string' ? url : '')
+      windows.broadcast('library:changed', null)
+      return { ok: true, value: { sessionId } }
+    } catch (error) {
+      const failure = error instanceof LinkError ? error.appError : toImportAppError(error)
+      if (failure.code !== 'link-cancelled') logger.error('link download failed', { code: failure.code, detail: failure.detail })
+      return { ok: false, error: failure }
+    }
+  })
+  handle('link:cancel', () => links.cancel())
 
   handle('recorder:open', () => {
     if (controller.getState().phase === 'idle') controller.dismissError()

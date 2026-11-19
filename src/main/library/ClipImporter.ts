@@ -30,9 +30,10 @@ const FALLBACK_FPS = 30
 
 /**
  * Brings a video file into a session's `assets/` folder as b-roll: H.264 in
- * MP4 (copied when it already is, re-encoded otherwise), without its audio
- * — b-roll plays under the recording's own sound. The original file is
- * never touched.
+ * MP4 (copied when it already is, re-encoded otherwise), with its sound as
+ * AAC when it has any — silent while the clip floats over the recording,
+ * heard when it splits the screen and the user asks for it. The original
+ * file is never touched.
  */
 export class ClipImporter {
   constructor(private readonly deps: ClipImporterDeps) {}
@@ -58,7 +59,7 @@ export class ClipImporter {
     try {
       await mkdir(directory, { recursive: true })
       const fps = video.fps > 0 ? Math.round(video.fps) : FALLBACK_FPS
-      await ffmpeg.writeVideoTrack(filePath, partial, { copy: canCopyVideo(video), bitrate: importBitrate(video.widthPx, video.heightPx, fps) })
+      await ffmpeg.writeVideoTrack(filePath, partial, { copy: canCopyVideo(video), bitrate: importBitrate(video.widthPx, video.heightPx, fps), withAudio: probe.audio !== null })
       const [size, written] = await Promise.all([stat(partial), ffmpeg.probeMedia(partial)])
       if (!written.video) throw new ClipImportError(appError('import-failed', 'clip has no video after import'))
       await rename(partial, target)
@@ -68,7 +69,8 @@ export class ClipImporter {
         sizeBytes: size.size,
         durationMs: Math.round(written.durationMs),
         widthPx: written.video.widthPx,
-        heightPx: written.video.heightPx
+        heightPx: written.video.heightPx,
+        hasAudio: written.audio !== null
       }
       const videos = [...(manifest.assets.videos ?? []), clip]
       await sessions.write({ ...manifest, assets: { ...manifest.assets, videos } })

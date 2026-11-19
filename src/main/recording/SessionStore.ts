@@ -1,10 +1,13 @@
-import { mkdir, readFile, readdir, rm, rmdir, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readFile, readdir, rm, rmdir, stat, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import path from 'node:path'
 import { SESSION_FILES } from '@shared/config/recording'
 import { suggestTitle, transcriptPreview } from '@engine/captions/transcriptPreview'
 import type { Transcript, TranscriptWord } from '@shared/models/captions'
 import { parseTranscript } from '@shared/models/captions'
 import type { AppError } from '@shared/models/errors'
+import type { PublishRecord } from '@shared/models/instagram'
+import { parsePublishRecord, publishSummaryOf } from '@shared/models/instagram'
 import type { MediaTrack } from '@shared/models/media'
 import { thumbnailUrl } from '@shared/models/media'
 import type {
@@ -246,6 +249,82 @@ export class SessionStore {
     if (manifest) await this.write({ ...manifest, lastExportAt: new Date().toISOString() })
   }
 
+  /**
+   * Changes how far the recording is on its way to Instagram (`null`: no
+   * longer approved). `change` gets the record as it is now, so a state
+   * written meanwhile is not lost. Returns the record written.
+   */
+  async updatePublish(sessionId: string, change: (current: PublishRecord | null) => PublishRecord | null): Promise<PublishRecord | null> {
+    const manifest = await this.read(sessionId)
+    if (!manifest) return null
+    const next = change(manifest.publish ?? null)
+    const written = { ...manifest }
+    if (next === null) delete written.publish
+    else written.publish = next
+    await this.write(written)
+    return next
+  }
+
+  /**
+   * A publish cut short when the app quit (rendering, sending) starts over:
+   * back to the queue. One Meta was processing is left to be checked again.
+   */
+  async requeueInterruptedPublishes(): Promise<string[]> {
+    let entries: string[]
+    try {
+      entries = await readdir(this.root)
+    } catch {
+      return []
+    }
+    const requeued: string[] = []
+    for (const id of entries.filter(isSessionId)) {
+      const manifest = await this.read(id)
+      const state = manifest?.publish?.state
+      if (manifest?.publish && (state === 'rendering' || state === 'uploading')) {
+        await this.write({ ...manifest, publish: { ...manifest.publish, state: 'approved' } })
+        requeued.push(id)
+      }
+    }
+    return requeued
+  }
+
+  /**
+   * A copy of a finished recording with all its edit, under a new id and
+   * "(cópia)" after its name, ready to be edited or published apart: what
+   * belongs to the original alone — its Instagram post, its last export, the
+   * Reels file made for it — stays behind. On APFS the files are cloned, so
+   * the copy takes no room until one of them changes. The new id.
+   */
+  async duplicate(sessionId: string, now: Date): Promise<string> {
+    const manifest = await this.read(sessionId)
+    if (!manifest || manifest.status !== 'completed') throw new Error('only a finished recording can be duplicated')
+    const source = this.directoryOf(sessionId)
+    const { id, directory } = await this.createDirectory(now)
+    try {
+      for (const entry of await readdir(source)) {
+        if (entry === 'publish' || entry === SESSION_FILES.manifest || entry.endsWith('.part')) continue
+        await cp(path.join(source, entry), path.join(directory, entry), { recursive: true, mode: constants.COPYFILE_FICLONE })
+      }
+      // The project names its session: the copy's names the copy.
+      const projectPath = path.join(directory, SESSION_FILES.project)
+      try {
+        const project = JSON.parse(await readFile(projectPath, 'utf8')) as Record<string, unknown>
+        await writeJsonAtomic(projectPath, { ...project, sessionId: id })
+      } catch {
+        // No edit yet: the copy opens fresh, as the original would.
+      }
+      const copy: RecordingSessionManifest = { ...manifest, id, createdAt: now.toISOString(), title: copyTitle(manifest.title ?? manifest.source.label) }
+      delete copy.publish
+      delete copy.lastExportAt
+      await this.write(copy)
+      this.logger.info('recording duplicated', { from: sessionId, to: id })
+      return id
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true })
+      throw error
+    }
+  }
+
   /** Keeps the start of what was said with the session, once transcribed. */
   async setTranscriptPreview(sessionId: string, preview: string): Promise<void> {
     const manifest = await this.read(sessionId)
@@ -433,6 +512,10 @@ function parseManifest(value: unknown, expectedId: string): RecordingSessionMani
   if (series === null) delete parsed.series
   else parsed.series = series
   if (typeof manifest.cover !== 'string' || !isSafeFileName(manifest.cover) || !manifest.cover.startsWith('cover-')) delete parsed.cover
+  const publish = parsePublishRecord(manifest.publish)
+  if (publish === null) delete parsed.publish
+  else parsed.publish = publish
+  if (typeof manifest.sourceUrl !== 'string' || !/^https?:\/\//.test(manifest.sourceUrl)) delete parsed.sourceUrl
   return parsed
 }
 
@@ -442,6 +525,14 @@ function withTitle(manifest: RecordingSessionManifest, title: string | null): Re
   if (title === null) delete next.title
   else next.title = title
   return next
+}
+
+/** "Aula 1" → "Aula 1 (cópia)"; a copy of a copy stays one copy, numbered. */
+export function copyTitle(title: string): string {
+  const numbered = /^(.*) \(cópia(?: (\d+))?\)$/.exec(title)
+  const base = numbered ? (numbered[1] as string) : title
+  const next = numbered ? (numbered[2] ? Number(numbered[2]) + 1 : 2) : 1
+  return normalizeSessionTitle(`${base} (cópia${next > 1 ? ` ${next}` : ''})`) ?? title
 }
 
 function toSummary(
@@ -469,6 +560,7 @@ function toSummary(
     title: manifest.title ?? manifest.source.label,
     series: manifest.series ?? null,
     hasCover: manifest.cover !== undefined,
+    publish: publishSummaryOf(manifest.publish),
     sourceLabel: manifest.source.label,
     durationMs: manifest.clock.durationMs,
     sizeBytes: [screen, microphone, systemAudio, webcam].reduce((total, asset) => total + (asset?.sizeBytes ?? 0), 0),

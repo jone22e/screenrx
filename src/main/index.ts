@@ -1,7 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import { existsSync } from 'node:fs'
-import { app, dialog, powerMonitor, screen, session } from 'electron'
+import { app, dialog, powerMonitor, safeStorage, screen, session } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { DEFAULT_CAPTION_LOCALE } from '@shared/models/captions'
 import { appError } from '@shared/models/errors'
@@ -30,6 +30,14 @@ import { TemplateStore } from './project/TemplateStore'
 import { ImageImporter } from './library/ImageImporter'
 import { MusicImporter } from './library/MusicImporter'
 import { VideoImporter } from './library/VideoImporter'
+import { LinkDownloader } from './library/LinkDownloader'
+import { InstagramGraph } from './instagram/InstagramGraph'
+import { InstagramService } from './instagram/InstagramService'
+import type { SecretBox } from './instagram/InstagramService'
+import { createLoginWindow } from './instagram/loginWindow'
+import { ReelCaptionService } from './ai/ReelCaptionService'
+import { ClipTranscriber } from './captions/ClipTranscriber'
+import { transcribeFile } from './captions/transcribeFile'
 import { addLogSink, consoleSink, createLogger, fileSink } from './logging/logger'
 import { ThumbnailService } from './media/ThumbnailService'
 import { WaveformService } from './media/WaveformService'
@@ -266,7 +274,50 @@ async function bootstrap(): Promise<void> {
   powerMonitor.on('resume', () => setTimeout(() => updates.checkIfStale(), 5_000))
   app.on('will-quit', () => updates.stop())
 
+  const importer = new VideoImporter({ ffmpeg, sessions, logger: createLogger('import') })
+  // The second video's speech (a reaction), for the editing team: transcribed on this Mac, once per clip.
+  const clipTranscriber = new ClipTranscriber({
+    transcribe: (audioPath, locale) => {
+      const binary = transcriberPath()
+      return binary ? transcribeFile(binary, audioPath, locale) : Promise.reject(new Error('no transcriber on this platform'))
+    },
+    ffmpeg,
+    sessions,
+    logger: createLogger('captions')
+  })
+  const ffmpegBinaries = bundledFfmpegBinaries()
+  const links = new LinkDownloader({
+    toolsDirectory: path.join(app.getPath('userData'), 'tools'),
+    ffmpegPath: ffmpegBinaries.ffmpeg,
+    ffprobePath: ffmpegBinaries.ffprobe,
+    importer,
+    sessions,
+    logger: createLogger('link'),
+    onProgress: (progress) => windows.broadcast('link:progress', progress)
+  })
+  // The Instagram tokens are sealed with the keychain; without it (never on a Mac) they are kept as they are.
+  const secrets: SecretBox | null = safeStorage.isEncryptionAvailable()
+    ? {
+        encrypt: (plain) => safeStorage.encryptString(plain).toString('base64'),
+        decrypt: (sealed) => safeStorage.decryptString(Buffer.from(sealed, 'base64'))
+      }
+    : null
+  const instagram = new InstagramService({
+    directory: app.getPath('userData'),
+    sessions,
+    graph: new InstagramGraph(),
+    secrets,
+    openLogin: createLoginWindow(() => windows.mainWindow),
+    logger: createLogger('instagram'),
+    onProgress: (progress) => windows.broadcast('instagram:progress', progress),
+    onChanged: () => windows.broadcast('library:changed', null)
+  })
+  await sessions.requeueInterruptedPublishes()
+
   registerIpc({
+    instagram,
+    links,
+    reelCaptions: new ReelCaptionService(ai, sessions, createLogger('ai')),
     engine,
     controller,
     sessions,
@@ -295,13 +346,14 @@ async function bootstrap(): Promise<void> {
       logger: createLogger('auto-edit'),
       onProgress: (progress) => windows.broadcast('ai:auto-edit-progress', progress),
       onPlan: (sessionId, plan) => windows.broadcast('ai:auto-edit-plan', { sessionId, plan }),
-      onWorker: (sessionId, result) => windows.broadcast('ai:auto-edit-worker', { sessionId, result })
+      onWorker: (sessionId, result) => windows.broadcast('ai:auto-edit-worker', { sessionId, result }),
+      clipWords: (sessionId, file, durationMs, locale) => clipTranscriber.wordsOf(sessionId, file, durationMs, locale)
     }),
     translations: new CaptionTranslationService(ai, createLogger('ai')),
     aiSetup,
     waveforms: new WaveformService(ffmpeg, sessions),
     thumbnails,
-    importer: new VideoImporter({ ffmpeg, sessions, logger: createLogger('import') }),
+    importer,
     music: new MusicImporter({ ffmpeg, sessions, logger: createLogger('music') }),
     images: new ImageImporter({ ffmpeg, sessions, logger: createLogger('images') }),
     clips: new ClipImporter({ ffmpeg, sessions, logger: createLogger('clips') }),

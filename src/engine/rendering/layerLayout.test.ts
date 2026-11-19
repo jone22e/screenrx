@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { ImageLayer } from '@shared/models/project'
-import { layersAt, layoutImageLayer, rotatedBounds } from './layerLayout'
+import type { ImageLayer, Layer } from '@shared/models/project'
+import { layersAt, layoutImageLayer, layoutLayer, rotatedBounds } from './layerLayout'
 
 const layer = (change: Partial<ImageLayer> = {}): ImageLayer => ({
   id: 'logo',
@@ -54,5 +54,16 @@ describe('rotatedBounds', () => {
     expect(turned.height).toBeCloseTo(200)
     expect(turned.x).toBeCloseTo(150)
     expect(turned.y).toBeCloseTo(50)
+  })
+})
+
+describe('layoutLayer', () => {
+  it('lays a shape out by its own aspect, an emoji as a square, and a file by its picture', () => {
+    const shape = { ...layer(), kind: 'shape', shape: 'rectangle', aspect: 0.5, fill: true, fillColor: '#ff0000', strokeRatio: 0, strokeColor: '#fff' } as unknown as Layer
+    expect(layoutLayer(output, shape, null)).toMatchObject({ width: 200, height: 100 })
+    const emoji = { ...layer(), kind: 'emoji', emoji: '👍' } as unknown as Layer
+    expect(layoutLayer(output, emoji, null)).toMatchObject({ width: 200, height: 200 })
+    expect(layoutLayer(output, layer(), { width: 400, height: 100 })).toMatchObject({ width: 200, height: 50 })
+    expect(layoutLayer(output, layer(), null)).toMatchObject({ width: 200, height: 200 })
   })
 })

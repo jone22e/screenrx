@@ -23,6 +23,7 @@ import type {
   ExportOverrides, ExportJob, ExportResult, ExportTrackName } from '../models/export'
 import type { MeetRoom, MeetSettings } from '../models/meet'
 import type { PermissionKind, PermissionReport } from '../models/permissions'
+import type { PlatformInfo } from '../models/platform'
 import type { Project } from '../models/project'
 import type { RecordingStateSnapshot } from '../models/recording'
 import type { RecordingSummary } from '../models/session'
@@ -30,6 +31,8 @@ import type { SeriesPlan, SeriesProgress } from '../models/series'
 import type { CutSuggestionResult } from '../models/suggestions'
 import type { ObjectTrack, ObjectTrackRequest } from '../models/telemetry'
 import type { UpdateState } from '../models/update'
+import type { CaptionSuggestion, InstagramStatus, PublishProgress, PublishRecord } from '../models/instagram'
+import type { LinkDownloadProgress, LinkToolStatus } from '../models/link'
 
 /** An audio track whose outline the timeline can draw: a recorded one, or a dubbing. */
 export type WaveformTrack = 'microphone' | 'systemAudio' | 'dubEn' | 'dubEs' | 'dubZh' | 'dubPt' | 'music'
@@ -73,6 +76,7 @@ export interface IpcInvokeContract {
   'library:import': { args: []; result: IpcResult<{ sessionIds: string[] }> }
   'library:import-paths': { args: [paths: string[]]; result: IpcResult<{ sessionIds: string[] }> }
   'library:join': { args: [sessionIds: string[]]; result: IpcResult<{ sessionId: string }> }
+  'library:duplicate': { args: [sessionId: string]; result: IpcResult<{ sessionId: string }> }
   'templates:list': { args: []; result: ProjectTemplate[] }
   'templates:save': { args: [template: ProjectTemplate]; result: IpcResult<ProjectTemplate[]> }
   'templates:delete': { args: [id: string]; result: IpcResult<ProjectTemplate[]> }
@@ -110,6 +114,7 @@ export interface IpcInvokeContract {
   'images:import': { args: [sessionId: string]; result: IpcResult<EditorImage[]> }
   'images:remove': { args: [sessionId: string, file: string]; result: IpcResult<null> }
   'clips:import': { args: [sessionId: string]; result: IpcResult<EditorClip[]> }
+  'clips:import-paths': { args: [sessionId: string, paths: string[]]; result: IpcResult<EditorClip[]> }
   'clips:remove': { args: [sessionId: string, file: string]; result: IpcResult<null> }
   'music:remove': { args: [sessionId: string]; result: IpcResult<null> }
   'dub:cancel': { args: []; result: void }
@@ -168,6 +173,25 @@ export interface IpcInvokeContract {
   'update:get-state': { args: []; result: UpdateState }
   'update:check': { args: []; result: UpdateState }
   'update:install': { args: []; result: boolean }
+
+  'instagram:status': { args: []; result: InstagramStatus }
+  'instagram:configure': { args: [appId: string, appSecret: string | null, configId: string]; result: IpcResult<InstagramStatus> }
+  'instagram:login': { args: [switching: boolean]; result: IpcResult<InstagramStatus> }
+  'instagram:connect-token': { args: [token: string]; result: IpcResult<InstagramStatus> }
+  'instagram:choose': { args: [igUserId: string]; result: IpcResult<InstagramStatus> }
+  'instagram:disconnect': { args: []; result: IpcResult<InstagramStatus> }
+  'instagram:approve': { args: [entries: Array<{ sessionId: string; caption: string }>]; result: IpcResult<null> }
+  'instagram:withdraw': { args: [sessionId: string]; result: IpcResult<null> }
+  'instagram:suggest-caption': { args: [sessionId: string, choice: AiChoice, topic: string]; result: IpcResult<CaptionSuggestion> }
+  'instagram:start-export': { args: [sessionId: string]; result: IpcResult<ExportJob> }
+  'instagram:mark': { args: [sessionId: string, state: 'approved' | 'failed', error: string | null]; result: IpcResult<null> }
+  'instagram:publish': { args: [sessionId: string]; result: IpcResult<PublishRecord> }
+  'instagram:open-post': { args: [sessionId: string]; result: void }
+
+  'link:status': { args: []; result: LinkToolStatus }
+  'link:install': { args: []; result: IpcResult<LinkToolStatus> }
+  'link:download': { args: [url: string]; result: IpcResult<{ sessionId: string }> }
+  'link:cancel': { args: []; result: void }
 }
 
 /** Every main → renderer broadcast. */
@@ -183,6 +207,8 @@ export interface IpcEventContract {
   'ai:auto-edit-progress': AutoEditProgress
   'ai:auto-edit-plan': { sessionId: string; plan: AutoEditPlan }
   'ai:auto-edit-worker': { sessionId: string; result: WorkerResult }
+  'instagram:progress': PublishProgress
+  'link:progress': LinkDownloadProgress
 }
 
 export type IpcInvokeChannel = keyof IpcInvokeContract
@@ -192,6 +218,8 @@ export type Unsubscribe = () => void
 
 /** The API exposed to renderers as `window.screenrx`. */
 export interface ScreenRxApi {
+  /** Where the renderer runs and what the server (web) offers; the editor hides what is not there. */
+  platform: PlatformInfo
   permissions: {
     get(): Promise<IpcResult<PermissionReport>>
     requestScreenRecording(): Promise<IpcResult<PermissionReport>>
@@ -253,6 +281,8 @@ export interface ScreenRxApi {
      * joined end to end, fitted into the first one's frame. The parts stay as they are.
      */
     join(sessionIds: string[]): Promise<IpcResult<{ sessionId: string }>>
+    /** A copy of the recording with all its edit, in the same series, to edit or publish apart; the original stays. */
+    duplicate(sessionId: string): Promise<IpcResult<{ sessionId: string }>>
     /** The ids of the recordings whose transcript contains the words; the title is matched by the caller. */
     search(query: string): Promise<string[]>
     onChanged(listener: () => void): Unsubscribe
@@ -297,8 +327,10 @@ export interface ScreenRxApi {
     remove(sessionId: string, file: string): Promise<IpcResult<null>>
   }
   clips: {
-    /** Asks for video files and brings each in as b-roll (H.264, no sound). Resolves with the ones brought in. */
+    /** Asks for video files and brings each in as b-roll (H.264, its sound as AAC). Resolves with the ones brought in. */
     import(sessionId: string): Promise<IpcResult<EditorClip[]>>
+    /** Brings video files dropped on the editor in, as `import` does for chosen ones. */
+    importFiles(sessionId: string, files: File[]): Promise<IpcResult<EditorClip[]>>
     remove(sessionId: string, file: string): Promise<IpcResult<null>>
   }
   music: {
@@ -434,5 +466,47 @@ export interface ScreenRxApi {
      */
     install(): Promise<boolean>
     onStateChanged(listener: (state: UpdateState) => void): Unsubscribe
+  }
+  instagram: {
+    /** Who is connected (never the tokens), and the Meta app the login goes through. */
+    status(): Promise<InstagramStatus>
+    /** The Meta app's id, its secret (empty keeps the one kept; `null` removes it) and an optional login configuration. */
+    configure(appId: string, appSecret: string | null, configId: string): Promise<IpcResult<InstagramStatus>>
+    /** Facebook's login in a window of its own; connects the professional account found. */
+    /** `switching`: Facebook asks again which Pages to share, and all the accounts reached are offered. */
+    login(switching?: boolean): Promise<IpcResult<InstagramStatus>>
+    /** Connects with a user token from the Graph API Explorer, instead of the login window. */
+    connectWithToken(token: string): Promise<IpcResult<InstagramStatus>>
+    /** Picks one of several accounts the login reached. */
+    choose(igUserId: string): Promise<IpcResult<InstagramStatus>>
+    disconnect(): Promise<IpcResult<InstagramStatus>>
+    /** Approves recordings, each with its caption: the queue publishes them as Reels. */
+    approve(entries: Array<{ sessionId: string; caption: string }>): Promise<IpcResult<null>>
+    /** Takes an approved (or failed) recording out of the queue. */
+    withdraw(sessionId: string): Promise<IpcResult<null>>
+    /**
+     * A caption written by the AI after it searches the web for what is in demand on the topic now
+     * (`topic` empty: the AI decides it from the recording), with the terms and hashtags it found.
+     */
+    suggestCaption(sessionId: string, choice: AiChoice, topic: string): Promise<IpcResult<CaptionSuggestion>>
+    /** Starts the Reels export (9:16, Reels settings) into the recording's folder, without asking where. */
+    startExport(sessionId: string): Promise<IpcResult<ExportJob>>
+    /** Gives an approved recording back to the queue, or marks it failed, when its file could not be made. */
+    mark(sessionId: string, state: 'approved' | 'failed', error: string | null): Promise<IpcResult<null>>
+    /** Sends the Reels file just exported and publishes it. */
+    publish(sessionId: string): Promise<IpcResult<PublishRecord>>
+    /** Opens the published Reel in the browser. */
+    openPost(sessionId: string): Promise<void>
+    onProgress(listener: (progress: PublishProgress) => void): Unsubscribe
+  }
+  link: {
+    /** Whether yt-dlp is there, and the size of its download when not. */
+    status(): Promise<LinkToolStatus>
+    /** Downloads yt-dlp into the app's data. */
+    install(): Promise<IpcResult<LinkToolStatus>>
+    /** Downloads the video behind a link and brings it into the library. */
+    download(url: string): Promise<IpcResult<{ sessionId: string }>>
+    cancel(): Promise<void>
+    onProgress(listener: (progress: LinkDownloadProgress) => void): Unsubscribe
   }
 }

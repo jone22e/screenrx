@@ -1,11 +1,14 @@
 import { useState, useSyncExternalStore } from 'react'
 import { formatTimecode } from '@shared/format'
 import type { EditorSession } from '@shared/models/editor'
-import { LAYER_LIMITS } from '@shared/models/project'
+import type { Layer, SplitAudio, SplitOrientation, SplitShow, VideoLayer } from '@shared/models/project'
+import { LAYER_LIMITS, SPLIT_LIMITS, isFileLayer } from '@shared/models/project'
+import { layerLabel } from '@engine/rendering/shapes'
+import { LayerIcon } from './LayerIcon'
 import type { EditorStore } from './EditorStore'
 import type { PreviewPlayer } from './PreviewPlayer'
-import { ArrowDownIcon, ArrowUpIcon, FilmIcon, ImageIcon, PlusIcon, TrashIcon } from './icons'
-import { Section, Slider } from './panelControls'
+import { ArrowDownIcon, ArrowUpIcon, FilmIcon, PlusIcon, TrashIcon } from './icons'
+import { Section, Segmented, Slider } from './panelControls'
 
 interface Props {
   session: EditorSession
@@ -23,10 +26,12 @@ const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
 export function LayersPanel({ session, store, player }: Props) {
   const state = useSyncExternalStore(store.subscribe, store.getState)
   const { layers, images, clips, selectedLayerId } = state
-  const selected = layers.find((layer) => layer.id === selectedLayerId) ?? null
+  // A shape or an emoji is selected on the Elementos tool; here only a file layer has settings.
+  const selected = layers.filter(isFileLayer).find((layer) => layer.id === selectedLayerId) ?? null
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
-  const nameOf = (file: string): string => images.find((image) => image.file === file)?.name ?? clips.find((clip) => clip.file === file)?.name ?? file
+  const fileName = (file: string): string => images.find((image) => image.file === file)?.name ?? clips.find((clip) => clip.file === file)?.name ?? file
+  const nameOf = (layer: Layer): string => layerLabel(layer, fileName)
   const clipOf = (file: string) => clips.find((clip) => clip.file === file) ?? null
 
   /** Brings clips in as b-roll, each laid over the video from the playhead, the last chosen on top. */
@@ -68,9 +73,11 @@ export function LayersPanel({ session, store, player }: Props) {
     if (lastId) store.selectLayer(lastId)
   }
 
-  /** Removes the layer and, when nothing else shows the file, the file too. */
-  const remove = async (layerId: string, file: string): Promise<void> => {
-    store.removeLayer(layerId)
+  /** Removes the layer and, when nothing else shows its file, the file too. */
+  const remove = async (layer: Layer): Promise<void> => {
+    store.removeLayer(layer.id)
+    if (!isFileLayer(layer)) return
+    const { file } = layer
     if (store.usesImage(file)) return
     if (clipOf(file)) {
       const result = await window.screenrx.clips.remove(session.sessionId, file).catch(() => null)
@@ -85,13 +92,13 @@ export function LayersPanel({ session, store, player }: Props) {
     <>
       <Section
         title={`Camadas${layers.length > 0 ? ` (${layers.length})` : ''}`}
-        help="Um logo, um sticker, uma captura ou um trecho de outro vídeo por cima da gravação. A imagem entra o vídeo inteiro; o vídeo, a partir do play. A primeira da lista fica por cima."
+        help="Um logo, um sticker, uma captura ou um trecho de outro vídeo por cima da gravação. A imagem entra o vídeo inteiro; o vídeo, a partir do play. As formas e os emojis também ficam nesta pilha. A primeira da lista fica por cima."
       >
         <div className="cut-actions">
           <button className="panel-button panel-button-primary" disabled={busy} onClick={() => void addImages()}>
             <PlusIcon /> {busy ? 'Trazendo…' : 'Imagem…'}
           </button>
-          <button className="panel-button" disabled={busy || !player} title="Um trecho de outro vídeo por cima da gravação, a partir do play, sem o som dele" onClick={() => void addClips()}>
+          <button className="panel-button" disabled={busy || !player} title="Outro vídeo, a partir do play, na trilha Vídeo 2: por cima da gravação ou em tela dividida" onClick={() => void addClips()}>
             <FilmIcon /> Vídeo…
           </button>
         </div>
@@ -108,9 +115,9 @@ export function LayersPanel({ session, store, player }: Props) {
                   }}
                 >
                   <span className="region-icon" aria-hidden="true">
-                    {layer.kind === 'video' ? <FilmIcon /> : <ImageIcon />}
+                    <LayerIcon layer={layer} />
                   </span>
-                  <span className="text-row-label">{nameOf(layer.file)}</span>
+                  <span className="text-row-label">{nameOf(layer)}</span>
                   <span className="region-row-meta">
                     {layer.startMs === 0 && layer.endMs >= session.durationMs ? 'o vídeo todo' : `${formatTimecode(layer.startMs)} – ${formatTimecode(layer.endMs)}`}
                   </span>
@@ -135,9 +142,9 @@ export function LayersPanel({ session, store, player }: Props) {
                 </button>
                 <button
                   className="region-row-remove"
-                  aria-label="Remover esta imagem"
-                  title="Remover esta imagem"
-                  onClick={() => void remove(layer.id, layer.file)}
+                  aria-label="Remover esta camada"
+                  title="Remover esta camada"
+                  onClick={() => void remove(layer)}
                 >
                   <TrashIcon />
                 </button>
@@ -150,7 +157,7 @@ export function LayersPanel({ session, store, player }: Props) {
       {selected && (
         <Section
           title={selected.kind === 'video' ? 'Vídeo selecionado' : 'Imagem selecionada'}
-          aside={nameOf(selected.file)}
+          aside={fileName(selected.file)}
           help="Arraste no vídeo para posicionar e puxe um canto para redimensionar. Na linha do tempo, mude quando aparece."
         >
           <p className="panel-meta">
@@ -173,6 +180,16 @@ export function LayersPanel({ session, store, player }: Props) {
               onCommit={() => store.endGesture()}
             />
           )}
+          {selected.kind === 'video' && (
+            <label className="check">
+              <input type="checkbox" checked={selected.split !== undefined} onChange={(event) => store.setLayerSplit(selected.id, event.target.checked)} />
+              <span>Tela dividida com a gravação</span>
+            </label>
+          )}
+          {selected.kind === 'video' && selected.split ? (
+            <SplitControls layer={selected} hasAudio={clipOf(selected.file)?.hasAudio === true} store={store} />
+          ) : (
+            <>
           <Slider
             label="Tamanho"
             value={percent(selected.sizeRatio)}
@@ -213,10 +230,117 @@ export function LayersPanel({ session, store, player }: Props) {
             onChange={(cornerRadiusRatio) => store.setLayer(selected.id, { cornerRadiusRatio }, 'layer-corners')}
             onCommit={() => store.endGesture()}
           />
-          <button className="panel-button panel-button-danger" onClick={() => void remove(selected.id, selected.file)}>
+            </>
+          )}
+          <button className="panel-button panel-button-danger" onClick={() => void remove(selected)}>
             <TrashIcon /> Remover {selected.kind === 'video' ? 'vídeo' : 'imagem'}
           </button>
         </Section>
+      )}
+    </>
+  )
+}
+
+const ORIENTATIONS: ReadonlyArray<{ value: SplitOrientation; label: string }> = [
+  { value: 'stacked', label: 'Em cima e embaixo' },
+  { value: 'side', label: 'Lado a lado' }
+]
+
+const SPLIT_SHOW_OPTIONS: ReadonlyArray<{ value: SplitShow; label: string }> = [
+  { value: 'both', label: 'Os dois' },
+  { value: 'main', label: 'Só o 1' },
+  { value: 'clip', label: 'Só o 2' }
+]
+
+const SPLIT_SOUNDS: ReadonlyArray<{ value: SplitAudio; label: string }> = [
+  { value: 'main', label: 'Só o 1' },
+  { value: 'both', label: 'Os dois' },
+  { value: 'clip', label: 'Só o 2' }
+]
+
+/** How a clip shares the frame with the recording: the split, each part's framing, the line and the sound. */
+function SplitControls({ layer, hasAudio, store }: { layer: VideoLayer; hasAudio: boolean; store: EditorStore }) {
+  const split = layer.split
+  if (!split) return null
+  const stacked = split.orientation === 'stacked'
+  const set = (change: Parameters<EditorStore['setSplit']>[1], gesture: string | null = null): void => store.setSplit(layer.id, change, gesture)
+  const end = (): void => store.endGesture()
+  // Each part is cut across the split's other axis: a stacked split moves the picture sideways, a side one up and down.
+  const axis: 'x' | 'y' = stacked ? 'x' : 'y'
+  return (
+    <>
+      <Segmented label="Mostrar neste trecho" value={split.show ?? 'both'} options={SPLIT_SHOW_OPTIONS} onChange={(show) => set({ show })} />
+      <Segmented label="Divisão" value={split.orientation} options={ORIENTATIONS} onChange={(orientation) => set({ orientation })} />
+      <p className="panel-meta">
+        {stacked ? (split.clipFirst ? 'Clipe em cima, gravação embaixo' : 'Gravação em cima, clipe embaixo') : split.clipFirst ? 'Clipe à esquerda, gravação à direita' : 'Gravação à esquerda, clipe à direita'}
+        <button className="field-link" onClick={() => set({ clipFirst: !split.clipFirst })}>
+          Trocar de lugar
+        </button>
+      </p>
+      <Slider
+        label="Espaço da gravação"
+        value={percent(split.mainShare)}
+        min={SPLIT_LIMITS.minShare}
+        max={SPLIT_LIMITS.maxShare}
+        step={0.01}
+        current={split.mainShare}
+        onChange={(mainShare) => set({ mainShare }, 'split-share')}
+        onCommit={end}
+      />
+      <Slider
+        label={stacked ? 'Enquadrar a gravação (lados)' : 'Enquadrar a gravação (altura)'}
+        value={percent(split.mainFocus[axis])}
+        min={0}
+        max={1}
+        step={0.01}
+        current={split.mainFocus[axis]}
+        onChange={(value) => set({ mainFocus: { ...split.mainFocus, [axis]: value } }, 'split-main-focus')}
+        onCommit={end}
+      />
+      <Slider
+        label={stacked ? 'Enquadrar o clipe (lados)' : 'Enquadrar o clipe (altura)'}
+        value={percent(split.clipFocus[axis])}
+        min={0}
+        max={1}
+        step={0.01}
+        current={split.clipFocus[axis]}
+        onChange={(value) => set({ clipFocus: { ...split.clipFocus, [axis]: value } }, 'split-clip-focus')}
+        onCommit={end}
+      />
+      <div className="color-row">
+        <Slider
+          label="Linha"
+          value={split.dividerRatio === 0 ? 'Sem' : percent(split.dividerRatio / SPLIT_LIMITS.maxDividerRatio)}
+          min={0}
+          max={SPLIT_LIMITS.maxDividerRatio}
+          step={0.001}
+          current={split.dividerRatio}
+          onChange={(dividerRatio) => set({ dividerRatio }, 'split-divider')}
+          onCommit={end}
+        />
+        <label className="color-field">
+          <input type="color" aria-label="Cor da linha" value={split.dividerColor} onChange={(event) => set({ dividerColor: event.target.value }, 'split-divider-color')} onBlur={end} />
+          <span>Cor</span>
+        </label>
+      </div>
+      {hasAudio ? (
+        <>
+          <Segmented label="Som (o vídeo 2 inteiro)" value={split.audio} options={SPLIT_SOUNDS} onChange={(audio) => set({ audio })} />
+          {split.audio !== 'main' && (
+            <Slider
+              label="Volume do vídeo 2"
+              value={percent(split.clipVolume)}
+              min={0}
+              max={SPLIT_LIMITS.maxClipVolume}
+              step={0.05}
+              current={split.clipVolume}
+              onChange={(clipVolume) => set({ clipVolume }, 'split-volume')}
+              onCommit={end}
+            />
+          )}
+        </>
+      ) : (
+        <p className="panel-hint">Este clipe está sem som. Clipes trazidos antes desta versão vieram sem áudio: adicione o vídeo de novo para poder ouvi-lo.</p>
       )}
     </>
   )

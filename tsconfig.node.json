@@ -9,7 +9,10 @@
     "src/preload/**/*.ts",
     "src/shared/**/*.ts",
     "src/engine/**/*.ts",
+    "src/server/**/*.ts",
     "electron.vite.config.ts",
+    "vite.web.config.ts",
+    "vite.server.config.ts",
     "vitest.config.ts"
   ]
 }

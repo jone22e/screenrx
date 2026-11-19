@@ -3,7 +3,9 @@ import { once } from 'node:events'
 import type { FileHandle } from 'node:fs/promises'
 import { open, rename, rm, stat } from 'node:fs/promises'
 import { buildAudioGraph } from '@engine/export/audioFilters'
-import type { ExportLoudness, ExportPreset, MusicSettings, Project } from '@shared/models/project'
+import type { AudioMixTrack } from '@engine/export/audioFilters'
+import { suggestedFileName } from '@engine/export/exportFileName'
+import type { ExportLoudness, Layer, MusicSettings, Project } from '@shared/models/project'
 import type { ExportPlan } from '@engine/export/exportPlan'
 import { createExportPlan } from '@engine/export/exportPlan'
 import { buildTimeMap } from '@engine/time/timeMapping'
@@ -24,6 +26,9 @@ import { FfmpegCancelledError, FfmpegError } from './FfmpegService'
 import { readAvcConfiguration } from './mp4'
 
 /** A failure of the export, already translated for the user. */
+// Kept here for the callers that always imported it from the service.
+export { suggestedFileName }
+
 export class ExportError extends Error {
   constructor(readonly appError: AppError) {
     super(appError.detail ? `${appError.code}: ${appError.detail}` : appError.code)
@@ -54,14 +59,6 @@ interface ActiveExport {
 }
 
 /** What a platform's file is called after the recording's name. */
-const PRESET_SUFFIXES: Record<Exclude<ExportPreset, 'custom'>, string> = {
-  reels: 'Reels',
-  tiktok: 'TikTok',
-  shorts: 'Shorts',
-  youtube: 'YouTube',
-  linkedin: 'LinkedIn',
-  x: 'X'
-}
 
 /** Largest slice of a track the renderer may ask for at once. */
 const MAX_CHUNK_BYTES = 64 * 1024 * 1024
@@ -85,7 +82,8 @@ export class ExportService {
     return this.active !== null
   }
 
-  async start(sessionId: string, overrides: ExportOverrides | null = null): Promise<ExportJob> {
+  /** `destination`: where the file goes without asking (the Reels file for publishing); `null` asks the user. */
+  async start(sessionId: string, overrides: ExportOverrides | null = null, destination: string | null = null): Promise<ExportJob> {
     if (this.active) throw new ExportError(appError('export-busy'))
     const { ffmpeg, sessions, projects, logger } = this.deps
 
@@ -103,7 +101,7 @@ export class ExportService {
     )
 
     const fileName = suggestedFileName(session.title, session.createdAt, plan.speed, project.export.preset)
-    const outputPath = await this.deps.chooseOutputPath(fileName)
+    const outputPath = destination ?? (await this.deps.chooseOutputPath(fileName))
     if (!outputPath) throw new ExportError(appError('export-cancelled'))
 
     const files: ActiveExport['files'] = {}
@@ -142,6 +140,17 @@ export class ExportService {
         .filter((track) => !project.audio[track.kind].muted && !(dub && track.kind === 'microphone'))
         .map((track) => ({ path: sessions.trackPathOf(sessionId, track.kind), volume: project.audio[track.kind].volume }))
       if (dub) tracks.push({ path: sessions.trackPathOf(sessionId, DUB_TRACKS[dub.language]), volume: 1 })
+      // A split screen may play the clip's sound with the recording's, or in its place, while it is on.
+      const splitSounds = splitAudioOf(project.layers, session.clips)
+      const silences = splitSounds.filter((sound) => sound.alone).map((sound) => ({ startMs: sound.atMs, endMs: sound.atMs + sound.lengthMs }))
+      if (silences.length > 0) for (const track of tracks) track.silences = silences
+      for (const sound of splitSounds) {
+        tracks.push({
+          path: resolveInside(path.join(sessions.directoryOf(sessionId), SESSION_FILES.assets), sound.file),
+          volume: sound.volume,
+          place: { atMs: sound.atMs, offsetMs: sound.offsetMs, lengthMs: sound.lengthMs }
+        })
+      }
       // Music plays only while its file is there; the settings may outlive a file that was removed.
       const music: ExportAudio['music'] =
         project.music && session.music && project.music.volume > 0
@@ -321,7 +330,7 @@ function videoArguments(encoder: VideoEncoder, bitrate: number): string[] {
 
 /** The audio that goes into an export: the recorded tracks heard, the music under them, the final loudness. */
 export interface ExportAudio {
-  tracks: Array<{ path: string; volume: number }>
+  tracks: Array<{ path: string; volume: number } & Pick<AudioMixTrack, 'place' | 'silences'>>
   music: ({ path: string } & MusicSettings) | null
   loudness: ExportLoudness
 }
@@ -342,7 +351,12 @@ export function encodeArguments(
   if (audio.music) inputs.push(...(audio.music.loop ? ['-stream_loop', '-1'] : []), '-i', audio.music.path)
   const graph = buildAudioGraph(
     {
-      tracks: audio.tracks.map((track, index) => ({ inputIndex: index + 1, volume: track.volume })),
+      tracks: audio.tracks.map((track, index) => ({
+        inputIndex: index + 1,
+        volume: track.volume,
+        ...(track.place && { place: track.place }),
+        ...(track.silences && { silences: track.silences })
+      })),
       music: audio.music ? { ...audio.music, inputIndex: audio.tracks.length + 1 } : null,
       loudness: audio.loudness
     },
@@ -375,19 +389,6 @@ function baseName(filePath: string): string {
   return filePath.slice(filePath.lastIndexOf('/') + 1)
 }
 
-/** `Display 1 2026-10-03 21.29 2x Reels.mp4`, safe on every file system. */
-export function suggestedFileName(title: string, createdAt: string, speed: number, preset: ExportPreset = 'custom'): string {
-  const date = new Date(createdAt)
-  const pad = (value: number): string => String(value).padStart(2, '0')
-  const stamp = Number.isNaN(date.getTime())
-    ? ''
-    : ` ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}.${pad(date.getMinutes())}`
-  const printable = [...title].filter((character) => character.charCodeAt(0) >= 32).join('')
-  const safeTitle = printable.replace(/[/\\:*?"<>|]/g, '-').trim().slice(0, 80) || 'Gravação'
-  const suffix = speed === 1 ? '' : ` ${String(speed).replace('.', ',')}x`
-  const platform = preset === 'custom' ? '' : ` ${PRESET_SUFFIXES[preset]}`
-  return `${safeTitle}${stamp}${suffix}${platform}.mp4`
-}
 
 function toExportError(error: unknown): ExportError {
   if (error instanceof ExportError) return error
@@ -398,4 +399,26 @@ function toExportError(error: unknown): ExportError {
   }
   const code = (error as NodeJS.ErrnoException).code
   return new ExportError(appError(code === 'ENOSPC' ? 'disk-full' : 'export-failed', String(error)))
+}
+
+/**
+ * The clips' sounds a split screen plays: each split layer whose clip has
+ * sound and whose setting lets it be heard, on the recording's clock.
+ * `alone`: the recording's own sound is silent meanwhile.
+ */
+export function splitAudioOf(
+  layers: readonly Layer[],
+  clips: ReadonlyArray<{ file: string; hasAudio: boolean; durationMs: number }>
+): Array<{ file: string; atMs: number; offsetMs: number; lengthMs: number; volume: number; alone: boolean }> {
+  const sounds: Array<{ file: string; atMs: number; offsetMs: number; lengthMs: number; volume: number; alone: boolean }> = []
+  for (const layer of layers) {
+    if (layer.kind !== 'video' || !layer.split || layer.split.audio === 'main' || !isSafeFileName(layer.file)) continue
+    const clip = clips.find((candidate) => candidate.file === layer.file)
+    if (!clip?.hasAudio) continue
+    // The clip runs out before the layer ends when it is shorter: its sound stops there too.
+    const lengthMs = Math.min(layer.endMs - layer.startMs, Math.max(0, clip.durationMs - layer.offsetMs))
+    if (lengthMs <= 0) continue
+    sounds.push({ file: layer.file, atMs: layer.startMs, offsetMs: layer.offsetMs, lengthMs, volume: layer.split.clipVolume, alone: layer.split.audio === 'clip' })
+  }
+  return sounds
 }

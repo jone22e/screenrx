@@ -11,6 +11,7 @@ import { openSettings } from '../common/settingsScreen'
 import { AutoEditBriefForm, defaultBrief } from '../editor/AutoEditBriefForm'
 import { SparklesIcon, TrashIcon } from './icons'
 import { seriesAutoEdit } from './seriesAutoEdit'
+import { SERIES_LIST_ID } from './RecordingCard'
 
 interface Props {
   recording: RecordingSummary
@@ -168,10 +169,13 @@ export function SeriesDialog({ recording, onClose }: Props) {
         {(phase.kind === 'plan' || phase.kind === 'splitting') && (
           <>
             <label className="series-field">
-              <span className="series-label">Nome da série</span>
+              <span className="series-label" title="Escolha uma série que já existe para juntar estes episódios a ela, ou dê um nome novo">
+                Série (nova ou existente)
+              </span>
               <input
                 className="series-name"
                 type="text"
+                list={SERIES_LIST_ID}
                 value={phase.plan.seriesTitle}
                 maxLength={SERIES_LIMITS.maxTitleLength}
                 disabled={busy}

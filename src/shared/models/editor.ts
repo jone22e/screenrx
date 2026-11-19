@@ -22,6 +22,8 @@ export interface EditorClip {
   durationMs: number
   widthPx: number
   heightPx: number
+  /** Whether its sound can be heard in a split screen. */
+  hasAudio: boolean
 }
 
 /** The session's music file, as the editor and the preview see it. */

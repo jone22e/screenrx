@@ -33,6 +33,7 @@ function subscribe<Channel extends IpcEventChannel>(
  * one channel of the IPC contract; `ipcRenderer` itself is never exposed.
  */
 const api: ScreenRxApi = {
+  platform: { kind: 'desktop', services: { transcription: true } },
   permissions: {
     get: () => invoke('permissions:get'),
     requestScreenRecording: () => invoke('permissions:request-screen-recording'),
@@ -73,6 +74,7 @@ const api: ScreenRxApi = {
     import: () => invoke('library:import'),
     importFiles: (files) => invoke('library:import-paths', files.map((file) => webUtils.getPathForFile(file))),
     join: (sessionIds) => invoke('library:join', sessionIds),
+    duplicate: (sessionId) => invoke('library:duplicate', sessionId),
     search: (query) => invoke('library:search', query),
     onChanged: (listener) => subscribe('library:changed', () => listener())
   },
@@ -101,6 +103,7 @@ const api: ScreenRxApi = {
   },
   clips: {
     import: (sessionId) => invoke('clips:import', sessionId),
+    importFiles: (sessionId, files) => invoke('clips:import-paths', sessionId, files.map((file) => webUtils.getPathForFile(file))),
     remove: (sessionId, file) => invoke('clips:remove', sessionId, file)
   },
   music: {
@@ -174,6 +177,29 @@ const api: ScreenRxApi = {
     check: () => invoke('update:check'),
     install: () => invoke('update:install'),
     onStateChanged: (listener) => subscribe('update:state-changed', listener)
+  },
+  instagram: {
+    status: () => invoke('instagram:status'),
+    configure: (appId, appSecret, configId) => invoke('instagram:configure', appId, appSecret, configId),
+    login: (switching) => invoke('instagram:login', switching === true),
+    connectWithToken: (token) => invoke('instagram:connect-token', token),
+    choose: (igUserId) => invoke('instagram:choose', igUserId),
+    disconnect: () => invoke('instagram:disconnect'),
+    approve: (entries) => invoke('instagram:approve', entries),
+    withdraw: (sessionId) => invoke('instagram:withdraw', sessionId),
+    suggestCaption: (sessionId, choice, topic) => invoke('instagram:suggest-caption', sessionId, choice, topic),
+    startExport: (sessionId) => invoke('instagram:start-export', sessionId),
+    mark: (sessionId, state, error) => invoke('instagram:mark', sessionId, state, error),
+    publish: (sessionId) => invoke('instagram:publish', sessionId),
+    openPost: (sessionId) => invoke('instagram:open-post', sessionId),
+    onProgress: (listener) => subscribe('instagram:progress', listener)
+  },
+  link: {
+    status: () => invoke('link:status'),
+    install: () => invoke('link:install'),
+    download: (url) => invoke('link:download', url),
+    cancel: () => invoke('link:cancel'),
+    onProgress: (listener) => subscribe('link:progress', listener)
   }
 }
 

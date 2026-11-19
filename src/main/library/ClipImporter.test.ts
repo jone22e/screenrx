@@ -42,7 +42,7 @@ describe('ClipImporter', () => {
     await rm(directory, { recursive: true, force: true })
   })
 
-  it('brings a clip in as silent H.264 in the assets folder and lists it in the manifest', async () => {
+  it('brings a clip in as H.264 with its sound as AAC in the assets folder and lists it in the manifest', async () => {
     const source = path.join(directory, 'broll.mov')
     run(['-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=25:duration=2', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', source])
     const clip = await importer.import(sessionId, source)
@@ -51,8 +51,10 @@ describe('ClipImporter', () => {
     expect([clip.widthPx, clip.heightPx]).toEqual([320, 240])
     expect(clip.durationMs).toBeGreaterThan(1900)
     const target = path.join(sessions.directoryOf(sessionId), 'assets', clip.file)
-    expect(streamsOf(target)).toHaveLength(1)
-    expect(streamsOf(target)[0]).toContain('h264')
+    expect(clip.hasAudio).toBe(true)
+    expect(streamsOf(target)).toHaveLength(2)
+    expect(streamsOf(target).join(' ')).toContain('h264')
+    expect(streamsOf(target).join(' ')).toContain('aac')
     expect((await sessions.read(sessionId))?.assets.videos).toEqual([clip])
   })
 
@@ -63,6 +65,8 @@ describe('ClipImporter', () => {
     const source = path.join(directory, 'b.mp4')
     run(['-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=10:duration=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', source])
     const clip = await importer.import(sessionId, source)
+    // A clip without sound says so: a split screen cannot play it.
+    expect(clip.hasAudio).toBe(false)
     await importer.remove(sessionId, clip.file)
     expect((await sessions.read(sessionId))?.assets.videos).toEqual([])
     await expect(access(path.join(sessions.directoryOf(sessionId), 'assets', clip.file))).rejects.toThrow()

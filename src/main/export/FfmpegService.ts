@@ -242,7 +242,8 @@ export class FfmpegService {
   async writeVideoTrack(
     inputPath: string,
     outputPath: string,
-    options: { copy: boolean; bitrate: number }
+    /** `withAudio`: the first audio stream comes along, as AAC (a b-roll clip whose sound a split screen may play). */
+    options: { copy: boolean; bitrate: number; withAudio?: boolean }
   ): Promise<void> {
     // 4:2:0 needs even dimensions; an odd edge loses one pixel rather than failing the whole import.
     const evenSize = ['-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-pix_fmt', 'yuv420p']
@@ -254,7 +255,7 @@ export class FfmpegService {
     await this.run(this.binaries.ffmpeg, [
       '-v', 'error', '-y',
       '-i', inputPath,
-      '-map', '0:v:0', '-an', '-sn', '-dn',
+      '-map', '0:v:0', ...(options.withAudio ? ['-map', '0:a:0', '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000'] : ['-an']), '-sn', '-dn',
       ...codec,
       '-movflags', '+faststart',
       '-f', 'mp4',

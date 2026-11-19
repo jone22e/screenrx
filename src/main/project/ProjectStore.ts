@@ -107,7 +107,8 @@ export class ProjectStore {
         url: assetUrl(sessionId, clip.file),
         durationMs: clip.durationMs,
         widthPx: clip.widthPx,
-        heightPx: clip.heightPx
+        heightPx: clip.heightPx,
+        hasAudio: clip.hasAudio === true
       })),
       music: manifest.assets.music
         ? { url: trackUrl(sessionId, 'music'), durationMs: manifest.assets.music.durationMs, name: manifest.assets.music.name }

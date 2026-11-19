@@ -68,11 +68,16 @@ src/
     zoom/                          zoomConfig (constantes), zoomCamera (movimento),
                                    autoZoom (geração), zoomEditing (edição na timeline)
     rendering/                     backgrounds (catálogo de fundos), frameLayout
-                                   (moldura e posição da câmera)
+                                   (moldura e posição da câmera), layerLayout, shapes
+                                   (formas e emojis), textLooks, textTemplates
     time/timeMapping.ts            origem ↔ linha do tempo ↔ saída (cortes, velocidade)
     timeline/                      spanEditing (mover/redimensionar regiões), trimConfig
     export/                        exportPlan (tamanho, quadros), audioFilters
-                                   (atempo, grafo de áudio), exportConfig
+                                   (atempo, grafo de áudio), exportConfig, exportFileName
+    mp4/mp4Demux.ts                lê as tabelas de amostras de um MP4/MOV (quadros, keyframes,
+                                   avcC/hvcC) sem FFmpeg: a exportação no navegador
+    audio/                         musicLevel (ducking do preview), timeStretch (WSOLA),
+                                   ducking, loudness e mixdown: o áudio da exportação no navegador
     dub/                           spellNumbers (números por extenso no idioma da dublagem),
                                    dubUnits (legendas → trechos de fala, referência de voz,
                                    posição dos trechos), dubVerification, dubConfig
@@ -120,7 +125,14 @@ src/
                                    (decodificação sequencial com WebCodecs)
     src/settings/                  tela de Configurações (ferramentas de IA)
     src/hud/                       HUD
-    src/common/                    store de estado e estilos base
+    src/common/                    store de estado, estilos base, platform.ts (o que a
+                                   plataforma oferece: desktop ou web)
+    src/web/                       editor web: ponte `window.screenrx` do navegador (webApi),
+                                   sessões abertas de arquivos (sessions), IndexedDB (storage),
+                                   exportação com WebCodecs + mp4-muxer (webExport), tela inicial
+  web/index.html, main.tsx         página do editor web (vite.web.config.ts → out/web)
+  server/                          servidor Node da página: estáticos + /api/transcription
+                                   (vite.server.config.ts → out/server/index.mjs; Dockerfile)
 scripts/
   build-native.mjs                 compila os helpers e copia para dist-native/
   build-voice.mjs                  compila o helper de voz (à parte: leva minutos)
@@ -523,7 +535,13 @@ por testes e leitura; nenhum arrasto nem exportação real com textos.
   instante já transformados; `drawCaption` recebe a transformação e a combina
   com a entrada das legendas. **Textos prontos** (`textTemplates.ts`: Título,
   Subtítulo, Lower third, Chamada) trazem estilo, posição, movimento e duração;
-  a ferramenta Texto os oferece ao lado de "Adicionar texto".
+  a ferramenta Texto os oferece ao lado de "Adicionar texto". **Estilos
+  prontos** (`textLooks.ts`: Simples, Negrito, Serifada, Cursiva, Máquina,
+  Caixa, Etiqueta, Impacto, Contorno, Amarelo, Neon, Editorial) vestem o texto
+  selecionado: trocam fonte, peso, caixa, cores e fundo e mantêm tamanho e
+  posição (`applyTextLook`); o tile acende quando o estilo bate (`hasTextLook`).
+  A fonte `cursive` (Snell Roundhand, Brush Script, Segoe Script) entrou para
+  isso; como as outras, é do sistema, sem arquivo a servir.
 - **Cortes** (`TrimEffect.transition`: `cut` ou `dip`; ausente = seco):
   `engine/time/transitions.ts` dá o escurecimento (0…1) em cada instante de
   origem — 0,2 s antes do corte indo ao preto, 0,2 s depois voltando — e o
@@ -578,6 +596,37 @@ project.layers (ImageLayer: arquivo, intervalo, centro, largura, rotação, opac
   textos e a legenda ficam por cima das imagens no clique). Linha do tempo: faixa
   "Imagens" (só quando há alguma), regiões arrastáveis e redimensionáveis.
   `⌫` remove a selecionada.
+
+### Formas e emojis (aba "Elementos")
+
+Camadas sem arquivo, na mesma pilha de `project.layers` (`isElementLayer`):
+
+- **Modelo.** `ShapeLayer` (`kind: 'shape'`): `shape` (`SHAPE_KINDS`: retângulo,
+  círculo, triângulo, losango, seta, linha, estrela, coração), `aspect` (altura
+  como fração da largura, 0,04–3), `fill` + `fillColor`, `strokeRatio` (espessura
+  do contorno como fração da altura de saída, até 0,03) + `strokeColor`, e a
+  colocação comum (`LayerPlacement`: centro, largura, rotação, opacidade,
+  cantos). `EmojiLayer` (`kind: 'emoji'`): um grafema (`emoji`, até 32 chars).
+  Os dois entram do play por 3 s (`SHAPE_LIMITS.defaultDurationMs`), no centro,
+  com a proporção própria da forma (`SHAPES[].aspect`); a linha nasce como
+  pílula (cantos 0,5). Uma forma sem preenchimento ganha contorno mínimo
+  (`setShape`), para não sumir.
+- **Desenho.** `engine/rendering/shapes.ts`: `traceShape(path, kind, box,
+  cornerRadius)` traça num `PathTarget` (o contexto do canvas, ou o gravador
+  que gera o `d` de SVG para os ícones do painel, `shapeSvgPath`, e para os
+  testes). `layoutLayer` usa `elementProportions` no lugar do tamanho de uma
+  imagem; `composeFrame` preenche e contorna (o contorno para dentro da caixa,
+  o tamanho não muda) e desenha o emoji com `fillText` na fonte de emoji do
+  sistema, medindo o glifo para caber na largura. Preview e exportação passam
+  `{ layer }` sem imagem (`PlacedLayer`).
+- **Interface.** Aba Elementos: grade de formas (ícones traçados do mesmo
+  caminho), 40 emojis prontos (`EMOJI_PICKS`) e um campo para qualquer outro
+  (`firstEmoji` pega o primeiro grafema), lista dos elementos, e para o
+  selecionado: trocar a forma, preencher + cor, contorno (espessura + cor),
+  altura, tamanho, opacidade, rotação, cantos (retângulo e linha). Selecionar
+  uma forma ou um emoji, de qualquer lugar, abre Elementos; uma imagem ou um
+  clipe abre Camadas. A aba Camadas lista a pilha inteira (ordem) e a faixa
+  "Imagens" mostra todos, com ícone por tipo (`LayerIcon`, `layerLabel`).
 
 ### Juntar gravações (biblioteca)
 
@@ -1010,6 +1059,24 @@ gravação, já que os episódios diferem).
   ⌘Z lá desfaz a equipe inteira como no editor.
 - **O que sai do Mac**: o mesmo texto da edição por IA no editor, por episódio.
 
+### Importar de um link e publicar no Instagram
+
+Fluxo de ponta a ponta: **link ou arquivo → biblioteca → Gerar série (nova ou existente) → Editar todos com IA → aprovar → Reels publicados**.
+
+- **Link** (`src/main/library/LinkDownloader.ts`, botão de corrente na barra da biblioteca): usa o **yt-dlp** — o do Homebrew se existir, senão o binário oficial (`yt-dlp_macos`, ~37,5 MB, tamanho lido da API do GitHub e mostrado no botão) baixado para `userData/tools` e conferido com o `SHA2-256SUMS` do release. Prefere H.264+AAC (`-f`), mescla com o FFmpeg empacotado (FFmpeg e FFprobe ligados por symlink em `userData/tools/ffmpeg-bin`), baixa numa pasta temporária e importa pelo `VideoImporter`; o título do vídeo vira o nome e `sourceUrl` fica no `session.json`. Só `http(s)` (`normalizeVideoLink`). Ao terminar, o diálogo oferece "Gerar série", cujo campo de série agora sugere as séries existentes (escolher uma junta os episódios a ela).
+- **Conexão** (`src/main/instagram/`, Configurações › Instagram): Graph API com **Login do Facebook** (conta Comercial/Criador ligada a uma Página), porque é a rota que aceita o **upload do arquivo** (`upload_type=resumable` → `rupload.facebook.com`); o Login do Instagram exigiria o vídeo numa URL pública. O usuário cria o app na Meta e informa ID (+ chave secreta, opcional, + ID de configuração para Login para Empresas). O login abre a página do Facebook numa janela própria sem preload (`loginWindow.ts`, partição `persist:facebook-login`), redireciona para `https://localhost/screenrx/instagram#access_token=…` (registrado nas URIs válidas; o Login para Empresas recusa o `login_success.html` do facebook.com) e a janela pega o redirecionamento antes de carregar. App criado em 2026-11-19: "ScreenRx Publisher" (caso de uso Instagram, configuração "ScreenRx Reels" com token de usuário). Com a chave secreta o token vira de longa duração e o **token da Página** tirado dele não expira. Alternativa: colar um token do Explorador da Graph API. Tokens e chave ficam em `userData/instagram.json`, selados com `safeStorage` (Chaveiro); o renderer só vê a conta. Escopos: `instagram_basic, instagram_content_publish, pages_show_list, pages_read_engagement, business_management`. Versão da Graph API: `GRAPH_VERSION` em `InstagramGraph.ts`.
+- **Aprovação** (ícone do Instagram no cartão; "Publicar no Instagram" na prateleira da série): `PublishDialog` pede um **tema** (opcional) e uma legenda por vídeo. ✨ chama `ReelCaptionService`, a única pergunta à IA com **busca na web** (`AiRequest.webSearch`: Claude com `--tools/--allowedTools WebSearch,WebFetch`, Codex com `--search` antes de `exec`; o Antigravity fica em modo plan): pesquisa o que está em alta sobre o tema na data de hoje e devolve legenda, hashtags (`normalizeHashtag`, máx. 30, as que faltam vão para o fim), termos em alta com o porquê (chips "Em alta", motivo no hover) e fontes. Sai do Mac só título, série e transcrição. Verificado ao vivo com `claude --model haiku`: ~19 s, 6 turnos, fontes reais. Aprovar grava `publish` no `session.json` (`state`, `caption`, `approvedAt`, depois `mediaId`, `permalink`, `error`).
+- **Fila** (`src/renderer/src/app/publishQueue.ts`): com a conta conectada e o app aberto, pega o aprovado mais antigo, exporta em 9:16 com o preset Reels para `<sessão>/publish/reels.mp4` (`instagram:start-export` → mesmo `renderExport` da exportação normal, sem diálogo de salvar), e o main publica: `content_publishing_limit` → container REELS → upload → espera `status_code=FINISHED` (a cada 10 s, até 15 min) → `media_publish` → `permalink`. Estados: approved → rendering → uploading → processing → published | failed. Se o editor estiver exportando, espera 20 s e tenta de novo. Ao abrir o app, `rendering/uploading` interrompidos voltam para `approved` (`requeueInterruptedPublishes`). "Parar" durante o desenho tira o vídeo da fila. Limite da API: 100 posts/24 h por conta; Reels de 3 s a 15 min.
+- Testes: `InstagramService.test.ts` (Meta falsa, cobre login, troca de token, upload, polling, falhas), `LinkDownloader.test.ts` (yt-dlp falso em shell + instalação com checksum), `publishQueue.test.ts`. **Nunca rodado contra a Meta de verdade** (precisa do app Meta do usuário) nem com o yt-dlp real.
+
+### Tela dividida (aba Camadas)
+
+Uma camada de vídeo (b-roll) pode virar **tela dividida** com a gravação (`VideoLayer.split`, `SplitScreen` em `project.ts`): em cima/embaixo ou lado a lado, quem fica primeiro, quanto espaço a gravação tem (20–80 %), enquadramento de cada parte (cada uma preenche a sua metade cortada no formato, `coverCrop` em `src/engine/rendering/splitScreen.ts`, nunca esticada), linha divisória (espessura/cor) e **som**: só a gravação, os dois, ou só o clipe (com volume). Só vale no trecho da camada; só uma camada divide por vez (`EditorStore.setLayerSplit`). O desenho está em `composeFrame` (o mesmo da prévia e da exportação). O som do clipe agora é importado junto (`ClipImporter`, `hasAudio`; clipes antigos vieram sem som e o painel avisa). Na exportação o som do clipe entra como trilha posta no relógio da gravação (`AudioMixTrack.place`: atrim + adelay + apad) e passa pelos mesmos cortes/velocidades; "só o clipe" silencia as trilhas gravadas naquele trecho (`silences`, `volume=0:enable=between`). Na linha do tempo, os clipes têm a trilha **Vídeo 2** (miniaturas do trecho do clipe, arrastar/redimensionar; o “+” do rótulo, ou **arrastar um arquivo do Finder para as trilhas** (`clips:import-paths`, solta no tempo onde foi largado), traz um vídeo já em tela dividida, `secondVideo.ts`); imagens, formas e emojis ficam em “Imagens”. Testado com FFmpeg real (`splitAudio.test.ts`, inclusive com corte antes do clipe) e no app: prévia (dividida, trocada, flutuante) e Reel exportado 1080×1920 com o som do clipe.
+
+### Edição por IA com dois vídeos (gameplay + reação)
+
+Quando há um vídeo na trilha Vídeo 2, a equipe de agentes edita os dois: o briefing pergunta "O que é cada vídeo" (padrão "a gameplay" / "minha reação (webcam)", `AutoEditBrief.videoRoles`); `AssistantEditState.secondVideo` diz onde o vídeo 2 está e o que cada trecho mostra; `ClipTranscriber` transcreve a fala do vídeo 2 neste Mac (FFmpeg → WAV 16 kHz → `screenrx-transcribe`, cache em `assets/<arquivo>.words.json`) e `wordsOnRecordingClock` a põe no relógio da gravação; a ficha (`recordingSheet.ts`) ganha a seção "Two videos" com a fala do vídeo 2 por frases, contagem de palavras do vídeo 2 por janela e regras de edição de react (não cortar enquanto o vídeo 2 fala, tela cheia para o vídeo 2 nos picos de 1–4 s, etc.). Ações novas: `layout` (Câmera; `both`/`video1`/`video2` por trecho → `EditorStore.applySplitShow` → `applyLayoutSpan` corta a camada do vídeo 2 nas bordas mantendo a sincronia pelo `offsetMs` e junta peças iguais) e `second-sound` (Som). `SplitScreen.show` (`both`/`main`/`clip`) também está no painel ("Mostrar neste trecho"); o som segue tocando qualquer que seja o que aparece. Cortes valem para os dois vídeos (o vídeo 2 anda no relógio da gravação). Limite: as legendas continuam vindo só da transcrição do vídeo 1. Nunca rodado contra a IA real com uma reação de verdade.
+
 ### Janelas
 
 O app tem dois modos, e só um está na tela por vez. Abre na **biblioteca**; "Nova
@@ -1145,6 +1212,128 @@ project.filters ──┬── estabilização / ruído / nitidez ──► Fil
   leva cerca de 1 s por 10 s de vídeo neste Mac, em duas passagens), e o
   resultado visual da estabilização só foi conferido por amostra lado a lado,
   não em movimento no app.
+
+### Editor web (navegador)
+
+O mesmo editor, servido como página, sem o que só roda no Mac. `npm run dev:web`
+serve em `http://localhost:5180`; `npm run build:web` escreve `out/web/` (estático).
+O vídeo é lido como `File`, o projeto fica no IndexedDB e a exportação é feita na
+própria página. A única coisa que sai do navegador é o som, para o servidor
+transcrever (abaixo), e só quando o usuário pede legendas.
+
+```
+src/web/main.tsx            probeServices() → window.screenrx = createWebApi(services)   (antes do editor)
+                            └► import('.../web/WebApp')        WebHome (abrir arquivo) → Editor (o mesmo do desktop)
+src/renderer/src/web/
+  webApi.ts                 implementa ScreenRxApi inteira: o que o editor precisa, com o navegador;
+                            o resto responde `web-unsupported` (e a UI esconde, por `features`)
+  sessions.ts               File → sessão: id = SHA-256(nome|tamanho|data), probe (<video> + mp4Demux),
+                            EditorSession com cursorInVideo=true, áudio do próprio arquivo como "microfone"
+  storage.ts                IndexedDB (v2): projects, assets (blobs de imagem/clipe/música), recent, templates, transcripts
+  files.ts                  showOpenFilePicker/showSaveFilePicker quando existem; <input type=file> e download senão
+  webExport.ts              start: plano + demux + VideoEncoder (H.264; HEVC se o navegador tiver)
+                            writeFrame: RGBA → VideoFrame → encoder (back-pressure pela fila)
+                            áudio em paralelo: decodeAudioData → engine/audio/mixdown → AudioEncoder (AAC)
+                            finish: mp4-muxer → arquivo escolhido (File System Access) ou download
+  webTranscription.ts       decodeAudioData a 16 kHz mono → WAV → POST /api/transcription (linhas JSON de
+                            progresso) → Transcript no IndexedDB; detectLocale manda o mesmo com mode=detect
+  webRecorder.ts            getDisplayMedia (+ getUserMedia) → MediaStreamTrackProcessor → VideoEncoder H.264
+                            e AudioEncoder AAC (mix dos sons num AudioContext) → mp4-muxer, no arquivo escolhido
+                            (showSaveFilePicker) ou em memória + download; WebRecordPanel na tela inicial
+src/server/                 o servidor Node da página (vite.server.config.ts → out/server/index.mjs)
+  index.ts                  env → config, http.createServer, SIGTERM
+  app.ts                    /healthz, /api/transcription (GET: o que oferece; POST: transcreve), estáticos
+  static.ts                 out/web: assets/ imutáveis por um ano, resto no-cache, index.html para rotas
+  transcription/
+    transcriptionRoute.ts   lê o WAV (limite por minutos), corta em pedaços no silêncio (engine/audio/wav),
+                            manda cada um ao serviço com semáforo, desloca as palavras, devolve ndjson
+    whisperClient.ts        POST {URL}/audio/transcriptions (multipart, verbose_json, palavras e segmentos);
+                            POST {URL}/models/{id} ao subir e quando o serviço diz que não tem o modelo (speaches)
+```
+
+- **Plataforma**: `ScreenRxApi.platform` (`PlatformInfo`: `kind` `'desktop'` no
+  preload, `'web'` na ponte do navegador, e `services`, o que o servidor web
+  respondeu que oferece) → `featuresOf(info)` em `src/shared/models/platform.ts`
+  → `features` em `src/renderer/src/common/platform.ts`. Os painéis escondem o
+  que a plataforma não tem: Assistente e sugestões (IA), Dublagem, traduzir
+  legendas, efeitos renderizados, seguir objeto, capa, Finder, e a aba Cursor
+  quando não há telemetria. Gerar legendas aparece na web quando o servidor tem
+  um serviço de transcrição. Nunca se testa `isWeb` para esconder algo que tenha
+  um recurso nomeado: o recurso vai em `PlatformFeatures`.
+- **Transcrição no servidor**: a página manda o som como WAV mono 16-bit a
+  16 kHz (`TRANSCRIPTION_SAMPLE_RATE`; 1,9 MB por minuto) a
+  `POST /api/transcription?locale=pt-BR` (ou `?mode=detect`, que ouve os 20 s
+  iniciais e devolve o idioma). O servidor corta o áudio em pedaços de até
+  `SCREENRX_TRANSCRIPTION_CHUNK_MINUTES` (1) no ponto mais silencioso dos últimos
+  10 s de cada pedaço (`splitAtQuiet`), manda os pedaços juntos, até
+  `_CONCURRENCY` em voo, a um serviço compatível com
+  a API de áudio da OpenAI (`SCREENRX_TRANSCRIPTION_URL`: OpenAI, Groq ou um
+  Whisper próprio como o speaches do `docker-compose.yml`) pedindo
+  `verbose_json` com palavras e segmentos, desloca as palavras pelo início do
+  pedaço e devolve linhas JSON (`TranscriptionEvent`: `progress` com `stage`
+  `downloading`/`transcribing`, `done`, `error`). O progresso sai a cada segundo
+  (`PieceProgress`): pedaços prontos contam inteiros e os em voo são estimados
+  pelo tempo decorrido e pela velocidade medida nos anteriores (tempo real
+  até medir; um Whisper `small` na CPU faz ~1,5–3×), nunca acima de 92% de um
+  pedaço e nunca voltando. Fechar a conexão cancela. Um
+  Whisper próprio (speaches) não vem com modelo: o servidor pede o download ao
+  subir (`warmUp`) e de novo se uma transcrição responder "model not
+  installed", repetindo o pedido depois; serviços de nuvem respondem 404 ao
+  `POST /models` e nada muda. Como alguns serviços tiram a pontuação das
+  palavras cronometradas, `wordsFromTranscription` recoloca a grafia dos
+  segmentos quando os tokens batem um a um, para `buildCues` fechar frases. O
+  resultado passa por `normalizeWords` e vira o mesmo `Transcript` do desktop,
+  guardado no IndexedDB e devolvido em `editorSession`. Limites: um áudio por
+  vez por página, `SCREENRX_TRANSCRIPTION_MAX_MINUTES` por pedido,
+  `_CONCURRENCY` pedaços em voo no servidor todo, `_TIMEOUT_SECONDS` por pedaço.
+- **Gravar no navegador**: a tela inicial grava a tela, uma janela ou uma aba
+  (o navegador escolhe), com o microfone e o som que o navegador deixa ouvir,
+  misturados numa trilha estéreo. Os quadros vão direto ao `VideoEncoder`
+  (H.264, keyframe a cada 2 s, fila limitada: numa máquina lenta perde quadros
+  em vez de inchar) e ao `mp4-muxer` enquanto grava, com `addVideoChunkRaw`
+  porque chunks ao vivo não trazem duração. Uma janela que muda de tamanho é
+  encaixada no quadro do primeiro frame (letterbox); uma tela parada não manda
+  quadros, então o último é repetido a cada 1 s. Sem `showSaveFilePicker` o
+  arquivo fica em memória e é baixado ao fim. O resultado abre como qualquer
+  arquivo (`webSessions.open`), sem telemetria: a aba Cursor não aparece. Só
+  Chromium tem `MediaStreamTrackProcessor`; em outros navegadores o painel não
+  aparece (`canRecordInBrowser`).
+- **Implantação**: `Dockerfile` (build da página e do servidor; imagem só com
+  `out/`), `docker-compose.yml` (página + speaches CPU com o modelo em volume).
+  Atrás de HTTPS, sempre: WebCodecs, File System Access e IndexedDB exigem
+  contexto seguro. Sem serviço de transcrição o servidor é só estático.
+- **O que fica**: cortes, velocidade, marcadores, zoom manual, legendas (editar,
+  estilo, importar e salvar SRT/VTT), textos, camadas (imagem e clipe), áudio e
+  música, formato, fundo, cor, modelos, salvar quadro (PNG) e exportação.
+- **Exportação**: `renderExport` e `TrackFrameReader` são os mesmos do desktop;
+  só mudam as pontas (`readChunk` lê `Blob.slice`, `writeFrame` entrega ao
+  `VideoEncoder`). O demux (`engine/mp4/mp4Demux.ts`) substitui o `ffprobe`:
+  lê `stts/ctts/stss/stsc/stsz/stco`, dá PTS com reordenação (B-frames) e o
+  `avcC`/`hvcC`. O áudio refaz em memória o que `buildAudioGraph` pede ao
+  FFmpeg: segmentos cortados e retimados (WSOLA preserva o tom), soma das
+  trilhas, música em loop com fades e ducking (compressor por blocos de 5 ms),
+  loudness −14 LUFS (BS.1770 sem filtro K, aproximação). Compactação 2–4 pede
+  HEVC; se o navegador não codifica, sai H.264 (o `encoder` do job diz qual).
+- **Limites**: precisa de WebCodecs (Chrome, Edge, Safari 16.4+); só MP4/MOV
+  H.264/HEVC; o áudio inteiro é decodificado em memória (gravações de dezenas de
+  minutos pesam); sem `showSaveFilePicker` o arquivo é montado em memória e
+  baixado; reabrir pelo "Abertos recentemente" só onde o navegador guarda o
+  handle (Chromium), senão basta escolher o mesmo arquivo e a edição volta.
+- **Verificado em 2026-11-17** (Chrome headless, vídeo de 8 s com B-frames e AAC):
+  abrir por arrastar e pelo botão, corte de 2 s, imagem e clipe em camadas,
+  música MP3, exportação (H.264 180 quadros + AAC estéreo, música presente no
+  espectro, loudness normalizado), reabertura com o projeto e os assets de volta.
+  Transcrição: servidor real (`out/server`) com um Whisper falso
+  (`tmp/autoedit-app/fake-whisper.mjs`): Detectar → pt-BR, Gerar legendas → 3
+  legendas com pontuação dos segmentos, de volta após recarregar; o servidor sem
+  serviço mostra só "Importar SRT ou VTT". E com o `docker compose` real
+  (speaches CPU, `faster-whisper-small`, fala sintética do `say -v Luciana`):
+  modelo baixado em 1 min, detecção em 7 s, 10 s de fala transcritos em 4 s, 4
+  legendas em pt-BR com pontuação. Gravação no navegador (Chrome headless com
+  `--auto-select-tab-capture-source-by-title` e dispositivos falsos): 6 s
+  gravados viram MP4 H.264 + AAC estéreo de 19 quadros e abrem no editor com
+  6,1 s. Drivers em `tmp/autoedit-app/web.mjs`, `web2.mjs`, `web3.mjs` e
+  `web4.mjs` (fora do repositório).
 
 ## 7. Cortes, tempo e exportação
 

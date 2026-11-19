@@ -22,6 +22,8 @@ export interface AutoEditBrief {
   /** The feel, in the user's words ("tutorial direto", "bastidores descontraído"). */
   tone: string
   roles: WorkerRole[]
+  /** With a second video: what each video is, in the user's words ("a gameplay", "minha reação"). */
+  videoRoles?: { first: string; second: string }
 }
 
 export interface AutoEditChapter {
@@ -94,7 +96,10 @@ function parseBrief(value: unknown): AutoEditBrief | null {
     preset: isExportPreset(value.preset) ? value.preset : 'custom',
     targetDurationSec: typeof target === 'number' && Number.isFinite(target) && target > 0 ? Math.min(target, AUTO_EDIT_LIMITS.maxTargetSec) : null,
     tone: typeof value.tone === 'string' ? value.tone.replace(/\s+/g, ' ').trim().slice(0, AUTO_EDIT_LIMITS.maxToneLength) : '',
-    roles: [...new Set(roles)]
+    roles: [...new Set(roles)],
+    ...(isRecord(value.videoRoles) && typeof value.videoRoles.first === 'string' && typeof value.videoRoles.second === 'string'
+      ? { videoRoles: { first: tidyRole(value.videoRoles.first), second: tidyRole(value.videoRoles.second) } }
+      : {})
   }
 }
 
@@ -141,3 +146,5 @@ export function parseAutoEditRerunRequest(value: unknown): AutoEditRerunRequest 
     instruction: typeof value.instruction === 'string' ? value.instruction.replace(/\s+/g, ' ').trim().slice(0, AUTO_EDIT_LIMITS.maxInstructionLength) : ''
   }
 }
+
+const tidyRole = (value: string): string => value.replace(/\s+/g, ' ').trim().slice(0, 80)

@@ -48,7 +48,9 @@ const ACTION_TYPES = [
   'unmute',
   'volume',
   'music-ducking',
-  'text'
+  'text',
+  'layout',
+  'second-sound'
 ] as const
 
 /**
@@ -103,7 +105,9 @@ export const ACTION_DOCS = `Actions and their fields:
 - "mute" / "unmute": value = "microphone" or "system".
 - "volume": how loud a track plays. value = "microphone", "system" or "music"; scale = the level, 0 to 1 (1 = as recorded). The music can only be set when the recording has music.
 - "music-ducking": how far the music goes down while someone speaks. value = "off", "light" or "strong". Only when the recording has music; the user brings music in on the Áudio tab.
-- "text": writes a text over the video (a title, a call-out). value = the text itself; fromWord/toWord or startSec/endSec say when it shows (without an end, ${ASSISTANT_CONFIG.defaultZoomMs / 1000} s). It appears in the middle of the frame; the user moves it.`
+- "text": writes a text over the video (a title, a call-out). value = the text itself; fromWord/toWord or startSec/endSec say when it shows (without an end, ${ASSISTANT_CONFIG.defaultZoomMs / 1000} s). It appears in the middle of the frame; the user moves it.
+- "layout" (only when the edit has a second video): what the frame shows over a stretch while video 2 is on. value = "both" (split screen: video 1 and video 2 together), "video1" (only video 1, the recording, full frame) or "video2" (only video 2 full frame — a reaction's big moment, 1–4 s). fromWord/toWord or startSec/endSec. The sound goes on as set whatever is shown.
+- "second-sound" (only with a second video): whose sound plays while video 2 is on. value = "video1", "both" or "video2"; scale = video 2's level, 0 to 2 (null = as it is).`
 
 const SYSTEM_PROMPT = `You are the editing assistant inside ScreenRx, a screen recording editor. The user talks to you in a chat next to the editor; you answer questions about the recording and ask the editor for edits.
 
@@ -156,7 +160,10 @@ export function describeEdit(edit: AssistantEditState): string {
     edit.hasWebcam ? `Webcam: ${edit.webcamVisible ? 'shown' : 'hidden'}` : 'Webcam: not recorded',
     `Microphone: ${onOff(!edit.microphoneMuted)}, volume ${level(edit.microphoneVolume)}`,
     edit.hasSystemAudio ? `System audio: ${onOff(!edit.systemAudioMuted)}, volume ${level(edit.systemAudioVolume)}` : 'System audio: not recorded',
-    edit.music ? `Music: volume ${level(edit.music.volume)}, ducking ${edit.music.ducking}` : 'Music: none (the user brings music in on the Áudio tab)'
+    edit.music ? `Music: volume ${level(edit.music.volume)}, ducking ${edit.music.ducking}` : 'Music: none (the user brings music in on the Áudio tab)',
+    edit.secondVideo
+      ? `Second video ("${edit.secondVideo.name}", ${edit.secondVideo.hasAudio ? 'with sound' : 'no sound'}; sound heard: ${edit.secondVideo.sound === 'main' ? 'video 1 only' : edit.secondVideo.sound === 'clip' ? 'video 2 only' : 'both'}):\n${edit.secondVideo.pieces.map((piece) => `  ${clock(piece.startMs)}–${clock(piece.endMs)} ${piece.show === 'both' ? 'split screen' : piece.show === 'main' ? 'video 1 only' : piece.show === 'clip' ? 'video 2 only' : 'floating over video 1'}`).join('\n')}`
+      : 'Second video: none'
   ]
   return lines.join('\n')
 }
@@ -390,6 +397,20 @@ export function parseAssistantResponse(
         const volume = raw > 1 && raw <= 100 ? raw / 100 : raw
         if (volume < 0 || volume > 1) break
         actions.push({ type: 'volume', track, volume: Math.round(volume * 100) / 100 })
+        break
+      }
+      case 'layout': {
+        const show =
+          text === 'both' || text === 'split' ? 'both' : text === 'video1' || text === 'main' || text === 'recording' ? 'main' : text === 'video2' || text === 'clip' || text === 'reaction' ? 'clip' : null
+        const span = spanOf(entry, words, durationMs, null)
+        if (show && span && span.endMs - span.startMs >= 300) actions.push({ type: 'layout', ...span, show })
+        break
+      }
+      case 'second-sound': {
+        const audio = text === 'video1' || text === 'main' ? 'main' : text === 'video2' || text === 'clip' ? 'clip' : text === 'both' ? 'both' : null
+        if (!audio) break
+        const volume = typeof entry.scale === 'number' && Number.isFinite(entry.scale) ? clamp(entry.scale, 0, 2) : null
+        actions.push({ type: 'second-sound', audio, volume })
         break
       }
       case 'music-ducking': {

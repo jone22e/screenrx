@@ -1,0 +1,11 @@
+node_modules
+out
+dist
+dist-native
+release
+native
+tmp
+coverage
+.git
+.claude
+*.log

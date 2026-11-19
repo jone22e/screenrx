@@ -5,6 +5,8 @@ interface Props {
   durationMs: number
   /** Width ÷ height of the video. */
   aspect: number
+  /** Where in the video the strip starts (a clip shown from part way in). */
+  fromMs?: number
 }
 
 /** Waits for the thumbnails to be redrawn until resizing settles. */
@@ -22,7 +24,7 @@ function once(target: EventTarget, event: string): Promise<void> {
  * the instant under its left edge. It is drawn progressively by seeking a
  * throwaway video element, which is released as soon as the strip is done.
  */
-export function Filmstrip({ url, durationMs, aspect }: Props) {
+export function Filmstrip({ url, durationMs, aspect, fromMs = 0 }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
 
   useEffect(() => {
@@ -51,7 +53,7 @@ export function Filmstrip({ url, durationMs, aspect }: Props) {
       try {
         await once(video, 'loadeddata')
         for (let index = 0; index < count && current === generation; index++) {
-          const seconds = ((index * thumbnailWidth) / width) * (durationMs / 1000)
+          const seconds = (fromMs + ((index * thumbnailWidth) / width) * durationMs) / 1000
           video.currentTime = Math.min(seconds, Math.max(0, video.duration - 0.05))
           await once(video, 'seeked')
           if (current !== generation) break
@@ -76,7 +78,7 @@ export function Filmstrip({ url, durationMs, aspect }: Props) {
       clearTimeout(settle)
       observer.disconnect()
     }
-  }, [url, durationMs, aspect])
+  }, [url, durationMs, aspect, fromMs])
 
   return <canvas ref={canvas} className="filmstrip" />
 }

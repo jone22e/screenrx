@@ -7,7 +7,9 @@ import type {
   ExportPreset,
   FrameAspect,
   FrameFit,
-  MusicDucking
+  MusicDucking,
+  SplitAudio,
+  SplitShow
 } from './project'
 import { AUDIO_TRACK_KINDS, CAPTION_LANGUAGES, CAPTION_LENGTHS, CAPTION_MODES, MUSIC_DUCKINGS, isExportPreset } from './project'
 
@@ -53,6 +55,18 @@ export interface AssistantEditState {
   systemAudioVolume: number
   /** Whether the session has music, and how it is pressed down under speech; `null` without music. */
   music: { volume: number; ducking: MusicDucking } | null
+  /** The video on the second track (a reaction, a gameplay…), when there is one: where it is and what each stretch shows. */
+  secondVideo?: SecondVideoState | null
+}
+
+export interface SecondVideoState {
+  name: string
+  /** Its file in the session's assets, for the main process to read its speech. */
+  file: string
+  /** On the recording's clock; `offsetMs` is where in the clip each piece starts. */
+  pieces: Array<AssistantSpan & { show: SplitShow | 'floating'; offsetMs: number }>
+  sound: SplitAudio
+  hasAudio: boolean
 }
 
 export interface AssistantRequest {
@@ -84,6 +98,10 @@ export type AssistantAction =
   | { type: 'volume'; track: AudioTrackKind | 'music'; volume: number }
   | { type: 'music-ducking'; ducking: MusicDucking }
   | { type: 'text'; text: string; startMs: number; endMs: number }
+  /** What the frame shows over a stretch, with a second video: both split, only video 1 or only video 2. */
+  | { type: 'layout'; startMs: number; endMs: number; show: SplitShow }
+  /** Whose sound plays while the second video is on, and the second video's level. */
+  | { type: 'second-sound'; audio: SplitAudio; volume: number | null }
 
 export interface AssistantReply {
   text: string
@@ -163,7 +181,8 @@ export function parseAssistantRequest(value: unknown): AssistantRequest | null {
       music:
         isRecord(edit.music) && (MUSIC_DUCKINGS as readonly unknown[]).includes(edit.music.ducking)
           ? { volume: parseLevel(edit.music.volume), ducking: edit.music.ducking as MusicDucking }
-          : null
+          : null,
+      secondVideo: parseSecondVideo(edit.secondVideo)
     }
   }
 }
@@ -175,3 +194,23 @@ function parseLevel(value: unknown): number {
 
 export const isAudioTrackKind = (value: unknown): value is AudioTrackKind =>
   (AUDIO_TRACK_KINDS as readonly unknown[]).includes(value)
+
+const SHOWS = ['both', 'main', 'clip', 'floating'] as const
+
+function parseSecondVideo(value: unknown): SecondVideoState | null {
+  if (!isRecord(value) || typeof value.name !== 'string' || !Array.isArray(value.pieces)) return null
+  const pieces = value.pieces.flatMap((entry) => {
+    const span = parseSpan(entry)
+    const show = isRecord(entry) && (SHOWS as readonly unknown[]).includes(entry.show) ? (entry.show as (typeof SHOWS)[number]) : null
+    const offsetMs = isRecord(entry) && isFiniteNumber(entry.offsetMs) && entry.offsetMs >= 0 ? entry.offsetMs : 0
+    return span && show ? [{ ...span, show, offsetMs }] : []
+  })
+  if (pieces.length === 0 || typeof value.file !== 'string' || !/^[^/\\\0]{1,255}$/.test(value.file) || value.file === '..' || value.file === '.') return null
+  return {
+    name: value.name.slice(0, 200),
+    file: value.file,
+    pieces: pieces.slice(0, 200),
+    sound: value.sound === 'main' || value.sound === 'clip' ? value.sound : 'both',
+    hasAudio: value.hasAudio === true
+  }
+}

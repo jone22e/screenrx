@@ -238,7 +238,7 @@ export interface CaptionCue {
   words: CaptionWord[]
 }
 
-export type CaptionFont = 'system' | 'rounded' | 'serif' | 'impact' | 'mono'
+export type CaptionFont = 'system' | 'rounded' | 'serif' | 'impact' | 'mono' | 'cursive'
 /** What keeps the text readable over the video. */
 export type CaptionBackdrop = 'box' | 'outline' | 'shadow' | 'none'
 /**
@@ -312,27 +312,31 @@ export interface TextOverlay {
   exit: TextMotion
 }
 
+/** What every layer over the video shares: when it shows, where it sits, how big, turned and faded. */
+export interface LayerPlacement {
+  id: string
+  startMs: number
+  endMs: number
+  /** Centre of the layer, normalized to the output. */
+  position: NormalizedPoint
+  /** Width as a ratio of the output width; the height follows the layer's own proportions. */
+  sizeRatio: number
+  rotationDeg: number
+  /** 0…1. */
+  opacity: number
+  /** Corner rounding as a ratio of the layer's shorter side; 0.5 makes a square round. */
+  cornerRadiusRatio: number
+}
+
 /**
  * An image laid over the video — a logo, a sticker, a screenshot — during
  * its span. The file is one of the session's `assets/`; the layer only says
  * how and when it shows. Layers are drawn in list order, the last on top.
  */
-export interface ImageLayer {
-  id: string
+export interface ImageLayer extends LayerPlacement {
   kind: 'image'
   /** File name inside the session's `assets/` folder. */
   file: string
-  startMs: number
-  endMs: number
-  /** Centre of the image, normalized to the output. */
-  position: NormalizedPoint
-  /** Width as a ratio of the output width; the height follows the image. */
-  sizeRatio: number
-  rotationDeg: number
-  /** 0…1. */
-  opacity: number
-  /** Corner rounding as a ratio of the image's shorter side; 0.5 makes a square round. */
-  cornerRadiusRatio: number
 }
 
 /**
@@ -340,13 +344,117 @@ export interface ImageLayer {
  * like an image. It plays from `offsetMs` into the clip, forward with the
  * recording, without its own sound.
  */
-export interface VideoLayer extends Omit<ImageLayer, 'kind'> {
+export interface VideoLayer extends LayerPlacement {
   kind: 'video'
+  file: string
   /** Where in the clip it starts playing, in ms. */
   offsetMs: number
+  /** Split screen with the recording while the layer is on, instead of floating over it; absent: floating. */
+  split?: SplitScreen
 }
 
-export type Layer = ImageLayer | VideoLayer
+/** `stacked`: one above the other (the Reels look); `side`: side by side. */
+export type SplitOrientation = 'stacked' | 'side'
+/** Whose sound is heard while the screen is split. */
+export type SplitAudio = 'main' | 'clip' | 'both'
+/** What the frame shows during the stretch: both videos split, only the recording, or only the clip (a reaction's big moment). */
+export type SplitShow = 'both' | 'main' | 'clip'
+export const SPLIT_SHOWS: readonly SplitShow[] = ['both', 'main', 'clip']
+
+/**
+ * The recording and a clip sharing the frame, each filling its part (cut to
+ * its shape, never squeezed), with a line between them. Only during the
+ * clip layer's span; before and after, the recording has the frame alone.
+ */
+export interface SplitScreen {
+  orientation: SplitOrientation
+  /** The clip on top (or on the left); otherwise the recording is. */
+  clipFirst: boolean
+  /** The recording's share of the frame along the split, 0.2–0.8. */
+  mainShare: number
+  /** Centre of the part of the clip shown, normalized to the clip. */
+  clipFocus: NormalizedPoint
+  /** Centre of the part of the recording shown, normalized to the recording. */
+  mainFocus: NormalizedPoint
+  /** Thickness of the line between the two, as a ratio of the output's shorter side; 0 for none. */
+  dividerRatio: number
+  /** `#rrggbb`. */
+  dividerColor: string
+  audio: SplitAudio
+  /** The clip's sound, when heard. */
+  clipVolume: number
+  /** What the frame shows meanwhile; the sound goes on as set whichever is shown. Absent: both. */
+  show?: SplitShow
+}
+
+export const SPLIT_LIMITS = { minShare: 0.2, maxShare: 0.8, maxDividerRatio: 0.03, maxClipVolume: 2 } as const
+
+export const DEFAULT_SPLIT: SplitScreen = {
+  orientation: 'stacked',
+  clipFirst: false,
+  mainShare: 0.5,
+  clipFocus: { x: 0.5, y: 0.5 },
+  mainFocus: { x: 0.5, y: 0.5 },
+  dividerRatio: 0.004,
+  dividerColor: '#000000',
+  audio: 'both',
+  clipVolume: 1
+}
+
+/** A split read back, checked; `undefined` when there is none (the layer floats). */
+export function parseSplitScreen(value: unknown): SplitScreen | undefined {
+  if (!isRecord(value)) return undefined
+  const share = isFiniteNumber(value.mainShare) ? Math.min(Math.max(value.mainShare, SPLIT_LIMITS.minShare), SPLIT_LIMITS.maxShare) : DEFAULT_SPLIT.mainShare
+  return {
+    orientation: value.orientation === 'side' ? 'side' : 'stacked',
+    clipFirst: value.clipFirst === true,
+    mainShare: share,
+    clipFocus: parseNormalizedPoint(value.clipFocus, DEFAULT_SPLIT.clipFocus),
+    mainFocus: parseNormalizedPoint(value.mainFocus, DEFAULT_SPLIT.mainFocus),
+    dividerRatio: clampRatio(value.dividerRatio, DEFAULT_SPLIT.dividerRatio, SPLIT_LIMITS.maxDividerRatio),
+    dividerColor: isHexColor(value.dividerColor) ? value.dividerColor : DEFAULT_SPLIT.dividerColor,
+    audio: value.audio === 'main' || value.audio === 'clip' ? value.audio : 'both',
+    clipVolume: clampRatio(value.clipVolume, 1, SPLIT_LIMITS.maxClipVolume),
+    ...(value.show === 'main' || value.show === 'clip' ? { show: value.show } : {})
+  }
+}
+
+export type ShapeKind = 'rectangle' | 'ellipse' | 'triangle' | 'diamond' | 'arrow' | 'line' | 'star' | 'heart'
+export const SHAPE_KINDS: readonly ShapeKind[] = ['rectangle', 'ellipse', 'triangle', 'diamond', 'arrow', 'line', 'star', 'heart']
+
+/**
+ * A shape drawn over the video — a box around a button, an arrow, a bar —
+ * filled, outlined or both. It needs no file: it is drawn from its settings.
+ */
+export interface ShapeLayer extends LayerPlacement {
+  kind: 'shape'
+  shape: ShapeKind
+  /** Height as a ratio of the width. */
+  aspect: number
+  fill: boolean
+  /** `#rrggbb`. */
+  fillColor: string
+  /** Thickness of the outline as a ratio of the output height; 0 for none. */
+  strokeRatio: number
+  /** `#rrggbb`. */
+  strokeColor: string
+}
+
+/** An emoji drawn over the video, in the system's emoji font, as big as asked. */
+export interface EmojiLayer extends LayerPlacement {
+  kind: 'emoji'
+  /** One emoji (a single grapheme, which may be several code points). */
+  emoji: string
+}
+
+export type Layer = ImageLayer | VideoLayer | ShapeLayer | EmojiLayer
+/** The layers that show a file of the session. */
+export type FileLayer = ImageLayer | VideoLayer
+/** The layers drawn from their settings alone, with no file. */
+export type ElementLayer = ShapeLayer | EmojiLayer
+
+export const isFileLayer = (layer: Layer): layer is FileLayer => layer.kind === 'image' || layer.kind === 'video'
+export const isElementLayer = (layer: Layer): layer is ElementLayer => layer.kind === 'shape' || layer.kind === 'emoji'
 
 /** How steady the drawn pointer's hand is. */
 export type CursorSmoothing = 'none' | 'light' | 'strong'
@@ -380,6 +488,37 @@ export const LAYER_LIMITS = {
 export const DEFAULT_IMAGE_LAYER: Pick<ImageLayer, 'position' | 'sizeRatio' | 'rotationDeg' | 'opacity' | 'cornerRadiusRatio'> = {
   position: { x: 0.85, y: 0.12 },
   sizeRatio: 0.18,
+  rotationDeg: 0,
+  opacity: 1,
+  cornerRadiusRatio: 0
+}
+
+export const SHAPE_LIMITS = {
+  minAspect: 0.04,
+  maxAspect: 3,
+  maxStrokeRatio: 0.03,
+  /** How long a shape or an emoji shows when added, before it is trimmed on the timeline. */
+  defaultDurationMs: 3000,
+  maxEmojiLength: 32
+} as const
+
+/** A shape as added: solid, centred, no outline; each kind then gets its own proportions. */
+export const DEFAULT_SHAPE_LAYER: Pick<ShapeLayer, 'position' | 'sizeRatio' | 'rotationDeg' | 'opacity' | 'cornerRadiusRatio' | 'aspect' | 'fill' | 'fillColor' | 'strokeRatio' | 'strokeColor'> = {
+  position: { x: 0.5, y: 0.5 },
+  sizeRatio: 0.2,
+  rotationDeg: 0,
+  opacity: 1,
+  cornerRadiusRatio: 0,
+  aspect: 1,
+  fill: true,
+  fillColor: '#ff3b30',
+  strokeRatio: 0,
+  strokeColor: '#ffffff'
+}
+
+export const DEFAULT_EMOJI_LAYER: Pick<EmojiLayer, 'position' | 'sizeRatio' | 'rotationDeg' | 'opacity' | 'cornerRadiusRatio'> = {
+  position: { x: 0.5, y: 0.5 },
+  sizeRatio: 0.1,
   rotationDeg: 0,
   opacity: 1,
   cornerRadiusRatio: 0
@@ -577,7 +716,7 @@ const isFiniteNumber = (value: unknown): value is number =>
 
 const WEBCAM_SHAPES: readonly WebcamShape[] = ['circle', 'rounded', 'square']
 const WEBCAM_CORNERS: readonly WebcamCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right']
-export const CAPTION_FONT_IDS: readonly CaptionFont[] = ['system', 'rounded', 'serif', 'impact', 'mono']
+export const CAPTION_FONT_IDS: readonly CaptionFont[] = ['system', 'rounded', 'serif', 'impact', 'mono', 'cursive']
 const CAPTION_BACKDROPS: readonly CaptionBackdrop[] = ['box', 'outline', 'shadow', 'none']
 export const CAPTION_LENGTHS: readonly CaptionLength[] = ['word', 'pair', 'short', 'medium', 'long']
 export const CAPTION_MODES: readonly CaptionMode[] = ['block', 'highlight', 'reveal']
@@ -787,29 +926,60 @@ function parseCursor(value: unknown): CursorSettings {
   }
 }
 
-/** Image layers as saved, in their order; a malformed one is dropped. Projects saved before them have none. */
+/** Layers as saved, in their order; a malformed one is dropped. Projects saved before them have none. */
 function parseLayers(value: unknown): Layer[] {
   const layers: Layer[] = []
   for (const entry of Array.isArray(value) ? value.slice(0, LAYER_LIMITS.maxLayers) : []) {
-    if (!isRecord(entry) || (entry.kind !== 'image' && entry.kind !== 'video')) continue
+    if (!isRecord(entry)) continue
     const base = parseBase(entry)
-    if (!base || typeof entry.file !== 'string' || !/^[^/\\\0]{1,255}$/.test(entry.file) || entry.file === '.' || entry.file === '..') continue
-    const common = {
+    if (!base) continue
+    const placement = (fallback: Pick<LayerPlacement, 'position' | 'sizeRatio'>): LayerPlacement => ({
       ...base,
-      file: entry.file,
-      position: parseNormalizedPoint(entry.position, DEFAULT_IMAGE_LAYER.position),
-      sizeRatio: isFiniteNumber(entry.sizeRatio)
-        ? Math.min(Math.max(entry.sizeRatio, LAYER_LIMITS.minSizeRatio), LAYER_LIMITS.maxSizeRatio)
-        : DEFAULT_IMAGE_LAYER.sizeRatio,
+      position: parseNormalizedPoint(entry.position, fallback.position),
+      sizeRatio: isFiniteNumber(entry.sizeRatio) ? Math.min(Math.max(entry.sizeRatio, LAYER_LIMITS.minSizeRatio), LAYER_LIMITS.maxSizeRatio) : fallback.sizeRatio,
       rotationDeg: isFiniteNumber(entry.rotationDeg) ? ((entry.rotationDeg % 360) + 360) % 360 : 0,
-      opacity: clampRatio(entry.opacity, DEFAULT_IMAGE_LAYER.opacity, 1),
-      cornerRadiusRatio: clampRatio(entry.cornerRadiusRatio, DEFAULT_IMAGE_LAYER.cornerRadiusRatio, LAYER_LIMITS.maxCornerRadiusRatio)
+      opacity: clampRatio(entry.opacity, 1, 1),
+      cornerRadiusRatio: clampRatio(entry.cornerRadiusRatio, 0, LAYER_LIMITS.maxCornerRadiusRatio)
+    })
+    switch (entry.kind) {
+      case 'image':
+      case 'video': {
+        if (typeof entry.file !== 'string' || !/^[^/\\\0]{1,255}$/.test(entry.file) || entry.file === '.' || entry.file === '..') continue
+        const common = { ...placement(DEFAULT_IMAGE_LAYER), file: entry.file }
+        layers.push(
+          entry.kind === 'video'
+            ? {
+                ...common,
+                kind: 'video',
+                offsetMs: isFiniteNumber(entry.offsetMs) && entry.offsetMs >= 0 ? entry.offsetMs : 0,
+                ...(parseSplitScreen(entry.split) && { split: parseSplitScreen(entry.split) as SplitScreen })
+              }
+            : { ...common, kind: 'image' }
+        )
+        break
+      }
+      case 'shape':
+        if (!includes(SHAPE_KINDS, entry.shape)) continue
+        layers.push({
+          ...placement(DEFAULT_SHAPE_LAYER),
+          kind: 'shape',
+          shape: entry.shape,
+          aspect: isFiniteNumber(entry.aspect) ? Math.min(Math.max(entry.aspect, SHAPE_LIMITS.minAspect), SHAPE_LIMITS.maxAspect) : DEFAULT_SHAPE_LAYER.aspect,
+          fill: entry.fill !== false,
+          fillColor: isHexColor(entry.fillColor) ? entry.fillColor : DEFAULT_SHAPE_LAYER.fillColor,
+          strokeRatio: clampRatio(entry.strokeRatio, DEFAULT_SHAPE_LAYER.strokeRatio, SHAPE_LIMITS.maxStrokeRatio),
+          strokeColor: isHexColor(entry.strokeColor) ? entry.strokeColor : DEFAULT_SHAPE_LAYER.strokeColor
+        })
+        break
+      case 'emoji': {
+        const emoji = typeof entry.emoji === 'string' ? entry.emoji.trim().slice(0, SHAPE_LIMITS.maxEmojiLength) : ''
+        if (emoji === '') continue
+        layers.push({ ...placement(DEFAULT_EMOJI_LAYER), kind: 'emoji', emoji })
+        break
+      }
+      default:
+        continue
     }
-    layers.push(
-      entry.kind === 'video'
-        ? { ...common, kind: 'video', offsetMs: isFiniteNumber(entry.offsetMs) && entry.offsetMs >= 0 ? entry.offsetMs : 0 }
-        : { ...common, kind: 'image' }
-    )
   }
   return layers
 }

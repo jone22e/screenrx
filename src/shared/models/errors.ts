@@ -20,6 +20,8 @@ export type AppErrorCode =
   | 'transcription-unavailable'
   | 'transcription-cancelled'
   | 'transcription-busy'
+  | 'transcription-too-long'
+  | 'transcription-server-unreachable'
   | 'ai-unavailable'
   | 'ai-failed'
   | 'ai-cancelled'
@@ -50,6 +52,18 @@ export type AppErrorCode =
   | 'image-unsupported'
   | 'image-failed'
   | 'invalid-state'
+  | 'web-unsupported'
+  | 'instagram-not-connected'
+  | 'instagram-login-failed'
+  | 'instagram-no-account'
+  | 'instagram-unauthorized'
+  | 'instagram-limit'
+  | 'instagram-failed'
+  | 'link-invalid'
+  | 'link-tool-missing'
+  | 'link-tool-failed'
+  | 'link-download-failed'
+  | 'link-cancelled'
   | 'unknown'
 
 export interface AppError {
@@ -92,6 +106,8 @@ const MESSAGES: Record<AppErrorCode, string> = {
     'A transcrição não está disponível: ela precisa do macOS 26 ou mais recente e de um idioma suportado pelo sistema.',
   'transcription-cancelled': 'A transcrição foi cancelada.',
   'transcription-busy': 'Já existe uma transcrição em andamento.',
+  'transcription-too-long': 'O áudio é longo demais para o serviço de transcrição deste servidor.',
+  'transcription-server-unreachable': 'Não foi possível falar com o serviço de transcrição. Tente de novo em instantes.',
   'ai-unavailable': 'A ferramenta de IA não foi encontrada. Instale-a em Configurar IA.',
   'ai-failed':
     'A IA não respondeu como esperado. Confira se o login da ferramenta está ativo e tente de novo.',
@@ -123,7 +139,24 @@ const MESSAGES: Record<AppErrorCode, string> = {
   'image-unsupported': 'O arquivo escolhido não é uma imagem que o ScreenRx consiga mostrar (PNG, JPG, WebP, GIF, SVG).',
   'image-failed': 'Não foi possível trazer a imagem para a gravação.',
   'invalid-state': 'Essa ação não está disponível no momento.',
+  'web-unsupported': 'Este recurso só existe no app ScreenRx para Mac.',
+  'instagram-not-connected': 'Conecte uma conta do Instagram em Configurações para publicar.',
+  'instagram-login-failed': 'O login no Facebook não foi concluído.',
+  'instagram-no-account':
+    'Nenhuma conta profissional do Instagram foi encontrada. A conta precisa ser Comercial ou de Criador e estar ligada a uma Página do Facebook.',
+  'instagram-unauthorized': 'O Instagram recusou o acesso. Conecte a conta de novo em Configurações.',
+  'instagram-limit': 'A conta atingiu o limite de publicações pela API nas últimas 24 horas. Tente mais tarde.',
+  'instagram-failed': 'O Instagram não aceitou o vídeo.',
+  'link-invalid': 'Esse endereço não parece um link de vídeo.',
+  'link-tool-missing': 'Para baixar vídeos por link, baixe antes a ferramenta yt-dlp.',
+  'link-tool-failed': 'Não foi possível baixar a ferramenta yt-dlp. Confira a conexão e tente de novo.',
+  'link-download-failed': 'Não foi possível baixar o vídeo desse link.',
+  'link-cancelled': 'O download foi cancelado.',
   unknown: 'Ocorreu um erro inesperado.'
+}
+
+export function isAppErrorCode(value: unknown): value is AppErrorCode {
+  return typeof value === 'string' && Object.hasOwn(MESSAGES, value)
 }
 
 export function appError(code: AppErrorCode, detail?: string): AppError {

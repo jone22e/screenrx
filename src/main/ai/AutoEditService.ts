@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { assembleWorkers } from '@engine/ai/assembly'
 import { buildDirectorPrompt, parseDirectorResponse } from '@engine/ai/directorPrompt'
-import type { RecordingFacts } from '@engine/ai/recordingSheet'
+import type { RecordingFacts, SecondVideoFacts } from '@engine/ai/recordingSheet'
+import { wordsOnRecordingClock } from '../captions/ClipTranscriber'
 import { buildRecordingSheet } from '@engine/ai/recordingSheet'
 import { buildWorkerPrompt, parseWorkerResponse } from '@engine/ai/workerPrompts'
 import { SESSION_FILES } from '@shared/config/recording'
@@ -27,6 +28,8 @@ export interface AutoEditServiceDeps {
   onPlan: (sessionId: string, plan: AutoEditPlan) => void
   /** Each agent's work the moment it is done, already assembled against the cutter's cuts when that is known. */
   onWorker: (sessionId: string, result: WorkerResult) => void
+  /** What is said in a clip of the session (the second video), on the clip's clock; absent: not read. */
+  clipWords?: (sessionId: string, file: string, durationMs: number, locale: string) => Promise<TranscriptWord[] | null>
 }
 
 /** The effort each role works at: the director thinks hard, the cutter and the captioner carefully, the rest quickly. */
@@ -152,7 +155,28 @@ export class AutoEditService {
       hasSystemAudio: manifest.assets.systemAudio !== undefined,
       musicName: manifest.assets.music?.name ?? null,
       imageNames: (manifest.assets.images ?? []).map((image) => image.name),
-      cursorDrawn: !manifest.capture.cursorInVideo && manifest.assets.cursor !== undefined
+      cursorDrawn: !manifest.capture.cursorInVideo && manifest.assets.cursor !== undefined,
+      second: await this.secondVideoFacts(sessionId, request, manifest.assets.videos ?? [], transcript?.locale ?? 'pt-BR')
+    }
+  }
+
+  /** The second video, its speech on the recording's clock, and what the user said each video is. */
+  private async secondVideoFacts(
+    sessionId: string,
+    request: AutoEditRequest,
+    clips: ReadonlyArray<{ file: string; durationMs: number; hasAudio?: boolean }>,
+    locale: string
+  ): Promise<SecondVideoFacts | null> {
+    const second = request.edit.secondVideo
+    if (!second) return null
+    const clip = clips.find((candidate) => candidate.file === second.file)
+    const words = clip?.hasAudio && this.deps.clipWords ? await this.deps.clipWords(sessionId, second.file, clip.durationMs, locale).catch(() => null) : null
+    return {
+      name: second.name,
+      firstRole: request.brief.videoRoles?.first ?? '',
+      secondRole: request.brief.videoRoles?.second ?? '',
+      words: words ? wordsOnRecordingClock(words, second.pieces) : [],
+      transcribed: words !== null
     }
   }
 

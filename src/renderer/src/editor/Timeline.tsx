@@ -1,14 +1,17 @@
-import type { PointerEvent, ReactNode, RefObject } from 'react'
+import type { DragEvent, PointerEvent, ReactNode, RefObject } from 'react'
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { sourceTimeToTimelineTime } from '@engine/time/timeMapping'
 import { moveZoom, resizeZoom } from '@engine/zoom/zoomEditing'
 import { formatClock, formatTimecode } from '@shared/format'
 import { DUB_TRACKS } from '@shared/models/media'
 import type { EditorSession } from '@shared/models/editor'
-import type { CaptionCue, Layer, SpeedEffect, TextOverlay, TrimEffect, ZoomEffect } from '@shared/models/project'
+import type { CaptionCue, Layer, SpeedEffect, TextOverlay, TrimEffect, VideoLayer, ZoomEffect } from '@shared/models/project'
+import { addSecondVideo } from './secondVideo'
 import type { EditorStore } from './EditorStore'
 import { Filmstrip } from './Filmstrip'
 import type { PreviewPlayer } from './PreviewPlayer'
+import { LayerIcon } from './LayerIcon'
+import { layerLabel } from '@engine/rendering/shapes'
 import { SUGGESTION_KIND_LABELS, previewSuggestion } from './SuggestionsPanel'
 import { Waveform } from './Waveform'
 import { useAgentCursors } from '../common/agentCursors'
@@ -79,7 +82,7 @@ const ZOOM_LEVELS = { min: 1, max: 8, step: 0.25 } as const
 const SNAP_KEY = 'screenrx.timeline.snap'
 
 /** A lane whose regions the user froze: nothing on it moves until it is unlocked. */
-type LaneId = 'cuts' | 'zoom' | 'speed' | 'captions' | 'text' | 'layers'
+type LaneId = 'cuts' | 'zoom' | 'speed' | 'captions' | 'text' | 'layers' | 'video2'
 
 const speedLabel = (speed: number): string => `${String(speed).replace('.', ',')}×`
 
@@ -231,7 +234,22 @@ export function Timeline({ session, store, player }: Props) {
   const { cues } = state.captions
   // The dubbing in use has a lane of its own; it stands in for the microphone.
   const dub = state.dubs.find((track) => track.language === state.dub.language) ?? null
-  const laneCount = 5 + (cues.length > 0 ? 1 : 0) + (state.layers.length > 0 ? 1 : 0) + (session.webcam ? 1 : 0) + session.audio.length + (dub ? 1 : 0)
+  // Clips have the second video track to themselves; images, shapes and emojis keep theirs.
+  const videoLayers = state.layers.filter((layer): layer is VideoLayer => layer.kind === 'video')
+  const pictureLayers = state.layers.filter((layer) => layer.kind !== 'video')
+  const [addingVideo, setAddingVideo] = useState(false)
+  const [videoNotice, setVideoNotice] = useState<string | null>(null)
+  const addVideo = (atMs: number = player.currentTimeMs, files: readonly File[] | null = null): void => {
+    setAddingVideo(true)
+    setVideoNotice(null)
+    void addSecondVideo(session, store, atMs, files)
+      .then(setVideoNotice)
+      .finally(() => setAddingVideo(false))
+  }
+  // A video file dragged from the Finder onto the tracks becomes the second video, from where it is let go.
+  const [dropAt, setDropAt] = useState<number | null>(null)
+  const carriesFiles = (event: DragEvent<HTMLElement>): boolean => Array.from(event.dataTransfer.types).includes('Files')
+  const laneCount = 6 + (cues.length > 0 ? 1 : 0) + (pictureLayers.length > 0 ? 1 : 0) + (session.webcam ? 1 : 0) + session.audio.length + (dub ? 1 : 0)
 
   useEffect(() => {
     const element = tracks.current
@@ -477,8 +495,8 @@ export function Timeline({ session, store, player }: Props) {
   const roomy = (region: { startMs: number; endMs: number }): boolean =>
     ((region.endMs - region.startMs) / duration) * width >= REMOVE_MIN_WIDTH_PX
   const now = (): number => player.currentTimeMs
-  const imageName = (file: string): string =>
-    state.images.find((image) => image.file === file)?.name ?? state.clips.find((clip) => clip.file === file)?.name ?? file
+  const nameOf = (layer: Layer): string =>
+    layerLabel(layer, (file) => state.images.find((image) => image.file === file)?.name ?? state.clips.find((clip) => clip.file === file)?.name ?? file)
   const dragHandlers = { onPointerMove: continueDrag, onPointerUp: endDrag, onPointerCancel: endDrag }
 
   return (
@@ -554,7 +572,10 @@ export function Timeline({ session, store, player }: Props) {
             {laneCount} {laneCount === 1 ? 'trilha' : 'trilhas'}
           </span>
           <LaneLabel icon={<FilmIcon />} tall>
-            Vídeo
+            Vídeo 1
+          </LaneLabel>
+          <LaneLabel icon={<FilmIcon />} tall onAdd={() => addVideo()} addLabel="Pôr um segundo vídeo em tela dividida aqui" locked={isLocked('video2')} onLock={() => toggleLock('video2')}>
+            Vídeo 2
           </LaneLabel>
           <LaneLabel
             icon={<ScissorsIcon />}
@@ -602,7 +623,7 @@ export function Timeline({ session, store, player }: Props) {
           >
             Texto
           </LaneLabel>
-          {state.layers.length > 0 && (
+          {pictureLayers.length > 0 && (
             <LaneLabel icon={<ImageIcon />} locked={isLocked('layers')} onLock={() => toggleLock('layers')}>
               Imagens
             </LaneLabel>
@@ -649,7 +670,34 @@ export function Timeline({ session, store, player }: Props) {
         </div>
 
         <div className="timeline-scroll" ref={scroll}>
-        <div className="timeline-tracks" ref={tracks} style={{ width: `${zoom * 100}%` }}>
+        <div
+          className="timeline-tracks"
+          ref={tracks}
+          style={{ width: `${zoom * 100}%` }}
+          data-dropping={dropAt !== null}
+          onDragOver={(event) => {
+            if (!carriesFiles(event)) return
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'copy'
+            setDropAt(rawTimeAt(event.clientX))
+          }}
+          onDragLeave={(event) => {
+            if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+            setDropAt(null)
+          }}
+          onDrop={(event) => {
+            if (!carriesFiles(event)) return
+            event.preventDefault()
+            setDropAt(null)
+            const files = Array.from(event.dataTransfer.files)
+            if (files.length > 0) addVideo(rawTimeAt(event.clientX), files.slice(0, 1))
+          }}
+        >
+          {dropAt !== null && (
+            <div className="timeline-drop" style={{ left: percent(dropAt) }}>
+              <span>Soltar como Vídeo 2 · {formatTimecode(dropAt)}</span>
+            </div>
+          )}
           <div className="ruler" onPointerDown={scrub} onPointerMove={scrub}>
             {rulerMarks(duration, width).map((timeMs) => (
               <span key={timeMs} className="ruler-mark" style={{ left: percent(timeMs) }}>
@@ -704,6 +752,46 @@ export function Timeline({ session, store, player }: Props) {
                   style={{ left: percent(event.timeMs) }}
                 />
               ))}
+          </div>
+
+          <div className="lane lane-video2" data-locked={isLocked('video2')} onPointerDown={scrub} onPointerMove={scrub}>
+            {videoLayers.length === 0 && (
+              <span className="lane-hint">{addingVideo ? 'Trazendo o vídeo…' : videoNotice ?? 'Clique em + para pôr um segundo vídeo em tela dividida'}</span>
+            )}
+            {videoLayers.map((layer) => {
+              const clip = state.clips.find((candidate) => candidate.file === layer.file)
+              return (
+                <div
+                  key={layer.id}
+                  className="region layer-block video2-block"
+                  data-selected={layer.id === state.selectedLayerId}
+                  data-split={layer.split !== undefined}
+                  title={`${nameOf(layer)} · ${formatTimecode(layer.startMs)} – ${formatTimecode(layer.endMs)}${layer.split ? ' · tela dividida' : ' · por cima da gravação'}`}
+                  style={span(layer)}
+                  onPointerDown={beginDrag({ target: 'layer', kind: 'move', original: layer, originX: 0 })}
+                  {...dragHandlers}
+                >
+                  {clip && <Filmstrip url={clip.url} durationMs={layer.endMs - layer.startMs} fromMs={layer.offsetMs} aspect={clip.widthPx / Math.max(1, clip.heightPx)} />}
+                  <span
+                    className="region-handle region-handle-start"
+                    onPointerDown={beginDrag({ target: 'layer', kind: 'start', original: layer, originX: 0 })}
+                    {...dragHandlers}
+                  />
+                  <span className="clip-label">
+                    <span className="clip-label-name">{nameOf(layer)}</span>
+                    <span className="clip-label-length">{!layer.split ? 'Por cima' : layer.split.show === 'main' ? 'Só o vídeo 1' : layer.split.show === 'clip' ? 'Só o vídeo 2' : 'Tela dividida'}</span>
+                  </span>
+                  {layer.id === state.selectedLayerId && roomy(layer) && (
+                    <RegionRemove label="Remover este vídeo" onRemove={() => store.removeLayer(layer.id)} />
+                  )}
+                  <span
+                    className="region-handle region-handle-end"
+                    onPointerDown={beginDrag({ target: 'layer', kind: 'end', original: layer, originX: 0 })}
+                    {...dragHandlers}
+                  />
+                </div>
+              )
+            })}
           </div>
 
           <div
@@ -918,14 +1006,14 @@ export function Timeline({ session, store, player }: Props) {
               ))}
           </div>
 
-          {state.layers.length > 0 && (
+          {pictureLayers.length > 0 && (
             <div className="lane lane-layers" data-locked={isLocked('layers')} onPointerDown={scrub} onPointerMove={scrub}>
-              {state.layers.map((layer) => (
+              {pictureLayers.map((layer) => (
                 <div
                   key={layer.id}
                   className="region layer-block"
                   data-selected={layer.id === state.selectedLayerId}
-                  title={`${imageName(layer.file)} · ${formatTimecode(layer.startMs)} – ${formatTimecode(layer.endMs)}`}
+                  title={`${nameOf(layer)} · ${formatTimecode(layer.startMs)} – ${formatTimecode(layer.endMs)}`}
                   style={span(layer)}
                   onPointerDown={beginDrag({ target: 'layer', kind: 'move', original: layer, originX: 0 })}
                   {...dragHandlers}
@@ -936,11 +1024,11 @@ export function Timeline({ session, store, player }: Props) {
                     {...dragHandlers}
                   />
                   <span className="region-icon" aria-hidden="true">
-                    {layer.kind === 'video' ? <FilmIcon /> : <ImageIcon />}
+                    <LayerIcon layer={layer} />
                   </span>
-                  <span className="cue-label">{imageName(layer.file)}</span>
+                  <span className="cue-label">{nameOf(layer)}</span>
                   {layer.id === state.selectedLayerId && roomy(layer) && (
-                    <RegionRemove label="Remover esta imagem" onRemove={() => store.removeLayer(layer.id)} />
+                    <RegionRemove label="Remover esta camada" onRemove={() => store.removeLayer(layer.id)} />
                   )}
                   <span
                     className="region-handle region-handle-end"

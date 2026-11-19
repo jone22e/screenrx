@@ -7,7 +7,7 @@ import type { CaptionLanguage } from '@shared/models/project'
 import { aiSettings, currentAiChoice } from '../common/aiSettings'
 import { agentCursors } from '../common/agentCursors'
 import { openSettings } from '../common/settingsScreen'
-import { AutoEditBriefForm, ROLE_HINTS, defaultBrief } from './AutoEditBriefForm'
+import { AutoEditBriefForm, DEFAULT_VIDEO_ROLES, ROLE_HINTS, defaultBrief } from './AutoEditBriefForm'
 import { editStateOf } from './editState'
 import type { EditorStore } from './EditorStore'
 import { GearIcon, RefreshIcon, SparklesIcon, UndoIcon } from './icons'
@@ -77,6 +77,11 @@ export function AutoEditPanel({ store }: Props) {
   const clock = `${Math.max(0, Math.round((elapsed.now - elapsed.startedAt) / 1000))} s`
   const { session } = store
   const hasTranscript = store.getState().transcript !== null
+  // With a second video the user says what each is; the team is told the defaults otherwise.
+  const editorState = useSyncExternalStore(store.subscribe, store.getState)
+  const secondVideo = editorState.layers.some((layer) => layer.kind === 'video') ? store.secondVideo() : null
+  const secondVideoName = secondVideo ? (editorState.clips.find((clip) => clip.file === secondVideo.file)?.name ?? secondVideo.file) : null
+  const briefToSend: AutoEditBrief = secondVideo ? { ...brief, videoRoles: brief.videoRoles ?? DEFAULT_VIDEO_ROLES } : brief
   /** The agents still landing their work; the team is over when the answer is back and this is empty. */
   const landing = useRef<Promise<void>[]>([])
   const working = useRef(false)
@@ -178,7 +183,7 @@ export function AutoEditPanel({ store }: Props) {
     setPhase({ kind: 'working' })
     const startedAt = Date.now()
     setElapsed({ startedAt, now: startedAt })
-    const answer = await window.screenrx.ai.autoEdit(session.sessionId, { brief, edit: editStateOf(store) }, current.choice).catch(() => null)
+    const answer = await window.screenrx.ai.autoEdit(session.sessionId, { brief: briefToSend, edit: editStateOf(store) }, current.choice).catch(() => null)
     await Promise.all(landing.current)
     working.current = false
     store.endTeam()
@@ -204,7 +209,7 @@ export function AutoEditPanel({ store }: Props) {
     setRerun({ ...rerun, busy: true })
     setNotice(null)
     const result = await window.screenrx.ai
-      .autoEditRerun(session.sessionId, { brief, edit: editStateOf(store), role: rerun.role, plan, instruction: rerun.instruction }, current.choice)
+      .autoEditRerun(session.sessionId, { brief: briefToSend, edit: editStateOf(store), role: rerun.role, plan, instruction: rerun.instruction }, current.choice)
       .catch(() => null)
     if (!result?.ok) {
       setRerun(null)
@@ -265,9 +270,13 @@ export function AutoEditPanel({ store }: Props) {
             </>
           )}
           {!hasTranscript && (
-            <p className="dialog-warning">Sem legendas geradas, a equipe não sabe o que foi dito: gere as legendas antes para um resultado melhor.</p>
+            <p className="dialog-warning">
+              {secondVideo
+                ? 'O vídeo 1 não tem legendas: a equipe só vai saber o que é dito no vídeo 2 (transcrito na hora). Gere as legendas do vídeo 1 se ele tiver fala.'
+                : 'Sem legendas geradas, a equipe não sabe o que foi dito: gere as legendas antes para um resultado melhor.'}
+            </p>
           )}
-          <AutoEditBriefForm brief={brief} onChange={setBrief} durationMs={session.durationMs} />
+          <AutoEditBriefForm brief={brief} onChange={setBrief} durationMs={session.durationMs} secondVideo={secondVideoName} />
           <div className="cut-actions">
             <button
               className="panel-button panel-button-primary"

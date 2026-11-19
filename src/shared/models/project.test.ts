@@ -10,7 +10,9 @@ import {
   createProject,
   parseProject,
   zoomsOf,
-  DEFAULT_EXPORT_SETTINGS } from './project'
+  DEFAULT_EXPORT_SETTINGS,
+  DEFAULT_SHAPE_LAYER,
+  SHAPE_LIMITS } from './project'
 
 const sessionId = 'recording-20261003-201530-123'
 const zoom = {
@@ -361,5 +363,45 @@ describe('zoomsOf', () => {
       { ...zoom, id: 'early', startMs: 1000, endMs: 2000 } as never
     ])
     expect(zoomsOf(project).map((effect) => effect.id)).toEqual(['early', 'late'])
+  })
+})
+
+describe('parseProject layers', () => {
+  const base = createProject(sessionId)
+  const placed = { startMs: 0, endMs: 2000, position: { x: 0.5, y: 0.5 }, sizeRatio: 0.2, rotationDeg: 0, opacity: 1, cornerRadiusRatio: 0 }
+
+  it('keeps shapes and emojis as saved, repairing what is out of range', () => {
+    const project = parseProject(
+      {
+        ...base,
+        layers: [
+          { ...placed, id: 'shape-1', kind: 'shape', shape: 'arrow', aspect: 0.5, fill: false, fillColor: '#00ff00', strokeRatio: 0.01, strokeColor: '#000000' },
+          { ...placed, id: 'shape-2', kind: 'shape', shape: 'rectangle', aspect: 99, fillColor: 'red', strokeRatio: -1 },
+          { ...placed, id: 'emoji-1', kind: 'emoji', emoji: '  🚀 ' }
+        ]
+      },
+      sessionId
+    )
+    expect(project?.layers).toEqual([
+      { ...placed, id: 'shape-1', kind: 'shape', shape: 'arrow', aspect: 0.5, fill: false, fillColor: '#00ff00', strokeRatio: 0.01, strokeColor: '#000000' },
+      { ...placed, id: 'shape-2', kind: 'shape', shape: 'rectangle', aspect: SHAPE_LIMITS.maxAspect, fill: true, fillColor: DEFAULT_SHAPE_LAYER.fillColor, strokeRatio: 0, strokeColor: DEFAULT_SHAPE_LAYER.strokeColor },
+      { ...placed, id: 'emoji-1', kind: 'emoji', emoji: '🚀' }
+    ])
+  })
+
+  it('drops a shape of an unknown kind, an empty emoji and a layer of an unknown kind, keeping the images', () => {
+    const project = parseProject(
+      {
+        ...base,
+        layers: [
+          { ...placed, id: 'shape-x', kind: 'shape', shape: 'hexagon' },
+          { ...placed, id: 'emoji-x', kind: 'emoji', emoji: '   ' },
+          { ...placed, id: 'what', kind: 'sticker' },
+          { ...placed, id: 'image-1', kind: 'image', file: 'logo.png' }
+        ]
+      },
+      sessionId
+    )
+    expect(project?.layers.map((layer) => layer.id)).toEqual(['image-1'])
   })
 })

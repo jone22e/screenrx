@@ -7,6 +7,8 @@ import { aiSettings } from '../common/aiSettings'
 import { meetSettings, useMeetSettings } from '../common/meetSettings'
 import { updateStatus, useUpdateStatus } from '../common/updateStatus'
 import { voiceModel } from '../common/voiceModel'
+import { instagramAccount } from '../common/instagramAccount'
+import type { InstagramStatus } from '@shared/models/instagram'
 import './settings.css'
 
 interface Props {
@@ -109,6 +111,183 @@ function MeetSection() {
 }
 
 /** The version running, whether a newer one exists, and a way to look for it now. */
+const expiryFormat = new Intl.DateTimeFormat('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })
+
+/**
+ * Instagram: the Meta app the login goes through (its id, and its secret so
+ * the access lasts), then Facebook's login in a window of its own. What is
+ * published goes to the professional account linked to a Facebook Page.
+ */
+function InstagramSection() {
+  const status = useSyncExternalStore(instagramAccount.subscribe, instagramAccount.getState)
+  const [draft, setDraft] = useState<{ appId: string; appSecret: string; configId: string } | null>(null)
+  const [busy, setBusy] = useState<'save' | 'login' | 'token' | 'disconnect' | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
+  const [pasting, setPasting] = useState(false)
+  const [token, setToken] = useState('')
+
+  useEffect(() => {
+    void instagramAccount.load()
+  }, [])
+
+  const current = draft ?? { appId: status?.appId ?? '', appSecret: '', configId: status?.configId ?? '' }
+  const dirty = status !== null && (current.appId !== status.appId || current.appSecret !== '' || current.configId !== status.configId)
+
+  const run = async (kind: NonNullable<typeof busy>, call: () => Promise<{ ok: true; value: InstagramStatus } | { ok: false; error: { message: string; detail?: string } }>): Promise<boolean> => {
+    setBusy(kind)
+    setFailure(null)
+    try {
+      const result = await call()
+      if (result.ok) {
+        instagramAccount.set(result.value)
+        return true
+      }
+      setFailure(result.error.detail ? `${result.error.message} (${result.error.detail})` : result.error.message)
+      return false
+    } finally {
+      setBusy(null)
+    }
+  }
+  const save = async (): Promise<boolean> => {
+    if (!dirty) return true
+    const done = await run('save', () => window.screenrx.instagram.configure(current.appId, current.appSecret, current.configId))
+    if (done) setDraft(null)
+    return done
+  }
+  const login = async (): Promise<void> => {
+    if (await save()) await run('login', () => window.screenrx.instagram.login())
+  }
+  const connectToken = async (): Promise<void> => {
+    if ((await save()) && (await run('token', () => window.screenrx.instagram.connectWithToken(token)))) {
+      setToken('')
+      setPasting(false)
+    }
+  }
+
+  const account = status?.account ?? null
+  const choices = status?.choices ?? []
+  const switchAccount = (): void => void run('login', () => window.screenrx.instagram.login(true))
+  const field = (key: 'appId' | 'appSecret' | 'configId', value: string): void => setDraft({ ...current, [key]: value })
+
+  return (
+    <section className="settings-section">
+      <header className="settings-section-head">
+        <div>
+          <h2>Instagram</h2>
+          <p>Publica como Reels os vídeos que você aprovar na biblioteca. Precisa de uma conta Comercial ou de Criador ligada a uma Página do Facebook.</p>
+        </div>
+      </header>
+
+      <div className="agent" data-instagram-connected={account !== null}>
+        {choices.length > 0 && (
+          <div className="instagram-choices" role="group" aria-label="Escolha a conta">
+            <span>Escolha a conta:</span>
+            {choices.map((choice) => (
+              <button
+                key={choice.igUserId}
+                className={choice.igUserId === account?.igUserId ? 'settings-button settings-button-primary' : 'settings-button'}
+                title={`Página ${choice.pageName || choice.pageId}`}
+                disabled={busy !== null}
+                onClick={() => void run('login', () => window.screenrx.instagram.choose(choice.igUserId))}
+              >
+                @{choice.username}
+              </button>
+            ))}
+          </div>
+        )}
+        {account ? (
+          <div className="instagram-account">
+            <div>
+              <strong>@{account.username}</strong>
+              <small>
+                Página {account.pageName || account.pageId} ·{' '}
+                {status?.expiresAt ? `acesso até ${expiryFormat.format(new Date(status.expiresAt))}` : 'acesso sem prazo'}
+              </small>
+            </div>
+            <button className="settings-button" disabled={busy !== null} title="Abre o login do Facebook de novo para escolher outras Páginas e contas" onClick={switchAccount}>
+              {busy === 'login' ? 'Esperando o login…' : 'Trocar de conta'}
+            </button>
+            <button className="settings-button" disabled={busy !== null} onClick={() => void run('disconnect', () => window.screenrx.instagram.disconnect())}>
+              Desconectar
+            </button>
+          </div>
+        ) : (
+          <>
+            <ol className="instagram-steps">
+              <li>
+                Em{' '}
+                <a href="https://developers.facebook.com/apps" target="_blank" rel="noreferrer">
+                  developers.facebook.com/apps
+                </a>
+                , crie um app com o caso de uso <em>Gerenciar mensagens e conteúdo no Instagram</em> e adicione as permissões de conteúdo (Configuração da API com login do Facebook).
+              </li>
+              <li>
+                Em Login do Facebook para Empresas › Configurações, ative <em>Login OAuth no navegador incorporado</em> e coloque <code>https://localhost/screenrx/instagram</code> nas URIs de redirecionamento.
+              </li>
+              <li>Em Login do Facebook para Empresas › Configurações, crie uma configuração com token de usuário e essas permissões. Cole aqui o ID do app, a Chave secreta (Configurações do app › Básico) e o ID da configuração, e conecte.</li>
+            </ol>
+            <div className="agent-options">
+              <label className="agent-field">
+                <span>ID do app</span>
+                <input type="text" inputMode="numeric" placeholder="1234567890" value={current.appId} disabled={status === null} onChange={(event) => field('appId', event.target.value)} />
+              </label>
+              <label className="agent-field">
+                <span>Chave secreta do app</span>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  placeholder={status?.hasAppSecret ? '•••••••• (guardada)' : 'Opcional'}
+                  value={current.appSecret}
+                  disabled={status === null}
+                  onChange={(event) => field('appSecret', event.target.value)}
+                />
+                <small>Com ela o acesso não expira. Fica no Chaveiro deste Mac.</small>
+              </label>
+              <label className="agent-field">
+                <span>ID da configuração</span>
+                <input type="text" inputMode="numeric" placeholder="Só para Login para Empresas" value={current.configId} disabled={status === null} onChange={(event) => field('configId', event.target.value)} />
+              </label>
+            </div>
+            <div className="meet-actions">
+              <button className="settings-button settings-button-primary" disabled={busy !== null || current.appId.trim() === ''} onClick={() => void login()}>
+                {busy === 'login' ? 'Esperando o login…' : 'Conectar com o Facebook'}
+              </button>
+              <button className="settings-button" disabled={busy !== null} onClick={() => setPasting((open) => !open)}>
+                Colar um token
+              </button>
+              {dirty && (
+                <button className="settings-button" disabled={busy !== null} onClick={() => void save()}>
+                  Salvar
+                </button>
+              )}
+            </div>
+            {pasting && (
+              <div className="meet-actions">
+                <input
+                  className="instagram-token"
+                  type="password"
+                  autoComplete="off"
+                  placeholder="Token de usuário do Explorador da Graph API"
+                  value={token}
+                  onChange={(event) => setToken(event.target.value)}
+                />
+                <button className="settings-button settings-button-primary" disabled={busy !== null || token.trim() === ''} onClick={() => void connectToken()}>
+                  {busy === 'token' ? 'Conectando…' : 'Conectar'}
+                </button>
+              </div>
+            )}
+          </>
+        )}
+        {failure && (
+          <p className="agent-failure" role="alert">
+            {failure}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
 function UpdateSection() {
   const update = useUpdateStatus()
   const [restartRefused, setRestartRefused] = useState(false)
@@ -209,6 +388,8 @@ export function Settings({ onClose }: Props) {
 
       <main className="settings-content">
         <UpdateSection />
+
+        <InstagramSection />
 
         <MeetSection />
 

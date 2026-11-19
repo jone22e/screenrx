@@ -9,6 +9,7 @@ import type { ExportCompression, ExportFps, ExportPreset } from '@shared/models/
 import { EXPORT_COMPRESSION_LEVELS, EXPORT_FRAME_RATES } from '@shared/models/project'
 import { FRAME_ASPECT_LABELS } from './frameAspects'
 import { ExportAbortedError, ExportFailedError, renderExport } from '../export/renderExport'
+import { features } from '../common/platform'
 import type { EditorStore } from './EditorStore'
 
 interface Props {
@@ -94,7 +95,8 @@ export function ExportDialog({ store, onClose }: Props) {
     try {
       await renderExport(
         job,
-        session,
+        // The images and clips brought in since the editor opened are drawn too.
+        { ...session, images: [...store.getState().images], clips: [...store.getState().clips] },
         project,
         store.getState().objectTrack,
         (framesDone) =>
@@ -333,12 +335,14 @@ export function ExportDialog({ store, onClose }: Props) {
 
         {phase.kind === 'done' && (
           <div className="dialog-actions">
-            <button
-              className="panel-button"
-              onClick={() => void window.screenrx.export.reveal((phase.results[phase.results.length - 1] as ExportResult).exportId)}
-            >
-              Mostrar no Finder
-            </button>
+            {features.revealExport && (
+              <button
+                className="panel-button"
+                onClick={() => void window.screenrx.export.reveal((phase.results[phase.results.length - 1] as ExportResult).exportId)}
+              >
+                Mostrar no Finder
+              </button>
+            )}
             <button className="panel-button panel-button-primary" onClick={onClose}>
               Concluir
             </button>

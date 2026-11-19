@@ -1,4 +1,5 @@
 import type { AppError } from './errors'
+import type { PublishRecord, PublishSummary } from './instagram'
 
 export const SESSION_SCHEMA_VERSION = 1
 
@@ -92,6 +93,8 @@ export interface VideoClipAsset {
   durationMs: number
   widthPx: number
   heightPx: number
+  /** Whether the file carries the clip's sound (clips brought in before sound was kept do not). */
+  hasAudio?: boolean
 }
 
 /** Music the user brought into the session, as a track of its own (`music.m4a`). Replaced whole when another is chosen. */
@@ -155,6 +158,10 @@ export interface RecordingSessionManifest {
   lastExportAt?: string
   /** The start of what was said, kept once transcribed, for searching and for suggesting a name. */
   transcriptPreview?: string
+  /** Approved for Instagram, and how far it has got; absent until approved. */
+  publish?: PublishRecord
+  /** The page a video downloaded by link came from. */
+  sourceUrl?: string
   capture: {
     fps: number
     cursorInVideo: boolean
@@ -199,6 +206,8 @@ export interface RecordingSummary {
   series: string | null
   /** Whether a cover of the user's choosing stands in for the poster frame. */
   hasCover: boolean
+  /** Approved for Instagram and where it stands; `null` when not approved. */
+  publish: PublishSummary | null
   sourceLabel: string
   durationMs: number
   /** Every track of the session together. */

@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type { IpcMainInvokeEvent, WebContents } from 'electron'
-import { BrowserWindow, screen } from 'electron'
+import { BrowserWindow, screen, shell } from 'electron'
 import type { IpcEventChannel, IpcEventContract } from '@shared/ipc/contract'
 import type { RecordingStateSnapshot } from '@shared/models/recording'
 import type { Logger } from '../logging/logger'
@@ -330,7 +330,11 @@ export class WindowManager implements CaptureShield {
 
   /** The renderers only ever show the app's own pages. */
   private harden(contents: WebContents): void {
-    contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+    // A link the app's pages show on purpose (Meta's developer pages, for the Instagram setup) opens in the browser.
+    contents.setWindowOpenHandler(({ url }) => {
+      if (/^https:\/\/developers\.facebook\.com\//.test(url)) void shell.openExternal(url)
+      return { action: 'deny' }
+    })
     contents.on('will-navigate', (event, url) => {
       this.options.logger.warn('blocked navigation', { url })
       event.preventDefault()

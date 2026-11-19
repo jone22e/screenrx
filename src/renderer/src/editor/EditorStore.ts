@@ -2,6 +2,7 @@ import { CAPTION_CONFIG } from '@engine/captions/captionConfig'
 import { applyPlatformPreset, platformPreset } from '@engine/export/platformPresets'
 import { captionPlacementOf, captionPlacementY } from '@engine/rendering/safeZones'
 import { SPEED_CONFIG, isSpeedFactor } from '@engine/timeline/speedConfig'
+import { shapeInfo } from '@engine/rendering/shapes'
 import type { TextTemplate } from '@engine/rendering/textTemplates'
 import type { ProjectTemplate } from '@shared/models/template'
 import type { AssistantAction } from '@shared/models/assistant'
@@ -35,6 +36,9 @@ import type {
   TextMotion,
   TrimTransition,
   CursorSettings,
+  EmojiLayer,
+  ShapeKind,
+  ShapeLayer,
   ImageLayer,
   Marker,
   SpeedEffect,
@@ -55,7 +59,10 @@ import type {
   TextOverlay,
   TrimEffect,
   WebcamSettings,
-  ZoomEffect
+  ZoomEffect,
+  SplitScreen,
+  SplitShow,
+  SplitAudio
 } from '@shared/models/project'
 import {
   DEFAULT_TEXT_MOTION,
@@ -75,8 +82,15 @@ import {
   WEBCAM_LIMITS,
   isExportFps,
   trimsOf,
-  zoomsOf
+  zoomsOf,
+  DEFAULT_EMOJI_LAYER,
+  DEFAULT_SHAPE_LAYER,
+  SHAPE_LIMITS,
+  isFileLayer,
+  DEFAULT_SPLIT,
+  SPLIT_LIMITS
 } from '@shared/models/project'
+import { applyLayoutSpan } from '@engine/rendering/splitScreen'
 import type { AiChoice } from '@shared/models/ai'
 import type { CutSuggestion, CutSuggestionResult } from '@shared/models/suggestions'
 
@@ -616,6 +630,101 @@ export class EditorStore {
   }
 
   /**
+   * Turns a clip layer into a split screen with the recording (`true`), or
+   * back into a picture floating over it. Only one layer splits the screen
+   * at a time: turning one on turns the others off.
+   */
+  setLayerSplit(layerId: string, on: boolean): void {
+    const layers = this.project.layers.map((layer) => {
+      if (layer.kind !== 'video') return layer
+      if (layer.id === layerId) {
+        if (!on) return floatingOf(layer)
+        return { ...layer, split: layer.split ?? { ...DEFAULT_SPLIT, clipFocus: { ...DEFAULT_SPLIT.clipFocus }, mainFocus: { ...this.project.background.crop } } }
+      }
+      // Two splits at the same instant cannot both be shown: one overlapping the new one floats again.
+      const target = this.project.layers.find((candidate) => candidate.id === layerId)
+      if (on && layer.split && target && layer.file !== (target as VideoLayer).file && layer.startMs < target.endMs && layer.endMs > target.startMs) return floatingOf(layer)
+      return layer
+    })
+    this.commitLayers(layers, layerId, null)
+  }
+
+  /** The clip on the second video track: the first video layer's file, `null` when there is none. */
+  secondVideo(): { file: string; layers: VideoLayer[] } | null {
+    const videos = this.project.layers.filter((layer): layer is VideoLayer => layer.kind === 'video').sort((a, b) => a.startMs - b.startMs)
+    const first = videos[0]
+    if (!first) return null
+    return { file: first.file, layers: videos.filter((layer) => layer.file === first.file) }
+  }
+
+  /**
+   * Shows both videos, only the recording or only the second video over a
+   * stretch: the second video's layers are cut at its edges and set. Returns
+   * whether the second video was there to set.
+   */
+  applySplitShow(span: TimeSpan, show: SplitShow): boolean {
+    const second = this.secondVideo()
+    if (!second || !second.layers.some((layer) => layer.startMs < span.endMs && layer.endMs > span.startMs)) return false
+    const fallback: SplitScreen = { ...DEFAULT_SPLIT, mainFocus: { ...this.project.background.crop } }
+    const layers = applyLayoutSpan(this.project.layers, second.file, span, show, fallback, createLayerId)
+    this.commitLayers(layers, this.state.selectedLayerId, null)
+    return true
+  }
+
+  /** Whose sound plays with the second video, on all of it; `volume` null keeps the clip's level. */
+  setSecondVideoSound(audio: SplitAudio, volume: number | null): boolean {
+    const second = this.secondVideo()
+    if (!second) return false
+    const fallback: SplitScreen = { ...DEFAULT_SPLIT, mainFocus: { ...this.project.background.crop } }
+    const layers = this.project.layers.map((layer) =>
+      layer.kind === 'video' && layer.file === second.file
+        ? { ...layer, split: { ...(layer.split ?? fallback), audio, ...(volume === null ? {} : { clipVolume: clamp(volume, 0, SPLIT_LIMITS.maxClipVolume) }) } }
+        : layer
+    )
+    this.commitLayers(layers, this.state.selectedLayerId, null)
+    return true
+  }
+
+  /** Changes how a split screen is laid out or sounds; values are kept within their limits. */
+  setSplit(layerId: string, change: Partial<SplitScreen>, gestureKey: string | null = null): void {
+    // The sound is the whole clip's, not one stretch's: it goes to every piece of the same video.
+    const target = this.project.layers.find((layer) => layer.id === layerId)
+    if (target?.kind === 'video' && (change.audio !== undefined || change.clipVolume !== undefined)) {
+      const sound: Partial<SplitScreen> = {
+        ...(change.audio !== undefined && { audio: change.audio }),
+        ...(change.clipVolume !== undefined && { clipVolume: clamp(change.clipVolume, 0, SPLIT_LIMITS.maxClipVolume) })
+      }
+      const layers = this.project.layers.map((layer) =>
+        layer.kind === 'video' && layer.file === target.file && layer.split ? { ...layer, split: { ...layer.split, ...sound } } : layer
+      )
+      this.commitLayers(layers, this.state.selectedLayerId, gestureKey === null ? null : `${gestureKey}:${target.file}`)
+      const rest = { ...change }
+      delete rest.audio
+      delete rest.clipVolume
+      if (Object.keys(rest).length === 0) return
+      change = rest
+    }
+    this.editLayer(layerId, gestureKey === null ? null : `${gestureKey}:${layerId}`, (layer) => {
+      if (layer.kind !== 'video' || !layer.split) return layer
+      const merged = { ...layer.split, ...change }
+      const point = (value: NormalizedPoint): NormalizedPoint => ({ x: clamp(value.x, 0, 1), y: clamp(value.y, 0, 1) })
+      const { show, ...rest } = merged
+      return {
+        ...layer,
+        split: {
+          ...rest,
+          mainShare: clamp(merged.mainShare, SPLIT_LIMITS.minShare, SPLIT_LIMITS.maxShare),
+          dividerRatio: clamp(merged.dividerRatio, 0, SPLIT_LIMITS.maxDividerRatio),
+          clipVolume: clamp(merged.clipVolume, 0, SPLIT_LIMITS.maxClipVolume),
+          clipFocus: point(merged.clipFocus),
+          mainFocus: point(merged.mainFocus),
+          ...(show === 'main' || show === 'clip' ? { show } : {})
+        }
+      }
+    })
+  }
+
+  /**
    * Lays an image of the session over the video, on top of the others, for
    * the whole recording — a logo stays; a sticker is then trimmed on the
    * timeline. Returns the layer's id.
@@ -635,6 +744,69 @@ export class EditorStore {
     if (this.project.layers.length >= LAYER_LIMITS.maxLayers) return ''
     this.commitLayers([...this.project.layers, layer], layer.id, null)
     return layer.id
+  }
+
+  /**
+   * Draws a shape over the video from `timeMs`, for a few seconds, in the
+   * middle of the frame, in the shape's own proportions. Returns its id.
+   */
+  addShapeLayer(shape: ShapeKind, timeMs: number): string {
+    const info = shapeInfo(shape)
+    const layer: ShapeLayer = {
+      id: createLayerId(),
+      kind: 'shape',
+      ...this.elementSpan(timeMs),
+      ...DEFAULT_SHAPE_LAYER,
+      position: { ...DEFAULT_SHAPE_LAYER.position },
+      shape,
+      aspect: info.aspect,
+      cornerRadiusRatio: info.cornerRadiusRatio
+    }
+    if (this.project.layers.length >= LAYER_LIMITS.maxLayers) return ''
+    this.commitLayers([...this.project.layers, layer], layer.id, null)
+    return layer.id
+  }
+
+  /** Draws an emoji over the video from `timeMs`, for a few seconds, in the middle of the frame. Returns its id. */
+  addEmojiLayer(emoji: string, timeMs: number): string {
+    const layer: EmojiLayer = {
+      id: createLayerId(),
+      kind: 'emoji',
+      ...this.elementSpan(timeMs),
+      ...DEFAULT_EMOJI_LAYER,
+      position: { ...DEFAULT_EMOJI_LAYER.position },
+      emoji: emoji.slice(0, SHAPE_LIMITS.maxEmojiLength)
+    }
+    if (this.project.layers.length >= LAYER_LIMITS.maxLayers) return ''
+    this.commitLayers([...this.project.layers, layer], layer.id, null)
+    return layer.id
+  }
+
+  /** The span an element added at `timeMs` shows for: a few seconds, within the recording. */
+  private elementSpan(timeMs: number): { startMs: number; endMs: number } {
+    const duration = this.session.durationMs
+    const startMs = clamp(timeMs, 0, Math.max(0, duration - LAYER_LIMITS.minDurationMs))
+    return { startMs, endMs: Math.min(duration, startMs + SHAPE_LIMITS.defaultDurationMs) }
+  }
+
+  /** How a shape is drawn: its kind, proportions, fill and outline. A shape with neither fill nor outline would vanish, so the outline stays. */
+  setShape(layerId: string, change: Partial<Pick<ShapeLayer, 'shape' | 'aspect' | 'fill' | 'fillColor' | 'strokeRatio' | 'strokeColor'>>, gestureKey: string | null = null): void {
+    this.editLayer(layerId, gestureKey === null ? null : `${gestureKey}:${layerId}`, (layer) => {
+      if (layer.kind !== 'shape') return layer
+      const merged = { ...layer, ...change }
+      const strokeRatio = clamp(merged.strokeRatio, 0, SHAPE_LIMITS.maxStrokeRatio)
+      return {
+        ...merged,
+        aspect: clamp(merged.aspect, SHAPE_LIMITS.minAspect, SHAPE_LIMITS.maxAspect),
+        strokeRatio: !merged.fill && strokeRatio === 0 ? 0.004 : strokeRatio
+      }
+    })
+  }
+
+  setEmoji(layerId: string, emoji: string): void {
+    const trimmed = emoji.trim().slice(0, SHAPE_LIMITS.maxEmojiLength)
+    if (trimmed === '') return
+    this.editLayer(layerId, null, (layer) => (layer.kind === 'emoji' ? { ...layer, emoji: trimmed } : layer))
   }
 
   setLayer(layerId: string, change: Partial<Omit<ImageLayer, 'id' | 'kind' | 'file'>>, gestureKey: string | null = null): void {
@@ -692,7 +864,7 @@ export class EditorStore {
 
   /** Whether any layer still shows the image file. */
   usesImage(file: string): boolean {
-    return this.project.layers.some((layer) => layer.file === file)
+    return this.project.layers.some((layer) => isFileLayer(layer) && layer.file === file)
   }
 
   // --- cuts -------------------------------------------------------------------
@@ -1893,4 +2065,11 @@ export class EditorStore {
   private emit(): void {
     for (const listener of this.listeners) listener()
   }
+}
+
+/** A clip layer without its split screen: floating over the recording again. */
+function floatingOf(layer: VideoLayer): VideoLayer {
+  const floating = { ...layer }
+  delete floating.split
+  return floating
 }

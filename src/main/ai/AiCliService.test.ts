@@ -85,6 +85,24 @@ describe('AiCliService', () => {
     expect(await recorded('cwd')).not.toContain('screenrx-ai-test-')
   })
 
+  it('lets the tools search the web, and only that, when a question asks for it', async () => {
+    await install('claude', `printf '%s\\n' "$@" > "${'${0}'}.args"; cat > /dev/null; echo '{"is_error":false,"structured_output":{"ok":true}}'`)
+    await createService().ask(choose('claude'), { ...request, webSearch: true })
+    const claudeArgs = (await readFile(path.join(directory, 'claude.args'), 'utf8')).split('\n')
+    expect(claudeArgs[claudeArgs.indexOf('--tools') + 1]).toBe('WebSearch,WebFetch')
+    expect(claudeArgs[claudeArgs.indexOf('--allowedTools') + 1]).toBe('WebSearch,WebFetch')
+
+    await install(
+      'codex',
+      [`printf '%s\\n' "$@" > "${'${0}'}.args"`, 'cat > /dev/null', 'while [ $# -gt 0 ]; do if [ "$1" = "--output-last-message" ]; then out="$2"; fi; shift; done', `echo '{"ok":true}' > "$out"`].join('\n')
+    )
+    await createService().ask(choose('codex'), { ...request, webSearch: true })
+    const codexArgs = (await readFile(path.join(directory, 'codex.args'), 'utf8')).split('\n')
+    // A flag of codex itself, before the subcommand, with the sandbox still read-only.
+    expect(codexArgs.slice(0, 2)).toEqual(['--search', 'exec'])
+    expect(codexArgs[codexArgs.indexOf('--sandbox') + 1]).toBe('read-only')
+  }, 20_000)
+
   it('reads the answer from the text when Claude returns no structured output', async () => {
     await install('claude', `cat > /dev/null; echo '{"is_error":false,"result":"Here it is: {\\"cuts\\":[]} Done."}'`)
     expect(await createService().ask(choose('claude'), request)).toEqual({ cuts: [] })

@@ -11,7 +11,12 @@ interface Props {
   /** The recording's length, shown beside the target; left out for a series, whose episodes differ. */
   durationMs?: number;
   disabled?: boolean;
+  /** The name of the video on the second track, when there is one: the user says what each video is. */
+  secondVideo?: string | null;
 }
+
+/** What the two videos usually are, until the user says otherwise. */
+export const DEFAULT_VIDEO_ROLES = { first: "a gameplay", second: "minha reação (webcam)" };
 
 export const ROLE_HINTS: Record<WorkerRole, string> = {
   cutter: "cortes e velocidade",
@@ -41,7 +46,11 @@ export function AutoEditBriefForm({
   onChange,
   durationMs,
   disabled = false,
+  secondVideo = null,
 }: Props) {
+  const videoRoles = brief.videoRoles ?? DEFAULT_VIDEO_ROLES;
+  const setRole = (key: "first" | "second", value: string): void =>
+    onChange({ ...brief, videoRoles: { ...videoRoles, [key]: value } });
   const toggleRole = (role: WorkerRole): void =>
     onChange({
       ...brief,
@@ -77,6 +86,35 @@ export function AutoEditBriefForm({
           <option value="custom">Sem rede específica</option>
         </select>
       </label>
+      {secondVideo !== null && (
+        <div className="field video-roles">
+          <span className="field-label">O que é cada vídeo</span>
+          <label className="video-role">
+            <span>Vídeo 1</span>
+            <input
+              className="text-input"
+              type="text"
+              value={videoRoles.first}
+              maxLength={80}
+              disabled={disabled}
+              placeholder="a gameplay"
+              onChange={(event) => setRole("first", event.target.value)}
+            />
+          </label>
+          <label className="video-role" title={secondVideo}>
+            <span>Vídeo 2</span>
+            <input
+              className="text-input"
+              type="text"
+              value={videoRoles.second}
+              maxLength={80}
+              disabled={disabled}
+              placeholder="minha reação"
+              onChange={(event) => setRole("second", event.target.value)}
+            />
+          </label>
+        </div>
+      )}
       <div className="field">
         <span className="field-label">
           Duração alvo{" "}

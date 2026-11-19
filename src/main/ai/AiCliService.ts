@@ -22,6 +22,11 @@ export interface AiRequest {
   prompt: string
   /** JSON Schema of the answer. */
   schema: object
+  /**
+   * Lets the tool search the web (and read the pages found), and nothing else: for the questions
+   * about what is current (trending terms of a topic). Off for everything that reads the recordings.
+   */
+  webSearch?: boolean
 }
 
 export interface AiCliServiceOptions {
@@ -59,7 +64,8 @@ function extractJson(text: string): unknown {
  *
  * The tools are given nothing to act with: no tools, a read-only sandbox or
  * plan mode, an empty working directory. They receive text and return JSON,
- * which the caller validates.
+ * which the caller validates. A question may ask for web search alone
+ * (`webSearch`), which still leaves them nothing to run or change.
  */
 export class AiCliService {
   /** The questions in flight, each with its own way to be stopped. */
@@ -115,7 +121,7 @@ export class AiCliService {
     const args = [
       '--print',
       '--output-format', 'json',
-      '--tools', '',
+      ...(request.webSearch ? ['--tools', 'WebSearch,WebFetch', '--allowedTools', 'WebSearch,WebFetch'] : ['--tools', '']),
       '--strict-mcp-config',
       '--disable-slash-commands',
       '--no-session-persistence',
@@ -144,6 +150,8 @@ export class AiCliService {
     const answerPath = path.join(workDir, 'answer.json')
     await writeFile(schemaPath, JSON.stringify(request.schema))
     const args = [
+      // A flag of the tool itself, not of `exec`.
+      ...(request.webSearch ? ['--search'] : []),
       'exec',
       '--skip-git-repo-check',
       '--ephemeral',

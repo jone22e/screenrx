@@ -10,3 +10,6 @@ coverage/
 release/
 native/macos/VoiceHelper/Vendor/
 tmp/
+
+# Configuração local do Claude Code e worktrees de sessões paralelas
+.claude/

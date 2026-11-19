@@ -1,4 +1,4 @@
-import type { AssistantEditState } from '@shared/models/assistant'
+import type { AssistantEditState, SecondVideoState } from '@shared/models/assistant'
 import type { EditorStore } from './EditorStore'
 
 /** The editor as it stands, in the terms the AI is told about. */
@@ -25,6 +25,22 @@ export function editStateOf(store: EditorStore): AssistantEditState {
     systemAudioMuted: state.audio.systemAudio.muted,
     microphoneVolume: state.audio.microphone.volume,
     systemAudioVolume: state.audio.systemAudio.volume,
-    music: state.music && state.musicTrack ? { volume: state.music.volume, ducking: state.music.ducking } : null
+    music: state.music && state.musicTrack ? { volume: state.music.volume, ducking: state.music.ducking } : null,
+    secondVideo: secondVideoOf(store)
+  }
+}
+
+/** The second video track, as the AI is told about it. */
+function secondVideoOf(store: EditorStore): SecondVideoState | null {
+  const second = store.secondVideo()
+  if (!second) return null
+  const clip = store.getState().clips.find((candidate) => candidate.file === second.file)
+  const withSplit = second.layers.find((layer) => layer.split)
+  return {
+    name: clip?.name ?? second.file,
+    file: second.file,
+    pieces: second.layers.map((layer) => ({ startMs: layer.startMs, endMs: layer.endMs, offsetMs: layer.offsetMs, show: layer.split ? (layer.split.show ?? 'both') : 'floating' })),
+    sound: withSplit?.split?.audio ?? 'main',
+    hasAudio: clip?.hasAudio === true
   }
 }

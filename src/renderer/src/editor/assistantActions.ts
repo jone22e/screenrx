@@ -148,6 +148,15 @@ export function applyAssistantActions(
           did(action.ducking === 'off' ? 'Música sem abaixar na fala' : `Música abaixa ${action.ducking === 'light' ? 'um pouco' : 'bastante'} na fala`, ok)
           break
         }
+        case 'layout':
+          did(`${action.show === 'both' ? 'Tela dividida' : action.show === 'main' ? 'Só o vídeo 1' : 'Só o vídeo 2'} ${span(action)}`, store.applySplitShow(action, action.show))
+          break
+        case 'second-sound':
+          did(
+            `Som: ${action.audio === 'main' ? 'só o vídeo 1' : action.audio === 'clip' ? 'só o vídeo 2' : 'os dois'}${action.volume === null ? '' : `, vídeo 2 a ${Math.round(action.volume * 100)}%`}`,
+            store.setSecondVideoSound(action.audio, action.volume)
+          )
+          break
         case 'mute': {
           const ok = store.session.audio.some((track) => track.kind === action.track)
           if (ok) store.setTrackMuted(action.track, action.muted)

@@ -8,7 +8,10 @@ import { findBackgroundPreset } from '@engine/rendering/backgrounds'
 import type { Rect, Size } from '@engine/rendering/frameLayout'
 import type { NormalizedRect } from '@engine/rendering/frameLayout'
 import { centeredSquare, layoutFrame, layoutWebcam, sourceCrop } from '@engine/rendering/frameLayout'
-import { layoutImageLayer, rotatedBounds } from '@engine/rendering/layerLayout'
+import { layoutLayer, rotatedBounds } from '@engine/rendering/layerLayout'
+import { coverCrop, layoutSplit } from '@engine/rendering/splitScreen'
+import type { SplitLayout } from '@engine/rendering/splitScreen'
+import { strokeWidthOf, traceShape } from '@engine/rendering/shapes'
 import type { ClickRipple } from '@engine/rendering/cursorRender'
 import type { TextTransform } from '@engine/rendering/animation'
 import { STILL_TRANSFORM } from '@engine/rendering/animation'
@@ -16,7 +19,8 @@ import { ARROW_OUTLINE, CURSOR_DRAW } from '@engine/rendering/cursorRender'
 import type { Camera } from '@engine/zoom/zoomCamera'
 import { viewToSource, visibleRect } from '@engine/zoom/zoomCamera'
 import type { ColorSettings } from '@shared/models/filters'
-import type { BackgroundSettings, CaptionStyle, CursorSettings, Layer, NormalizedPoint, WebcamSettings } from '@shared/models/project'
+import type { BackgroundSettings, CaptionStyle, CursorSettings, ElementLayer, EmojiLayer, FileLayer, NormalizedPoint, ShapeLayer, WebcamSettings } from '@shared/models/project'
+import { isFollowing } from '@shared/models/project'
 
 export interface FrameInput {
   screen: CanvasImageSource
@@ -37,11 +41,17 @@ export interface FrameInput {
   texts: ReadonlyArray<{ id: string; text: string; style: CaptionStyle; motion?: TextTransform }>
   /** How dark the whole frame is because of a dip at a cut: 0 clear, 1 black. */
   darkness?: number
-  /** Images on screen at this instant, bottom first, each with its picture as loaded; one not loaded yet is left out. */
-  layers: ReadonlyArray<{ layer: Layer; image: CanvasImageSource; size: Size }>
+  /** Layers on screen at this instant, bottom first: images and clips with their picture as loaded (one not loaded yet is left out), shapes and emojis as they are. */
+  layers: ReadonlyArray<PlacedLayer>
   /** The pointer to draw over the recording, with the clicks still rippling; `null` when none is drawn. */
   cursor: { position: NormalizedPoint | null; settings: CursorSettings; ripples: readonly ClickRipple[] } | null
 }
+
+/** A layer to draw: a file layer comes with its picture; a shape or an emoji is drawn from its settings. */
+export type PlacedLayer = { layer: FileLayer; image: CanvasImageSource; size: Size } | { layer: ElementLayer }
+
+/** The fonts the system draws emojis with. */
+export const EMOJI_FONT_FAMILY = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif'
 
 /** Where things ended up on the frame, for pointer interaction in the preview. */
 export interface FrameRegions {
@@ -168,8 +178,16 @@ function drawWords(context: Context, layout: CaptionLayout, style: CaptionStyle,
  *   source frame → zoom → backdrop and frame → webcam → caption
  */
 export function composeFrame(context: Context, output: Size, input: FrameInput): FrameRegions {
-  const preset = findBackgroundPreset(input.background.presetId)
-  const layout = layoutFrame(output, input.screenSize, input.background, preset !== null)
+  // A clip splitting the screen with the recording takes its part of the frame; the recording fills the rest.
+  const splitEntry = input.layers.find(
+    (entry): entry is { layer: FileLayer; image: CanvasImageSource; size: Size } => 'image' in entry && entry.layer.kind === 'video' && entry.layer.split !== undefined
+  )
+  const splitSettings = splitEntry && splitEntry.layer.kind === 'video' ? splitEntry.layer.split : undefined
+  // Showing only the recording, the frame is as if there were no split (the clip may still be heard).
+  const split = splitEntry && splitSettings && splitSettings.show !== 'main' ? { entry: splitEntry, settings: splitSettings, layout: layoutSplit(output, splitSettings) } : null
+  const hiddenClip = splitEntry && splitSettings?.show === 'main' ? splitEntry : null
+  const preset = split ? null : findBackgroundPreset(input.background.presetId)
+  const layout = split ? { frame: split.layout.main, cornerRadius: 0 } : layoutFrame(output, input.screenSize, input.background, preset !== null)
   const { frame, cornerRadius } = layout
 
   // Backdrop.
@@ -212,7 +230,10 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
   }
 
   // The part of the recording in use, seen through the zoom camera; following, it is centred on the pointer or on the zoom.
-  const crop = sourceCrop(output, input.screenSize, input.background, followPoint(input.background, input.camera, input.pointer, input.object))
+  const follow = followPoint(input.background, input.camera, input.pointer, input.object)
+  const crop = split
+    ? coverCrop(frame, input.screenSize, isFollowing(input.background.fit) && follow ? follow : split.settings.mainFocus)
+    : sourceCrop(output, input.screenSize, input.background, follow)
   const view = visibleRect(cameraWithin(input.camera, crop))
   context.save()
   framePath()
@@ -278,6 +299,8 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
   }
   context.restore()
 
+  if (split) drawSplitClip(context, split.entry.image, split.entry.size, split.layout, split.settings.clipFocus, split.settings.dividerColor)
+
   // Webcam: a square crop of the camera, in the chosen shape and place.
   if (input.webcam) {
     const { image, size, settings } = input.webcam
@@ -315,10 +338,17 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
     }
   }
 
-  // Images over the picture and the webcam, each in its place, turned and faded as set.
+  // Layers over the picture and the webcam, each in its place, turned and faded as set.
   const layers: FrameRegions['layers'] = []
-  for (const { layer, image, size } of input.layers) {
-    const placed = layoutImageLayer(output, layer, size)
+  for (const entry of input.layers) {
+    const { layer } = entry
+    // The split clip was drawn in its part already; it is picked by that part. One set to show only the recording is not drawn.
+    if (split && entry === split.entry) {
+      layers.push({ id: layer.id, box: split.layout.clip })
+      continue
+    }
+    if (entry === hiddenClip) continue
+    const placed = layoutLayer(output, layer, 'size' in entry ? entry.size : null)
     const centerX = placed.x + placed.width / 2
     const centerY = placed.y + placed.height / 2
     context.save()
@@ -328,12 +358,18 @@ export function composeFrame(context: Context, output: Size, input: FrameInput):
       context.rotate((placed.rotationDeg * Math.PI) / 180)
       context.translate(-centerX, -centerY)
     }
-    if (placed.cornerRadius > 0) {
-      context.beginPath()
-      context.roundRect(placed.x, placed.y, placed.width, placed.height, placed.cornerRadius)
-      context.clip()
+    if ('image' in entry) {
+      if (placed.cornerRadius > 0) {
+        context.beginPath()
+        context.roundRect(placed.x, placed.y, placed.width, placed.height, placed.cornerRadius)
+        context.clip()
+      }
+      context.drawImage(entry.image, placed.x, placed.y, placed.width, placed.height)
+    } else if (layer.kind === 'shape') {
+      drawShape(context, layer, placed, placed.cornerRadius, output.height)
+    } else if (layer.kind === 'emoji') {
+      drawEmoji(context, layer, placed)
     }
-    context.drawImage(image, placed.x, placed.y, placed.width, placed.height)
     context.restore()
     layers.push({ id: layer.id, box: rotatedBounds(placed) })
   }
@@ -420,4 +456,53 @@ export function outputToFrame(
   const x = (outputX * output.width - frame.x) / frame.width
   const y = (outputY * output.height - frame.y) / frame.height
   return x >= 0 && x <= 1 && y >= 0 && y <= 1 ? { x, y } : null
+}
+
+/** A shape filled and outlined as set; the outline is drawn inside the box, so the shape stays its size. */
+function drawShape(context: Context, layer: ShapeLayer, box: Rect, cornerRadius: number, outputHeight: number): void {
+  const stroke = strokeWidthOf(layer, outputHeight)
+  const inset = stroke / 2
+  const inner: Rect = { x: box.x + inset, y: box.y + inset, width: Math.max(1, box.width - stroke), height: Math.max(1, box.height - stroke) }
+  context.beginPath()
+  traceShape(context, layer.shape, inner, Math.max(0, cornerRadius - inset))
+  if (layer.fill) {
+    context.fillStyle = layer.fillColor
+    context.fill()
+  }
+  if (stroke > 0) {
+    context.lineWidth = stroke
+    context.lineJoin = 'round'
+    context.strokeStyle = layer.strokeColor
+    context.stroke()
+  }
+}
+
+/** An emoji as wide as its box, in the system's emoji font. */
+function drawEmoji(context: Context, layer: EmojiLayer, box: Rect): void {
+  const probe = Math.max(8, box.width)
+  context.font = `${probe}px ${EMOJI_FONT_FAMILY}`
+  const measured = context.measureText(layer.emoji).width || probe
+  // Glyphs are a little wider or narrower than the font size, platform by platform: fit by what was measured.
+  const size = Math.max(4, (probe * box.width) / measured)
+  context.font = `${size}px ${EMOJI_FONT_FAMILY}`
+  context.textAlign = 'center'
+  context.textBaseline = 'middle'
+  context.fillStyle = '#000'
+  context.fillText(layer.emoji, box.x + box.width / 2, box.y + box.height / 2)
+}
+
+/** The clip in its part of a split frame, filling it, and the line over the seam. */
+function drawSplitClip(context: Context, image: CanvasImageSource, size: Size, layout: SplitLayout, focus: NormalizedPoint, dividerColor: string): void {
+  const { clip, divider } = layout
+  const part = coverCrop(clip, size, focus)
+  context.save()
+  context.beginPath()
+  context.rect(clip.x, clip.y, clip.width, clip.height)
+  context.clip()
+  context.drawImage(image, part.x * size.width, part.y * size.height, part.width * size.width, part.height * size.height, clip.x, clip.y, clip.width, clip.height)
+  context.restore()
+  if (divider) {
+    context.fillStyle = dividerColor
+    context.fillRect(divider.x, divider.y, divider.width, divider.height)
+  }
 }

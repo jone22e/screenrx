@@ -32,6 +32,32 @@ export function buildAtempoFilter(speed: number): string {
 export interface AudioMixTrack {
   inputIndex: number
   volume: number
+  /**
+   * A clip's sound laid on the recording's clock: `lengthMs` of it from `offsetMs`, starting at
+   * `atMs` of the recording, silence around it. It then gets the same cuts and tempo as the rest.
+   */
+  place?: { atMs: number; offsetMs: number; lengthMs: number }
+  /** Stretches of the recording's clock where this track is silent (a split screen playing the clip's sound alone). */
+  silences?: ReadonlyArray<{ startMs: number; endMs: number }>
+}
+
+/** The filters that put a track on the recording's clock and silence what should not be heard, before the cuts. */
+export function trackPrefilters(track: Pick<AudioMixTrack, 'place' | 'silences'>): string[] {
+  const filters: string[] = []
+  if (track.place) {
+    const { atMs, offsetMs, lengthMs } = track.place
+    filters.push(
+      `atrim=start=${seconds(offsetMs)}:end=${seconds(offsetMs + lengthMs)}`,
+      'asetpts=PTS-STARTPTS',
+      FORMAT,
+      ...(atMs > 0 ? [`adelay=${Math.round(atMs)}:all=1`] : []),
+      'apad'
+    )
+  }
+  for (const silence of track.silences ?? []) {
+    if (silence.endMs > silence.startMs) filters.push(`volume=0:enable='between(t,${seconds(silence.startMs)},${seconds(silence.endMs)})'`)
+  }
+  return filters
 }
 
 /**
@@ -102,11 +128,18 @@ export function buildAudioGraph(mix: AudioMix, map: TimeMap, exportSpeed: number
   const chains: string[] = []
   const trackLabels: string[] = []
 
-  mix.tracks.forEach(({ inputIndex, volume }, track) => {
+  mix.tracks.forEach((entry, track) => {
+    const { inputIndex, volume } = entry
     const count = map.segments.length
-    const sources =
-      count === 1 ? [`[${inputIndex}:a]`] : map.segments.map((_, index) => `[t${track}s${index}]`)
-    if (count > 1) chains.push(`[${inputIndex}:a]asplit=${count}${sources.join('')}`)
+    // A clip's sound is first laid on the recording's clock, and a silenced stretch muted, so the cuts below fall where they do for the rest.
+    const prefilters = trackPrefilters(entry)
+    let input = `[${inputIndex}:a]`
+    if (prefilters.length > 0) {
+      chains.push(`${input}${prefilters.join(',')}[t${track}in]`)
+      input = `[t${track}in]`
+    }
+    const sources = count === 1 ? [input] : map.segments.map((_, index) => `[t${track}s${index}]`)
+    if (count > 1) chains.push(`${input}asplit=${count}${sources.join('')}`)
 
     const pieces = map.segments.map((segment, index) => {
       const tempo = buildAtempoFilter(segment.speed * exportSpeed)

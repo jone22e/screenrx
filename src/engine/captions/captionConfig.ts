@@ -52,5 +52,6 @@ export const CAPTION_FONTS: Record<CaptionFont, { label: string; family: string 
   rounded: { label: 'Arredondada', family: '"Arial Rounded MT Bold", "Varela Round", system-ui, sans-serif' },
   serif: { label: 'Serifada', family: 'Georgia, "Times New Roman", serif' },
   impact: { label: 'Impacto', family: 'Impact, "Arial Black", "Helvetica Neue", sans-serif' },
-  mono: { label: 'Monoespaçada', family: 'Menlo, Consolas, "Courier New", monospace' }
+  mono: { label: 'Monoespaçada', family: 'Menlo, Consolas, "Courier New", monospace' },
+  cursive: { label: 'Cursiva', family: '"Snell Roundhand", "Brush Script MT", "Segoe Script", "Comic Sans MS", cursive' }
 }

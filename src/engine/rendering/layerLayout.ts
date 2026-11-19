@@ -1,5 +1,7 @@
 import type { Layer } from '@shared/models/project'
+import { isElementLayer } from '@shared/models/project'
 import type { Rect, Size } from './frameLayout'
+import { elementProportions } from './shapes'
 
 /** Where an image layer sits on the output, in output pixels, before its rotation. */
 export interface ImageLayerLayout extends Rect {
@@ -26,6 +28,15 @@ export function layoutImageLayer(output: Size, layer: Layer, image: Size): Image
     cornerRadius: Math.min(width, height) * layer.cornerRadiusRatio,
     rotationDeg: layer.rotationDeg
   }
+}
+
+/**
+ * Lays out any layer: an image or a clip by its picture's size, a shape by
+ * its own proportions, an emoji as a square. `picture` is the image's size,
+ * ignored for a shape or an emoji.
+ */
+export function layoutLayer(output: Size, layer: Layer, picture: Size | null): ImageLayerLayout {
+  return layoutImageLayer(output, layer, isElementLayer(layer) ? elementProportions(layer) : (picture ?? { width: 0, height: 0 }))
 }
 
 /** The layers on screen at `timeMs` (source time), bottom first: the order they are drawn in. */

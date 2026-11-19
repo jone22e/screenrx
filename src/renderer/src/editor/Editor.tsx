@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import type { EditorSession } from '@shared/models/editor'
 import type { AppError } from '@shared/models/errors'
 import { useSettingsOpen } from '../common/settingsScreen'
+import { features } from '../common/platform'
 import { EditorStore } from './EditorStore'
 import { autoEditFocus } from './AutoEditPanel'
 import { sidebarNav } from '../common/sidebarNav'
@@ -50,7 +51,7 @@ export function Editor({ sessionId, onClose }: Props) {
     <div className="editor">
       <header className="editor-toolbar">
         <button className="tool-button" onClick={onClose}>
-          <BackIcon /> Gravações
+          <BackIcon /> {features.library ? 'Gravações' : 'Início'}
         </button>
       </header>
       <p className="editor-message">
@@ -220,6 +221,7 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
   // The rendered effects (stabilization and the like) are a derived track made by FFmpeg in the
   // main process: whenever their settings change, the track is made again after a short pause.
   useEffect(() => {
+    if (!features.renderedEffects) return
     const render = (sessionId: string, request: Parameters<typeof window.screenrx.filters.render>[1]) =>
       window.screenrx.filters.render(sessionId, request)
     const cancel = (): void => void window.screenrx.filters.cancel()
@@ -259,7 +261,7 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
     <div className="editor">
       <header className="editor-toolbar">
         <button className="tool-button" onClick={onClose}>
-          <BackIcon /> Gravações
+          <BackIcon /> {features.library ? 'Gravações' : 'Início'}
         </button>
         <div className="editor-heading">
           <span className="editor-title">{session.title}</span>
@@ -268,6 +270,7 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
         <span className="editor-save" data-status={state.saveStatus}>
           {SAVE_LABELS[state.saveStatus]}
         </span>
+        {features.ai && (
         <button
           className="tool-button tool-button-ai"
           title="Um Diretor planeja e uma equipe de agentes edita o vídeo inteiro ao mesmo tempo, à vista, na linha do tempo"
@@ -280,6 +283,8 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
         >
           <SparklesIcon /> Editar com IA
         </button>
+        )}
+        {features.library && (
         <button
           className="tool-button"
           title="O quadro que está na tela vira a capa desta gravação na biblioteca"
@@ -289,6 +294,7 @@ function Workspace({ session, onClose }: { session: EditorSession; onClose: () =
         >
           <CoverIcon /> {cover === 'done' ? 'Capa definida' : 'Usar como capa'}
         </button>
+        )}
         <div className="tool-group">
           <button
             className="tool-button tool-icon"

@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useState, useSyncExternalStore } from 'react'
 import { useSidebarNav } from '../common/sidebarNav'
+import { features, isWeb } from '../common/platform'
 import { BACKGROUND_PRESETS } from '@engine/rendering/backgrounds'
 import { nextKeptSourceTime } from '@engine/time/timeMapping'
 import { ZOOM_LIMITS } from '@engine/zoom/zoomConfig'
@@ -8,10 +9,11 @@ import { SPEED_CONFIG } from '@engine/timeline/speedConfig'
 import { formatTimecode } from '@shared/format'
 import type { EditorSession } from '@shared/models/editor'
 import type { TrimTransition, WebcamCorner, WebcamShape } from '@shared/models/project'
-import { BACKGROUND_LIMITS, FRAME_LIMITS, MARKER_LIMITS, WEBCAM_LIMITS } from '@shared/models/project'
+import { BACKGROUND_LIMITS, FRAME_LIMITS, MARKER_LIMITS, WEBCAM_LIMITS, isElementLayer } from '@shared/models/project'
 import { AssistantPanel } from './AssistantPanel'
 import { AudioPanel } from './AudioPanel'
 import { CursorPanel } from './CursorPanel'
+import { ElementsPanel } from './ElementsPanel'
 import { LayersPanel } from './LayersPanel'
 import { CaptionsPanel } from './CaptionsPanel'
 import { DubbingPanel } from './DubbingSection'
@@ -39,6 +41,7 @@ import {
   VoiceIcon,
   PlusIcon,
   ScissorsIcon,
+  ShapesIcon,
   SparklesIcon,
   TextIcon,
   TrashIcon,
@@ -53,8 +56,8 @@ interface Props {
   player: PreviewPlayer | null
 }
 
-type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'layers' | 'cursor' | 'audio' | 'dub' | 'format' | 'effects' | 'background' | 'webcam'
-const TABS: readonly Tab[] = ['assistant', 'cuts', 'zoom', 'captions', 'text', 'layers', 'cursor', 'audio', 'dub', 'format', 'effects', 'background', 'webcam']
+type Tab = 'assistant' | 'cuts' | 'zoom' | 'captions' | 'text' | 'elements' | 'layers' | 'cursor' | 'audio' | 'dub' | 'format' | 'effects' | 'background' | 'webcam'
+const TABS: readonly Tab[] = ['assistant', 'cuts', 'zoom', 'captions', 'text', 'elements', 'layers', 'cursor', 'audio', 'dub', 'format', 'effects', 'background', 'webcam']
 
 const decimal = (value: number, digits = 1): string => value.toFixed(digits).replace('.', ',')
 const speedChip = (value: number): string => `${String(value).replace('.', ',')}×`
@@ -88,20 +91,24 @@ export function Sidebar({ session, store, player }: Props) {
         ? 'captions'
         : state.selectedTextId
           ? 'text'
-          : state.selectedLayerId
-            ? 'layers'
+          : store.selectedLayer
+            ? isElementLayer(store.selectedLayer)
+              ? 'elements'
+              : 'layers'
             : chosen
 
+  // On the web there is no AI, no dubbing, and a file from elsewhere has no pointer to draw.
   const tabs: Array<{ id: Tab; label: string; icon: ReactNode }> = [
-    { id: 'assistant', label: 'Assistente', icon: <SparklesIcon /> },
+    ...(features.ai ? [{ id: 'assistant' as const, label: 'Assistente', icon: <SparklesIcon /> }] : []),
     { id: 'cuts', label: 'Cortes', icon: <ScissorsIcon /> },
     { id: 'zoom', label: 'Zoom', icon: <ZoomIcon /> },
     { id: 'captions', label: 'Legendas', icon: <CaptionsIcon /> },
     { id: 'text', label: 'Texto', icon: <TextIcon /> },
+    { id: 'elements', label: 'Elementos', icon: <ShapesIcon /> },
     { id: 'layers', label: 'Camadas', icon: <ImageIcon /> },
-    { id: 'cursor', label: 'Cursor', icon: <CursorIcon /> },
+    ...(!isWeb || session.cursor.length > 0 ? [{ id: 'cursor' as const, label: 'Cursor', icon: <CursorIcon /> }] : []),
     { id: 'audio', label: 'Áudio', icon: <MusicIcon /> },
-    { id: 'dub', label: 'Dublagem', icon: <VoiceIcon /> },
+    ...(features.dubbing ? [{ id: 'dub' as const, label: 'Dublagem', icon: <VoiceIcon /> }] : []),
     { id: 'format', label: 'Formato', icon: <FormatIcon /> },
     { id: 'effects', label: 'Efeitos', icon: <WandIcon /> },
     { id: 'background', label: 'Fundo', icon: <BackdropIcon /> },
@@ -124,14 +131,17 @@ export function Sidebar({ session, store, player }: Props) {
       </nav>
       <aside className="sidebar">
         {/* The assistant stays mounted, so its conversation and an answer on its way survive a change of tool. */}
-        <div className="sidebar-assistant" hidden={tab !== 'assistant'}>
-          <AssistantPanel store={store} />
-        </div>
+        {features.ai && (
+          <div className="sidebar-assistant" hidden={tab !== 'assistant'}>
+            <AssistantPanel store={store} />
+          </div>
+        )}
         <div className="sidebar-body" hidden={tab === 'assistant'}>
         {tab === 'cuts' && <CutsPanel session={session} store={store} player={player} />}
         {tab === 'zoom' && <ZoomPanel session={session} store={store} player={player} />}
         {tab === 'captions' && <CaptionsPanel session={session} store={store} player={player} />}
         {tab === 'text' && <TextPanel store={store} player={player} />}
+        {tab === 'elements' && <ElementsPanel session={session} store={store} player={player} />}
         {tab === 'layers' && <LayersPanel session={session} store={store} player={player} />}
         {tab === 'cursor' && <CursorPanel session={session} store={store} />}
         {tab === 'audio' && <AudioPanel session={session} store={store} />}
@@ -205,7 +215,7 @@ function CutsPanel({ session, store, player }: Props) {
         </Section>
       )}
 
-      <SuggestionsPanel store={store} player={player} />
+      {features.ai && <SuggestionsPanel store={store} player={player} />}
 
       <Section title={`Cortes${trims.length > 0 ? ` (${trims.length})` : ''}`} help="Clique num corte para ir até ele; a seta desfaz o corte.">
         {trims.length === 0 ? (
@@ -461,7 +471,7 @@ function FormatPanel({ session, store, player, onOpenBackground }: Props & { onO
             <Segmented
               label="Seguir o"
               value={background.fit === 'follow-mouse' || background.fit === 'follow-object' ? background.fit : 'follow-zoom'}
-              options={FRAME_FOLLOW_OPTIONS}
+              options={features.objectTracking ? FRAME_FOLLOW_OPTIONS : FRAME_FOLLOW_OPTIONS.filter((option) => option.value !== 'follow-object')}
               onChange={(fit) => store.setBackground({ fit })}
             />
           )}

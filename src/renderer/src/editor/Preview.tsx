@@ -47,7 +47,7 @@ function snapToCentre(player: PreviewPlayer, x: number, y: number): { x: number;
   return { x: vertical ? 0.5 : x, y: horizontal ? 0.5 : y }
 }
 
-const settingsOf = (state: EditorState, store: EditorStore): PreviewSettings => ({
+const settingsOf = (state: EditorState): PreviewSettings => ({
   timeMap: state.timeMap,
   zooms: state.zooms,
   speeds: state.speeds,
@@ -59,8 +59,9 @@ const settingsOf = (state: EditorState, store: EditorStore): PreviewSettings => 
   selectedTextId: state.selectedTextId,
   layers: state.layers,
   selectedLayerId: state.selectedLayerId,
-  images: store.session.images,
-  clips: store.session.clips,
+  // What the editor holds now: an image or a clip brought in after the editor opened is shown at once.
+  images: state.images,
+  clips: state.clips,
   cursor: state.cursor,
   safeAreas: safeAreas.getState(),
   phoneFrame: phoneFrame.getState(),
@@ -91,13 +92,13 @@ export function Preview({ session, store, onPlayerReady }: Props) {
 
   useEffect(() => {
     if (!canvas.current) return
-    const instance = new PreviewPlayer(canvas.current, session, settingsOf(store.getState(), store))
+    const instance = new PreviewPlayer(canvas.current, session, settingsOf(store.getState()))
     player.current = instance
     const stopListening = instance.onError(() => setFailed(true))
     // The player redraws itself whenever the project (or a preview preference) changes.
-    const unsubscribe = store.subscribe(() => instance.update(settingsOf(store.getState(), store)))
-    const unsubscribeSafeAreas = safeAreas.subscribe(() => instance.update(settingsOf(store.getState(), store)))
-    const unsubscribePhone = phoneFrame.subscribe(() => instance.update(settingsOf(store.getState(), store)))
+    const unsubscribe = store.subscribe(() => instance.update(settingsOf(store.getState())))
+    const unsubscribeSafeAreas = safeAreas.subscribe(() => instance.update(settingsOf(store.getState())))
+    const unsubscribePhone = phoneFrame.subscribe(() => instance.update(settingsOf(store.getState())))
     onPlayerReady(instance)
     return () => {
       unsubscribe()

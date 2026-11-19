@@ -1,8 +1,11 @@
+import type { CSSProperties } from 'react'
 import { useSyncExternalStore } from 'react'
 import { CAPTION_FONTS } from '@engine/captions/captionConfig'
 import { formatTimecode } from '@shared/format'
 import { TEXT_MOTION_LABELS } from '@engine/rendering/animation'
 import { TEXT_TEMPLATES } from '@engine/rendering/textTemplates'
+import { TEXT_LOOKS, applyTextLook, hasTextLook } from '@engine/rendering/textLooks'
+import type { TextLook } from '@engine/rendering/textLooks'
 import type { CaptionBackdrop, CaptionFont, TextMotionKind } from '@shared/models/project'
 import { CAPTION_FONT_IDS, CAPTION_LIMITS, TEXT_LIMITS, TEXT_MOTION_KINDS, TEXT_MOTION_LIMITS } from '@shared/models/project'
 import type { EditorStore } from './EditorStore'
@@ -24,6 +27,19 @@ const BACKDROPS: ReadonlyArray<{ value: CaptionBackdrop; label: string }> = [
 
 const percent = (ratio: number): string => `${Math.round(ratio * 100)}%`
 const seconds = (ms: number): string => `${(ms / 1000).toFixed(1).replace('.', ',')} s`
+
+/** How a look is previewed on its button, approximating what the canvas draws. */
+function lookSample({ style }: TextLook): CSSProperties {
+  return {
+    fontFamily: CAPTION_FONTS[style.font].family,
+    fontWeight: style.bold ? 700 : 500,
+    color: style.color,
+    textTransform: style.uppercase ? 'uppercase' : 'none',
+    ...(style.backdrop === 'box' && { background: `${style.backdropColor}d9`, padding: '1px 7px', borderRadius: 5 }),
+    ...(style.backdrop === 'outline' && { WebkitTextStroke: `3px ${style.backdropColor}`, paintOrder: 'stroke fill' }),
+    ...(style.backdrop === 'shadow' && { textShadow: '0 1px 4px rgba(0, 0, 0, 0.9)' })
+  }
+}
 
 const MOTIONS: ReadonlyArray<{ value: TextMotionKind; label: string }> = TEXT_MOTION_KINDS.map((kind) => ({ value: kind, label: TEXT_MOTION_LABELS[kind] }))
 
@@ -159,7 +175,23 @@ export function TextPanel({ store, player }: Props) {
             )}
           </Section>
 
-          <Section title="Estilo">
+          <Section title="Estilo" help="Um estilo pronto troca fonte, cor e fundo e mantém o tamanho e o lugar; ajuste o resto abaixo.">
+            <div className="looks" role="group" aria-label="Estilos prontos">
+              {TEXT_LOOKS.map((look) => (
+                <button
+                  key={look.id}
+                  className="look"
+                  title={look.hint}
+                  aria-pressed={hasTextLook(selected.style, look)}
+                  onClick={() => store.setTextStyle(selected.id, applyTextLook(selected.style, look))}
+                >
+                  <span className="look-sample">
+                    <span style={lookSample(look)}>Aa</span>
+                  </span>
+                  <span className="look-name">{look.label}</span>
+                </button>
+              ))}
+            </div>
             <label className="field">
               <span className="field-label">Fonte</span>
               <select

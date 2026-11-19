@@ -747,6 +747,62 @@ kbd {
   font-size: 10.5px;
 }
 
+/* Shapes, four to a row, each drawn as the canvas draws it. */
+.looks-shapes {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.looks-shapes .look-sample {
+  height: 40px;
+  color: #fff;
+}
+
+.looks-shapes .look[aria-pressed='true'] .look-sample {
+  color: var(--accent);
+}
+
+/* The emojis offered first, in the system's own font. */
+.emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 4px;
+}
+
+.emoji-pick {
+  height: 32px;
+  padding: 0;
+  font-size: 19px;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+}
+
+.emoji-pick:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--hairline);
+}
+
+.emoji-pick:disabled {
+  opacity: 0.4;
+}
+
+.emoji-other {
+  display: flex;
+  gap: 8px;
+}
+
+.emoji-other .text-input {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+}
+
+.emoji-input {
+  font-size: 22px;
+  resize: none;
+}
+
 .color-row {
   display: flex;
   gap: 18px;
@@ -3670,4 +3726,86 @@ kbd {
 
 .team .agent-actions {
   max-height: 120px;
+}
+
+/* The second video track: the clips, with their frames, as tall as the recording's. */
+.lane-video2 {
+  height: var(--tall-lane-height);
+  background: #0c0d10;
+}
+
+.video2-block {
+  top: 0;
+  bottom: 0;
+  height: auto;
+  overflow: hidden;
+  background: #101826;
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  border-radius: 6px;
+}
+
+.video2-block[data-split='true'] {
+  border-color: rgba(96, 165, 250, 0.95);
+}
+
+.video2-block[data-selected='true'] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.video2-block .filmstrip {
+  opacity: 0.85;
+}
+
+.video2-block .clip-label {
+  left: 4px;
+}
+
+.video-roles {
+  gap: 6px;
+}
+
+.video-role {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.video-role span {
+  flex: none;
+  width: 48px;
+}
+
+.video-role input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A video file dragged over the tracks: where the second video would start. */
+.timeline-tracks[data-dropping='true'] .lane-video2 {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.timeline-drop {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  width: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.timeline-drop span {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: #fff;
+  white-space: nowrap;
+  background: var(--accent);
+  border-radius: 5px;
 }

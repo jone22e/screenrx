@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import type { FilterStrength, RenderedFilterName } from '@shared/models/filters'
 import { colorChanged, needsRenderedTrack, renderKey } from '@shared/models/filters'
+import { features } from '../common/platform'
 import type { EditorStore } from './EditorStore'
 import { Section, Segmented, Slider } from './panelControls'
 
@@ -52,7 +53,7 @@ export function EffectsPanel({ store }: Props) {
 
   return (
     <>
-      {RENDERED.map(({ name, title, label, hint }) => {
+      {features.renderedEffects && RENDERED.map(({ name, title, label, hint }) => {
         const setting = filters[name]
         return (
           <Section key={name} title={title}>
@@ -80,7 +81,7 @@ export function EffectsPanel({ store }: Props) {
         )
       })}
 
-      {(rendered || filtering || filterNotice) && (
+      {features.renderedEffects && (rendered || filtering || filterNotice) && (
         <Section title="Aplicação dos efeitos">
           {filtering ? (
             <div className="progress" role="status">

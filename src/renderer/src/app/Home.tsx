@@ -13,12 +13,18 @@ import { SeriesEditDialog } from './SeriesEditDialog'
 import { SeriesEditStatus } from './SeriesEditStatus'
 import { seriesAutoEdit } from './seriesAutoEdit'
 import { RecordingRow } from './RecordingRow'
+import { LinkImportDialog } from './LinkImportDialog'
+import { PublishDialog, publishRequest } from './PublishDialog'
+import { PublishStatus } from './PublishStatus'
+import { publishQueue } from './publishQueue'
+import { instagramAccount } from '../common/instagramAccount'
+import { isPublishPending } from '@shared/models/instagram'
 import { Shelf } from './Shelf'
 import { UpdateNotice } from './UpdateNotice'
 import { VoiceModelNotice } from './VoiceModelNotice'
 import { usePermissions } from './hooks'
 import { openSettings } from '../common/settingsScreen'
-import { CloseIcon, FilmIcon, GearIcon, GridIcon, HomeIcon, ImportIcon, JoinIcon, ListIcon, PlusIcon, SearchIcon } from './icons'
+import { CloseIcon, FilmIcon, GearIcon, GridIcon, HomeIcon, ImportIcon, JoinIcon, LinkIcon, ListIcon, PlusIcon, SearchIcon } from './icons'
 import { SESSION_SERIES_MAX_LENGTH } from '@shared/models/session'
 
 interface Props {
@@ -172,6 +178,18 @@ export function Home({ state, recordings, onEdit }: Props) {
   const moveToSeries = (sessionId: string, series: string | null): void => {
     void window.screenrx.library.setSeries(sessionId, series ?? '')
   }
+  // Instagram: the dialog that approves, and the queue that publishes what was approved while the app is open.
+  const publishing = useSyncExternalStore(publishRequest.subscribe, publishRequest.getState)
+  const account = useSyncExternalStore(instagramAccount.subscribe, instagramAccount.getState)
+  useEffect(() => {
+    void instagramAccount.load()
+  }, [])
+  const connected = account?.account != null
+  useEffect(() => {
+    if (recordings) publishQueue.consider(recordings, connected)
+  }, [recordings, connected])
+  // A video by link: the dialog, and then on to a series made of it.
+  const [linkOpen, setLinkOpen] = useState(false)
   const searchField = useRef<HTMLInputElement>(null)
   const content = useRef<HTMLElement>(null)
   // The search field opens beside the rail's magnifier; closing it clears the search.
@@ -343,6 +361,15 @@ export function Home({ state, recordings, onEdit }: Props) {
         </button>
         <button
           className="bar-icon bar-icon-boxed"
+          aria-label="Importar de um link"
+          title="Importar um vídeo de um link (YouTube e outros sites)"
+          disabled={!canImport}
+          onClick={() => setLinkOpen(true)}
+        >
+          <LinkIcon />
+        </button>
+        <button
+          className="bar-icon bar-icon-boxed"
           aria-label="Importar vídeo"
           title={importing ? 'Importando…' : 'Importar um vídeo gravado fora do ScreenRx'}
           disabled={!canImport}
@@ -422,6 +449,27 @@ export function Home({ state, recordings, onEdit }: Props) {
 
         {seriesFrom && (recordings ?? []).some((recording) => recording.id === seriesFrom) && (
           <SeriesDialog recording={(recordings ?? []).find((recording) => recording.id === seriesFrom) as RecordingSummary} onClose={() => setSeriesFrom(null)} />
+        )}
+
+        <PublishStatus recordings={recordings ?? []} connected={connected} />
+
+        {linkOpen && (
+          <LinkImportDialog
+            onClose={() => setLinkOpen(false)}
+            onDone={(sessionId, next) => {
+              setLinkOpen(false)
+              if (next === 'series') setSeriesFrom(sessionId)
+              else onEdit(sessionId)
+            }}
+          />
+        )}
+
+        {publishing && (
+          <PublishDialog
+            recordings={publishing.ids.flatMap((id) => (recordings ?? []).filter((recording) => recording.id === id))}
+            series={publishing.series}
+            onClose={() => publishRequest.close()}
+          />
         )}
 
         {editingSeries !== null && (
@@ -623,6 +671,13 @@ export function Home({ state, recordings, onEdit }: Props) {
                           onRemove: () => void window.screenrx.library.removeSeries(group.label),
                           onRename: (name: string) => void window.screenrx.library.renameSeries(group.label, name),
                           ...(seriesRun.phase !== 'working' && { onEditAll: () => setEditingSeries(group.label) }),
+                          ...(group.items.some((item) => item.status === 'completed' && !(item.publish && (isPublishPending(item.publish.state) || item.publish.state === 'published'))) && {
+                            onPublishAll: () =>
+                              publishRequest.open(
+                                group.items.filter((item) => item.status === 'completed' && !(item.publish && (isPublishPending(item.publish.state) || item.publish.state === 'published'))).map((item) => item.id),
+                                group.label
+                              )
+                          }),
                           ...(seriesRun.phase !== 'idle' && seriesRun.series === group.label && { status: <SeriesEditStatus run={seriesRun} /> })
                         })
                       })}

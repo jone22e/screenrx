@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { formatBytes, formatClock } from '@shared/format'
 import type { RecordingSummary } from '@shared/models/session'
-import { ProgressBadge, RecordingActions, RecordingBadges, SeriesEditor, SuggestedTitle } from './RecordingCard'
+import { ProgressBadge, PublishBadge, RecordingActions, RecordingBadges, SeriesEditor, SuggestedTitle } from './RecordingCard'
 import { RecordingTitle } from './RecordingTitle'
 import { FilmIcon } from './icons'
 
@@ -72,6 +72,7 @@ export function RecordingRow({ recording, highlighted, showSeries, onEdit, onMak
       </span>
       <span className="row-cell row-status">
         <ProgressBadge recording={recording} />
+        <PublishBadge recording={recording} />
       </span>
       <span className="row-cell row-figure">{formatClock(recording.durationMs)}</span>
       <span className="row-cell row-figure">{formatBytes(recording.sizeBytes)}</span>

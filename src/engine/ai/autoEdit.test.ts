@@ -176,3 +176,45 @@ describe('assembly', () => {
     ])
   })
 })
+
+describe('two videos', () => {
+  it('tells the agents who is who and what video 2 says, and reads the layout actions back', async () => {
+    const { buildRecordingSheet } = await import('./recordingSheet')
+    const { parseAssistantResponse } = await import('../assistant/assistantPrompt')
+    const edit = {
+      durationMs: 20_000, cuts: [], zooms: [], speed: 1, speedRegions: [], hasCaptions: false, captionsVisible: false, captionLanguage: null,
+      captionLength: 'medium', captionMode: 'block', backgroundId: null, exportPreset: 'reels', hasWebcam: false, webcamVisible: false,
+      hasSystemAudio: true, microphoneMuted: false, systemAudioMuted: false, microphoneVolume: 1, systemAudioVolume: 1, music: null,
+      secondVideo: { name: 'reacao.mp4', file: 'x.mp4', pieces: [{ startMs: 0, endMs: 20_000, offsetMs: 0, show: 'both' }], sound: 'both', hasAudio: true }
+    } as const
+    const sheet = buildRecordingSheet(
+      {
+        durationMs: 20_000, words: [], locale: 'pt-BR', interactions: [], cursor: [], edit: edit as never, hasWebcam: false, hasMicrophone: false,
+        hasSystemAudio: true, musicName: null, imageNames: [], cursorDrawn: false,
+        second: { name: 'reacao.mp4', firstRole: 'a gameplay', secondRole: 'minha reação', words: [{ text: 'NÃO', startMs: 12_000, endMs: 12_300 }, { text: 'ACREDITO', startMs: 12_300, endMs: 12_900 }], transcribed: true }
+      },
+      { preset: 'reels', targetDurationSec: null, tone: '', roles: ['camera'] }
+    )
+    expect(sheet).toContain('Video 1 is a gameplay')
+    expect(sheet).toContain('Video 2 is minha reação')
+    expect(sheet).toContain('12.0–12.9 s: NÃO ACREDITO')
+    expect(sheet).toContain('video 2: 2 words')
+    expect(sheet).toContain('Second video ("reacao.mp4"')
+    const parsed = parseAssistantResponse(
+      {
+        reply: '',
+        actions: [
+          { type: 'layout', fromWord: null, toWord: null, startSec: 11.5, endSec: 14, scale: null, value: 'video2' },
+          { type: 'layout', fromWord: null, toWord: null, startSec: 1, endSec: 1.1, scale: null, value: 'both' },
+          { type: 'second-sound', fromWord: null, toWord: null, startSec: null, endSec: null, scale: 1.3, value: 'both' }
+        ]
+      },
+      [],
+      20_000
+    )
+    expect(parsed.actions).toEqual([
+      { type: 'layout', startMs: 11_500, endMs: 14_000, show: 'clip' },
+      { type: 'second-sound', audio: 'both', volume: 1.3 }
+    ])
+  })
+})

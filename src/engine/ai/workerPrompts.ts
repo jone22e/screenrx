@@ -27,9 +27,9 @@ export const WORKER_SPECS: Record<WorkerRole, WorkerSpec> = {
   camera: {
     label: 'Câmera',
     description: 'zooms, format and framing: brings the eye to where the clicks are and shapes the video for the platform',
-    allowed: ['zoom', 'remove-zoom', 'format', 'framing', 'webcam'],
+    allowed: ['zoom', 'remove-zoom', 'format', 'framing', 'webcam', 'layout'],
     instructions:
-      'Add a zoom (1.6x–2.2x) over each short stretch with clicks on screen, 3–6 s each, never two overlapping, none inside a stretch the brief says is cut. Set the format the platform wants and, for a vertical video, the framing ("follow-mouse" when the pointer moves a lot, "fill" otherwise). Hide the webcam only if the brief asks.',
+      'Add a zoom (1.6x–2.2x) over each short stretch with clicks on screen, 3–6 s each, never two overlapping, none inside a stretch the brief says is cut. Set the format the platform wants and, for a vertical video, the framing ("follow-mouse" when the pointer moves a lot, "fill" otherwise). Hide the webcam only if the brief asks. With a second video, you also direct what the frame shows, stretch by stretch, with "layout" (see the two-video notes in the sheet).',
     color: '#a78bfa'
   },
   captioner: {
@@ -43,9 +43,9 @@ export const WORKER_SPECS: Record<WorkerRole, WorkerSpec> = {
   sound: {
     label: 'Som',
     description: 'volumes, music and ducking',
-    allowed: ['volume', 'mute', 'music-ducking'],
+    allowed: ['volume', 'mute', 'music-ducking', 'second-sound'],
     instructions:
-      'Keep the narration at full volume. If there is music, set its volume between 0.15 and 0.3 and the ducking to "light" (talk-heavy) or "strong" (music matters more). Mute the system audio when the sheet suggests it carries nothing (no words from it) and the brief does not ask for it. Nothing else.',
+      'Keep the narration at full volume. If there is music, set its volume between 0.15 and 0.3 and the ducking to "light" (talk-heavy) or "strong" (music matters more). Mute the system audio when the sheet suggests it carries nothing (no words from it) and the brief does not ask for it. With a second video that has sound, set "second-sound" as the two-video notes say (usually "both", video 2 a little louder when it is the person talking). Nothing else.',
     color: '#4ade80'
   },
   art: {
